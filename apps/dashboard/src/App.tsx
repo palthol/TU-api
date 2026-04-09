@@ -9,6 +9,11 @@ import { Textarea } from '@/components/ui/textarea';
 /** Analysis views: most operationally useful first */
 export const ANALYSIS_VIEWS = [
   {
+    slug: 'primary-kpis' as const,
+    label: 'Primary KPIs',
+    hint: 'Expected revenue, actual revenue, visitors, and current monthly members.',
+  },
+  {
     slug: 'payment-board' as const,
     label: 'Payment board',
     hint: 'Charges, net due, allocations — main money & status picture.',
@@ -42,6 +47,61 @@ export const ANALYSIS_VIEWS = [
     slug: 'orphan-waivers' as const,
     label: 'Orphan waivers (detail)',
     hint: 'Row-level orphan waiver rows for cleanup.',
+  },
+  {
+    slug: 'today-sessions' as const,
+    label: 'Today sessions',
+    hint: 'Front desk day-of logistics and attendance snapshot.',
+  },
+  {
+    slug: 'upcoming-access-issues' as const,
+    label: 'Upcoming access issues',
+    hint: 'Participants likely blocked by entitlement/override constraints.',
+  },
+  {
+    slug: 'waiver-compliance-gaps' as const,
+    label: 'Waiver compliance gaps',
+    hint: 'Active participants missing waiver/emergency/medical records.',
+  },
+  {
+    slug: 'ar-aging' as const,
+    label: 'AR aging',
+    hint: 'Collections buckets by account plus total rollup.',
+  },
+  {
+    slug: 'payment-risk' as const,
+    label: 'Payment risk',
+    hint: 'Unallocated, partial, or overallocated billing risk queue.',
+  },
+  {
+    slug: 'revenue-waterfall-monthly' as const,
+    label: 'Revenue waterfall (monthly)',
+    hint: 'Gross billed, concessions, refunds, and net cash monthly.',
+  },
+  {
+    slug: 'subscription-movement' as const,
+    label: 'Subscription movement',
+    hint: 'Monthly new/cancelled/paused/expired by plan.',
+  },
+  {
+    slug: 'attendance-utilization-weekly' as const,
+    label: 'Attendance utilization (weekly)',
+    hint: 'Weekly attendance/no-show and private-minute utilization.',
+  },
+  {
+    slug: 'entitlement-burn' as const,
+    label: 'Entitlement burn',
+    hint: 'Usage vs limits with remaining and overburn-risk signals.',
+  },
+  {
+    slug: 'affiliate-performance' as const,
+    label: 'Affiliate performance',
+    hint: 'Referral counts, credit earned/applied, liability by referrer.',
+  },
+  {
+    slug: 'data-hygiene' as const,
+    label: 'Data hygiene',
+    hint: 'Potential duplicates, missing links, and contact quality gaps.',
   },
 ] as const;
 
@@ -170,7 +230,7 @@ function Sidebar({
 export default function App() {
   const [apiBase, setApiBase] = useState(getDefaultApiBase);
   const [adminKey, setAdminKey] = useState('');
-  const [nav, setNav] = useState<NavState>({ kind: 'analysis', slug: 'payment-board' });
+  const [nav, setNav] = useState<NavState>({ kind: 'analysis', slug: 'primary-kpis' });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const requireKey = useCallback(() => {
@@ -287,7 +347,11 @@ export default function App() {
         />
 
         <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          {nav.kind === 'analysis' && currentAnalysisMeta && (
+          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug === 'primary-kpis' && (
+            <PrimaryKpiConsole apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />
+          )}
+
+          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug !== 'primary-kpis' && (
             <DataExplorer
               apiBase={apiBase}
               adminKey={adminKey}
@@ -655,6 +719,204 @@ function formatReportingCell(value: unknown): string {
   return JSON.stringify(value);
 }
 
+type PrimaryKpis = {
+  month_start: string;
+  month_end: string;
+  expected_revenue_open_due_cents: number;
+  actual_revenue_net_cash_cents: number;
+  total_visitors_present_checkins: number;
+  current_monthly_members_active_count: number;
+};
+
+function formatUsd(cents: number): string {
+  const amount = Number.isFinite(cents) ? cents / 100 : 0;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+}
+
+function PrimaryKpiConsole({
+  apiBase,
+  adminKey,
+  requireKey,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+}) {
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+  const [kpis, setKpis] = useState<PrimaryKpis | null>(null);
+  const [expanded, setExpanded] = useState<'expected' | 'actual' | 'visitors' | 'members' | null>(null);
+  const [detailRows, setDetailRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variant, setVariant] = useState<'ok' | 'err'>('ok');
+
+  const loadKpis = useCallback(async () => {
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      setKpis(null);
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const { ok, status, data } = await adminFetch<{
+      ok?: boolean;
+      error?: string;
+      kpis?: PrimaryKpis;
+    }>(apiBase, adminKey, `/api/admin/reporting/summary/primary-kpis?month=${encodeURIComponent(month)}`);
+    setLoading(false);
+    if (!ok || !data.kpis) {
+      setVariant('err');
+      setMsg(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      setKpis(null);
+      return;
+    }
+    setVariant('ok');
+    setKpis(data.kpis);
+    setMsg(`Loaded primary KPIs for ${data.kpis.month_start}.`);
+  }, [apiBase, adminKey, month, requireKey]);
+
+  useEffect(() => {
+    void loadKpis();
+  }, [loadKpis]);
+
+  const loadDetail = useCallback(
+    async (kind: 'expected' | 'actual' | 'visitors' | 'members') => {
+      if (!kpis) return;
+      let path = '';
+      if (kind === 'expected') {
+        path = `/api/admin/reporting/views/payment-risk?limit=8&start=${kpis.month_start}&end=${kpis.month_end}&sort=days_past_due&order=desc`;
+      } else if (kind === 'actual') {
+        path = `/api/admin/reporting/views/revenue-waterfall-monthly?limit=6&start=${kpis.month_start}&end=${kpis.month_end}&sort=month_start&order=desc`;
+      } else if (kind === 'visitors') {
+        path = `/api/admin/reporting/views/attendance-utilization-weekly?limit=8&start=${kpis.month_start}&end=${kpis.month_end}&sort=week_start&order=desc`;
+      } else {
+        path = `/api/admin/reporting/views/subscription-movement?limit=12&start=${kpis.month_start}&end=${kpis.month_end}&sort=new_count&order=desc`;
+      }
+      const { ok, data } = await adminFetch<{ rows?: Record<string, unknown>[] }>(apiBase, adminKey, path);
+      if (!ok) {
+        setDetailRows([]);
+        return;
+      }
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      if (kind === 'members') {
+        setDetailRows(rows.filter((r) => (typeof r.billing_cadence === 'string' ? r.billing_cadence : '') === 'monthly'));
+      } else {
+        setDetailRows(rows);
+      }
+    },
+    [apiBase, adminKey, kpis],
+  );
+
+  useEffect(() => {
+    if (!expanded) return;
+    void loadDetail(expanded);
+  }, [expanded, loadDetail]);
+
+  const cardClass =
+    'w-full rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-muted/30';
+  const detailColumns = detailRows.length > 0 ? Object.keys(detailRows[0]) : [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 border-b border-border pb-4">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Primary KPIs</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Most important operational signals first. Click a card to expand details.
+          </p>
+        </div>
+        <Field id="kpi-month" label="Month">
+          <Input
+            id="kpi-month"
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="h-9 w-40 font-mono text-xs"
+          />
+        </Field>
+        <Button type="button" variant="secondary" className="h-9" onClick={() => void loadKpis()} disabled={loading}>
+          {loading ? 'Loading…' : 'Refresh KPIs'}
+        </Button>
+      </div>
+
+      <StatusMessage message={msg} variant={variant} />
+
+      {kpis && (
+        <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <button type="button" className={cardClass} onClick={() => setExpanded((v) => (v === 'expected' ? null : 'expected'))}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Expected revenue</p>
+              <p className="mt-2 text-2xl font-semibold">{formatUsd(kpis.expected_revenue_open_due_cents)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Open due in selected month</p>
+            </button>
+            <button type="button" className={cardClass} onClick={() => setExpanded((v) => (v === 'actual' ? null : 'actual'))}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Actual revenue</p>
+              <p className="mt-2 text-2xl font-semibold">{formatUsd(kpis.actual_revenue_net_cash_cents)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Net cash collected in selected month</p>
+            </button>
+            <button type="button" className={cardClass} onClick={() => setExpanded((v) => (v === 'visitors' ? null : 'visitors'))}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total visitors</p>
+              <p className="mt-2 text-2xl font-semibold">{kpis.total_visitors_present_checkins.toLocaleString('en-US')}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Present check-ins in selected month</p>
+            </button>
+            <button type="button" className={cardClass} onClick={() => setExpanded((v) => (v === 'members' ? null : 'members'))}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current monthly members</p>
+              <p className="mt-2 text-2xl font-semibold">{kpis.current_monthly_members_active_count.toLocaleString('en-US')}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Active monthly subscriptions as of today</p>
+            </button>
+          </div>
+
+          {expanded && (
+            <div className="rounded-lg border border-border bg-card shadow-sm">
+              <div className="border-b border-border px-4 py-3">
+                <h3 className="text-sm font-semibold">
+                  {expanded === 'expected' && 'Expected revenue details'}
+                  {expanded === 'actual' && 'Actual revenue details'}
+                  {expanded === 'visitors' && 'Visitors details'}
+                  {expanded === 'members' && 'Monthly members details'}
+                </h3>
+              </div>
+              <div className="max-h-[420px] overflow-auto">
+                {detailColumns.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">No detail rows for the selected month.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 border-b border-border bg-muted/95">
+                      <tr>
+                        {detailColumns.map((c) => (
+                          <th key={c} className="h-10 px-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {c}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailRows.map((row, i) => (
+                        <tr key={`${expanded}-${i}`} className="border-b border-border/50">
+                          {detailColumns.map((c) => (
+                            <td key={c} className="px-3 py-2 text-xs">
+                              {formatReportingCell(row[c])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DataExplorer({
   apiBase,
   adminKey,
@@ -671,15 +933,61 @@ function DataExplorer({
   description: string;
 }) {
   const [limit, setLimit] = useState('200');
+  const [offset, setOffset] = useState('0');
+  const [sort, setSort] = useState('');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [revenueMinNetCashCents, setRevenueMinNetCashCents] = useState('');
+  const [revenueMinCollectedCents, setRevenueMinCollectedCents] = useState('');
+  const [revenueMaxRefundedCents, setRevenueMaxRefundedCents] = useState('');
   const limitRef = useRef(limit);
+  const offsetRef = useRef(offset);
+  const sortRef = useRef(sort);
+  const orderRef = useRef(order);
+  const startRef = useRef(start);
+  const endRef = useRef(end);
+  const revenueMinNetCashRef = useRef(revenueMinNetCashCents);
+  const revenueMinCollectedRef = useRef(revenueMinCollectedCents);
+  const revenueMaxRefundedRef = useRef(revenueMaxRefundedCents);
   limitRef.current = limit;
+  offsetRef.current = offset;
+  sortRef.current = sort;
+  orderRef.current = order;
+  startRef.current = start;
+  endRef.current = end;
+  revenueMinNetCashRef.current = revenueMinNetCashCents;
+  revenueMinCollectedRef.current = revenueMinCollectedCents;
+  revenueMaxRefundedRef.current = revenueMaxRefundedCents;
 
   const [msg, setMsg] = useState<string | null>(null);
   const [variant, setVariant] = useState<'ok' | 'err'>('ok');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [meta, setMeta] = useState<{ view?: string; rowCount?: number } | null>(null);
+  const [meta, setMeta] = useState<{
+    view?: string;
+    rowCount?: number;
+    offset?: number;
+    sort?: string | null;
+    order?: string | null;
+    start?: string | null;
+    end?: string | null;
+    filters?: Record<string, number>;
+  } | null>(null);
   const [resultBatch, setResultBatch] = useState(0);
+
+  const applyDatePreset = (preset: '3m' | '6m' | '12m' | 'ytd') => {
+    const now = new Date();
+    const endDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    let startDate = new Date(endDate);
+    if (preset === '3m') startDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - 2, 1));
+    if (preset === '6m') startDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - 5, 1));
+    if (preset === '12m') startDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() - 11, 1));
+    if (preset === 'ytd') startDate = new Date(Date.UTC(endDate.getUTCFullYear(), 0, 1));
+    const toIso = (d: Date) => d.toISOString().slice(0, 10);
+    setStart(toIso(startDate));
+    setEnd(toIso(endDate));
+  };
 
   const fetchRows = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -701,14 +1009,38 @@ function DataExplorer({
         setMsg('Limit must be a positive number (max 500).');
         return;
       }
+      const off = Number.parseInt(offsetRef.current, 10);
+      if (!Number.isFinite(off) || off < 0) {
+        setVariant('err');
+        setMsg('Offset must be a non-negative number.');
+        return;
+      }
       setLoading(true);
       if (!opts?.silent) setMsg(null);
-      const q = new URLSearchParams({ limit: String(Math.min(lim, 500)) });
+      const q = new URLSearchParams({
+        limit: String(Math.min(lim, 500)),
+        offset: String(off),
+      });
+      if (sortRef.current.trim()) q.set('sort', sortRef.current.trim());
+      if (orderRef.current) q.set('order', orderRef.current);
+      if (startRef.current.trim()) q.set('start', startRef.current.trim());
+      if (endRef.current.trim()) q.set('end', endRef.current.trim());
+      if (slug === 'revenue-waterfall-monthly') {
+        if (revenueMinNetCashRef.current.trim()) q.set('min_net_cash_cents', revenueMinNetCashRef.current.trim());
+        if (revenueMinCollectedRef.current.trim()) q.set('min_collected_cents', revenueMinCollectedRef.current.trim());
+        if (revenueMaxRefundedRef.current.trim()) q.set('max_refunded_cents', revenueMaxRefundedRef.current.trim());
+      }
       const { ok, status, data } = await adminFetch<{
         ok?: boolean;
         error?: string;
         view?: string;
         rowCount?: number;
+        offset?: number;
+        sort?: string | null;
+        order?: string | null;
+        start?: string | null;
+        end?: string | null;
+        filters?: Record<string, number>;
         rows?: Record<string, unknown>[];
       }>(apiBase, adminKey, `/api/admin/reporting/views/${encodeURIComponent(slug)}?${q}`);
       setLoading(false);
@@ -721,7 +1053,16 @@ function DataExplorer({
       }
       setVariant('ok');
       setRows(Array.isArray(data.rows) ? data.rows : []);
-      setMeta({ view: data.view, rowCount: data.rowCount });
+      setMeta({
+        view: data.view,
+        rowCount: data.rowCount,
+        offset: data.offset,
+        sort: data.sort ?? null,
+        order: data.order ?? null,
+        start: data.start ?? null,
+        end: data.end ?? null,
+        filters: data.filters ?? {},
+      });
       setResultBatch((b) => b + 1);
       setMsg(`Loaded ${data.rowCount ?? 0} row(s) from ${data.view ?? slug}.`);
     },
@@ -747,7 +1088,15 @@ function DataExplorer({
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p>
           {meta?.view && (
             <p className="mt-2 font-mono text-xs text-muted-foreground">
-              {meta.view} · {meta.rowCount} rows (limit {Math.min(Number.parseInt(limit, 10) || 200, 500)})
+              {meta.view} · {meta.rowCount} rows (limit {Math.min(Number.parseInt(limit, 10) || 200, 500)}, offset{' '}
+              {meta.offset ?? 0}
+              {meta.sort ? `, sort ${meta.sort} ${meta.order ?? ''}` : ''}
+              {meta.start || meta.end ? `, range ${meta.start ?? '...'} -> ${meta.end ?? '...'}` : ''})
+            </p>
+          )}
+          {meta?.filters && Object.keys(meta.filters).length > 0 && (
+            <p className="mt-1 font-mono text-xs text-muted-foreground">
+              filters: {JSON.stringify(meta.filters)}
             </p>
           )}
         </div>
@@ -764,6 +1113,108 @@ function DataExplorer({
               className="h-9 w-24 font-mono text-sm"
             />
           </Field>
+          <Field id="view-offset" label="Offset">
+            <Input
+              id="view-offset"
+              type="number"
+              min={0}
+              step={1}
+              value={offset}
+              onChange={(e) => setOffset(e.target.value)}
+              className="h-9 w-24 font-mono text-sm"
+            />
+          </Field>
+          <Field id="view-sort" label="Sort column">
+            <Input
+              id="view-sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+              placeholder="optional"
+              className="h-9 w-40 font-mono text-xs"
+            />
+          </Field>
+          <Field id="view-order" label="Order">
+            <select
+              id="view-order"
+              className="flex h-9 w-24 rounded-md border border-input bg-background px-2 text-sm"
+              value={order}
+              onChange={(e) => setOrder(e.target.value === 'asc' ? 'asc' : 'desc')}
+            >
+              <option value="desc">desc</option>
+              <option value="asc">asc</option>
+            </select>
+          </Field>
+          <Field id="view-start" label="Start date">
+            <Input
+              id="view-start"
+              type="date"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              className="h-9 w-36 font-mono text-xs"
+            />
+          </Field>
+          <Field id="view-end" label="End date">
+            <Input
+              id="view-end"
+              type="date"
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              className="h-9 w-36 font-mono text-xs"
+            />
+          </Field>
+          {slug === 'revenue-waterfall-monthly' && (
+            <>
+              <Field id="rev-min-net-cash" label="Min net cash (cents)">
+                <Input
+                  id="rev-min-net-cash"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={revenueMinNetCashCents}
+                  onChange={(e) => setRevenueMinNetCashCents(e.target.value)}
+                  className="h-9 w-36 font-mono text-xs"
+                />
+              </Field>
+              <Field id="rev-min-collected" label="Min collected (cents)">
+                <Input
+                  id="rev-min-collected"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={revenueMinCollectedCents}
+                  onChange={(e) => setRevenueMinCollectedCents(e.target.value)}
+                  className="h-9 w-36 font-mono text-xs"
+                />
+              </Field>
+              <Field id="rev-max-refunded" label="Max refunded (cents)">
+                <Input
+                  id="rev-max-refunded"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={revenueMaxRefundedCents}
+                  onChange={(e) => setRevenueMaxRefundedCents(e.target.value)}
+                  className="h-9 w-36 font-mono text-xs"
+                />
+              </Field>
+            </>
+          )}
+          {slug === 'revenue-waterfall-monthly' && (
+            <div className="flex items-end gap-1">
+              <Button type="button" variant="outline" className="h-9 px-2 text-xs" onClick={() => applyDatePreset('3m')}>
+                3M
+              </Button>
+              <Button type="button" variant="outline" className="h-9 px-2 text-xs" onClick={() => applyDatePreset('6m')}>
+                6M
+              </Button>
+              <Button type="button" variant="outline" className="h-9 px-2 text-xs" onClick={() => applyDatePreset('12m')}>
+                12M
+              </Button>
+              <Button type="button" variant="outline" className="h-9 px-2 text-xs" onClick={() => applyDatePreset('ytd')}>
+                YTD
+              </Button>
+            </div>
+          )}
           <Button type="submit" disabled={loading} variant="secondary" className="h-9">
             {loading ? 'Loading…' : 'Refresh'}
           </Button>

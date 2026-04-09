@@ -11,7 +11,7 @@ All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
-| **Supabase** | Server uses **service role**; billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `upgrade_subscription_prorated`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migration `0007`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`) |
 | **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id` |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
@@ -88,6 +88,66 @@ Calls RPC `upgrade_subscription_prorated`: **upgrade only** (new plan `price_cen
 
 ---
 
+### `POST /api/admin/billing/per-class/charge-from-attendance`
+
+Calls RPC `create_pay_per_class_charge` to create one `charges` row from one attendance row.
+
+Rules:
+- Manual-only flow (no automatic trigger on attendance writes).
+- Attendance must be `present`.
+- Participant must have an active `per_session` subscription covering the attendance date.
+- Idempotent by attendance row (same attendance returns the existing charge).
+
+**Body (JSON):**
+
+```json
+{
+  "attendance_record_id": "uuid",
+  "due_at": "YYYY-MM-DD optional; defaults to session date",
+  "notes": "optional text",
+  "created_by": "optional override; defaults to admin_api"
+}
+```
+
+**Response:** `{ "ok": true, "charge_id": "<uuid>" }`
+
+---
+
+### `POST /api/admin/billing/per-class/upgrade-to-monthly`
+
+Calls RPC `upgrade_per_class_to_monthly`: ends the active `per_session` subscription as of `effective_date`, creates a monthly subscription, and optionally creates an initial monthly charge.
+
+Policy:
+- Explicit `conversion_policy` mode:
+  - `no_credit` (default)
+  - `manual_writeoff_allowed` (still no automatic deduction; admin may apply a manual write-off separately)
+
+**Body (JSON):**
+
+```json
+{
+  "participant_id": "uuid",
+  "new_plan_definition_id": "uuid",
+  "effective_date": "YYYY-MM-DD optional; defaults to current date in DB",
+  "create_initial_charge": "boolean optional; defaults to true",
+  "notes": "optional text",
+  "conversion_policy": "optional: no_credit | manual_writeoff_allowed"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "old_subscription_id": "uuid",
+  "new_subscription_id": "uuid",
+  "initial_charge_id": "uuid | null"
+}
+```
+
+---
+
 ### `POST /api/admin/participants/merge`
 
 Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets `participants.merged_into_participant_id` and `merged_at` on the duplicate. Does **not** delete rows. If merging produces duplicate **active** `affiliate_referrals` rows for the same (referrer, referred), extras are ended (`status = ended`, `ended_at` set) so the partial unique index stays valid.
@@ -115,12 +175,23 @@ Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets 
 
 Read-only preview of a **whitelisted** reporting view. Uses the API’s **service role** client (bypasses RLS). Intended for trusted operators.
 
-**Query:** `limit` — optional, default `200`, max `500`.
+**Query:**
+
+- `limit` — optional, default `200`, max `500`
+- `offset` — optional, default `0`, max `100000`
+- `sort` — optional, view-specific sortable column
+- `order` — optional `asc|desc` (default `desc` when sort is used)
+- `start` / `end` — optional `YYYY-MM-DD` date range for views that expose a date column
+- `revenue-waterfall-monthly` view-specific filters:
+  - `min_net_cash_cents` — optional non-negative integer
+  - `min_collected_cents` — optional non-negative integer
+  - `max_refunded_cents` — optional non-negative integer
 
 **Slugs → Postgres objects:**
 
 | Slug | View / relation |
 |------|------------------|
+| `primary-kpis` | `view_analytics_primary_kpis_monthly` |
 | `payment-board` | `view_member_payment_board` |
 | `payment-reminders` | `view_member_payment_reminders` |
 | `orphan-waivers` | `view_orphan_waivers` |
@@ -128,10 +199,52 @@ Read-only preview of a **whitelisted** reporting view. Uses the API’s **servic
 | `charge-net` | `view_charge_net` |
 | `waiver-documents` | `view_waiver_documents` |
 | `participant-entitlements` | `participant_entitlement_status` |
+| `today-sessions` | `view_ops_today_sessions` |
+| `upcoming-access-issues` | `view_ops_upcoming_access_issues` |
+| `waiver-compliance-gaps` | `view_ops_waiver_compliance_gaps` |
+| `ar-aging` | `view_ops_ar_aging` |
+| `payment-risk` | `view_ops_unallocated_or_partial_payment_risk` |
+| `revenue-waterfall-monthly` | `view_analytics_revenue_waterfall_monthly` |
+| `subscription-movement` | `view_analytics_subscription_movement` |
+| `attendance-utilization-weekly` | `view_analytics_attendance_utilization_weekly` |
+| `entitlement-burn` | `view_analytics_entitlement_burn` |
+| `affiliate-performance` | `view_analytics_affiliate_program_performance` |
+| `data-hygiene` | `view_analytics_data_hygiene` |
 
-**Response:** `{ "ok": true, "slug", "view", "limit", "rowCount", "rows": [ ... ] }`
+**Response:** `{ "ok": true, "slug", "view", "limit", "offset", "sort", "order", "start", "end", "filters", "rowCount", "rows": [ ... ] }`
 
 **Errors:** `400` with `unknown_view` and `allowed: [...]` if slug is not whitelisted; `400` if PostgREST/DB rejects the select.
+
+---
+
+### `GET /api/admin/reporting/summary/primary-kpis`
+
+Primary KPI summary for a month window used by dashboard cards.
+
+**Query:**
+- `month` — optional `YYYY-MM`; defaults to current UTC month
+
+**KPI definitions:**
+- `expected_revenue_open_due_cents` — open due for charges due in selected month
+- `actual_revenue_net_cash_cents` — net cash (`collected - refunded`) in selected month
+- `total_visitors_present_checkins` — count of `attendance_records.status = 'present'` in selected month
+- `current_monthly_members_active_count` — active monthly subscriptions as of `current_date`
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "kpis": {
+    "month_start": "2026-03-01",
+    "month_end": "2026-03-31",
+    "expected_revenue_open_due_cents": 0,
+    "actual_revenue_net_cash_cents": 0,
+    "total_visitors_present_checkins": 0,
+    "current_monthly_members_active_count": 0
+  }
+}
+```
 
 ---
 
@@ -143,8 +256,9 @@ Mounted under `/api/waivers/*` with the same `requireAdmin` pattern where applic
 
 ## Local dashboard (`apps/dashboard`)
 
-- **Sidebar layout:** **Analysis** (whitelisted reporting views, ordered for operations — payment board, charge net, reminders, entitlements, waivers, orphans) is the default experience; **Administration** groups **Merge**, **Write-off**, **Refund**, **Upgrade**, and **Waiver** URLs.
+- **Sidebar layout:** **Analysis** now starts with **Primary KPIs** (expected revenue, actual revenue, visitors, monthly members), then whitelisted reporting views for deeper inspection. **Administration** groups **Merge**, **Write-off**, **Refund**, **Upgrade**, **Pay-per-class**, and **Waiver** URLs.
 - Sticky header: API base + admin key. Changing analysis view (or pasting the key) auto-loads data; **Refresh** re-fetches with the current row limit (max 500).
+- `revenue-waterfall-monthly` includes quick date presets in the UI (`3M`, `6M`, `12M`, `YTD`) plus optional threshold filters for net cash / collected / refunded cents.
 - `npm run dev:dashboard` (from repo root; run `npm install` in the monorepo first)
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`
 - Paste **x-admin-key** only in trusted sessions; do not commit keys
