@@ -34,9 +34,13 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "guard:waiver-schema": "node scripts/guard-waiver-schema.mjs",
-    "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs"
+    "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs",
+    "tu-test:seed": "node scripts/tu-test-seed.mjs",
+    "tu-test:cleanup": "node scripts/tu-test-cleanup.mjs"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
     "npm-run-all": "^4.1.5",
     "supabase": "^2.75.5"
   },
