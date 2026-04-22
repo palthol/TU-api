@@ -228,6 +228,7 @@ function Sidebar({
 }
 
 export default function App() {
+  const receiptsAppUrl = import.meta.env.VITE_RECEIPTS_APP_URL || 'http://localhost:5176';
   const [apiBase, setApiBase] = useState(getDefaultApiBase);
   const [adminKey, setAdminKey] = useState('');
   const [nav, setNav] = useState<NavState>({ kind: 'analysis', slug: 'primary-kpis' });
@@ -272,6 +273,17 @@ export default function App() {
               <p className="text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">Analysis & data</span> first — administration in the
                 sidebar. Trusted sessions only; see <code className="rounded bg-muted px-1">docs/admin-api.md</code>.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                <a
+                  href={receiptsAppUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-primary underline underline-offset-4"
+                >
+                  Open Receipts app
+                </a>{' '}
+                (record payments, receipts, voids — same API base and admin key).
               </p>
             </div>
           </div>
