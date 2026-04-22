@@ -143,7 +143,19 @@ async function main() {
     }
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.ok) {
-      console.error(`Waiver submit failed for ${email}:`, res.status, body);
+      console.error(`Waiver submit failed for ${email}:`, res.status);
+      console.error(JSON.stringify(body, null, 2));
+      if (body?.dbError) {
+        console.error('\nSupabase reported:', body.dbError.message, body.dbError.code ?? '');
+        if (body.dbError.hint) console.error('Hint:', body.dbError.hint);
+        if (body.dbError.details) console.error('Details:', body.dbError.details);
+      }
+      if (body?.errors?.[0]?.messageKey === 'server.db_insert_participant_failed') {
+        console.error(
+          '\nTypical fix: the API must use SUPABASE_SERVICE_ROLE_KEY (service_role JWT), not the anon key —',
+          'see Supabase Dashboard → Project Settings → API.',
+        );
+      }
       process.exitCode = 1;
       return;
     }

@@ -9,6 +9,9 @@
  *
  * event_ledger rows are append-only and are NOT deleted; they may reference
  * removed entity UUIDs as historical audit noise.
+ *
+ * Waiver seeding calls the HTTP API, which needs SUPABASE_SERVICE_ROLE_KEY in the API
+ * process (service_role bypasses RLS). Using the anon key causes participant insert failures.
  */
 
 export const TU_TEST_EMAIL_DOMAIN = 'tu-test.invalid';

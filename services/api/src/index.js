@@ -10,6 +10,8 @@ import { registerAdminBillingRoutes } from './routes/admin/billing.js';
 import { registerAdminParticipantRoutes } from './routes/admin/participants.js';
 import { registerAdminReportingRoutes } from './routes/admin/reporting.js';
 import { registerAdminNotificationRoutes } from './routes/admin/notifications.js';
+import { warnIfSupabaseKeyIsNotServiceRole } from './lib/warnIfSupabaseKeyIsNotServiceRole.js';
+import { exposeSupabaseError } from './lib/exposeSupabaseError.js';
 
 const app = express();
 // CORS: allow configured origin or all in dev
@@ -26,6 +28,7 @@ const PORT = process.env.PORT || 3001;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = supabaseUrl && supabaseServiceRole ? createClient(supabaseUrl, supabaseServiceRole) : null;
+if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';
 
@@ -250,8 +253,12 @@ app.post('/api/waivers/submit', async (req, res) => {
         .limit(1)
         .maybeSingle();
       if (findErr) {
-        console.error('participants.find error', findErr);
-        return res.status(500).json({ ok: false, errors: [{ field: 'participant', messageKey: 'server.db_find_participant_failed' }] });
+        console.error('participants.find error', JSON.stringify(findErr, null, 2));
+        return res.status(500).json({
+          ok: false,
+          errors: [{ field: 'participant', messageKey: 'server.db_find_participant_failed' }],
+          dbError: exposeSupabaseError(findErr),
+        });
       }
       const phone = String(participant.phone);
       if (existing?.id && (existing.cell_phone === phone || existing.home_phone === phone)) {
@@ -274,8 +281,12 @@ app.post('/api/waivers/submit', async (req, res) => {
           .select('id')
           .single();
         if (insErr) {
-          console.error('participants.insert error', insErr);
-          return res.status(500).json({ ok: false, errors: [{ field: 'participant', messageKey: 'server.db_insert_participant_failed' }] });
+          console.error('participants.insert error', JSON.stringify(insErr, null, 2));
+          return res.status(500).json({
+            ok: false,
+            errors: [{ field: 'participant', messageKey: 'server.db_insert_participant_failed' }],
+            dbError: exposeSupabaseError(insErr),
+          });
         }
         participantId = inserted.id;
       }
