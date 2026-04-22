@@ -1,5 +1,12 @@
-import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { adminFetch, getDefaultApiBase } from '@/lib/admin-api';
+import { SharePreviewPanel } from '@/components/SharePreviewPanel';
+import {
+  buildFormalShareText,
+  buildInvoiceShareText,
+  buildQuickShareText,
+  formatUsdFromCents,
+} from '@/lib/shareFormats';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,7 +15,22 @@ import { Textarea } from '@/components/ui/textarea';
 
 const PAYMENT_METHODS = ['cash', 'card', 'cashapp', 'venmo', 'paypal', 'zelle', 'other'] as const;
 
-type TabId = 'record' | 'lookup' | 'void' | 'refund';
+type TabId = 'quick' | 'invoice' | 'recent' | 'formal' | 'preview' | 'lookup' | 'void' | 'refund';
+
+type PersonalEntry = {
+  id: string;
+  entry_kind: string;
+  member_display_name: string;
+  amount_cents: number;
+  method?: string | null;
+  issued_by: string;
+  notes?: string | null;
+  due_at?: string | null;
+  invoice_status?: string | null;
+  account_id?: string | null;
+  charge_id?: string | null;
+  created_at?: string;
+};
 
 function Field({ id, label, children }: { id?: string; label: string; children: ReactNode }) {
   return (
@@ -39,21 +61,16 @@ function parseDollarsToCents(raw: string): number | null {
   return Math.round(n * 100);
 }
 
-function formatUsdFromCents(cents: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
-}
-
-function buildShareText(params: { name?: string; amountCents: number; paymentId: string; receiptId: string | null }) {
-  const amt = formatUsdFromCents(params.amountCents);
-  const who = params.name?.trim() ? ` for ${params.name.trim()}` : '';
-  const receiptLine = params.receiptId ? ` Receipt ID: ${params.receiptId}.` : '';
-  return `Temple Underground — payment recorded${who}. Amount: ${amt}. Payment ID: ${params.paymentId}.${receiptLine} Questions? Reply to this message.`;
+function defaultTomorrowIsoDate() {
+  const t = new Date();
+  t.setDate(t.getDate() + 1);
+  return t.toISOString().slice(0, 10);
 }
 
 export default function App() {
   const [apiBase, setApiBase] = useState(getDefaultApiBase);
   const [adminKey, setAdminKey] = useState('');
-  const [tab, setTab] = useState<TabId>('record');
+  const [tab, setTab] = useState<TabId>('quick');
 
   const requireKey = useCallback(() => {
     if (!adminKey.trim()) return 'Enter your admin API key (x-admin-key).';
@@ -65,10 +82,10 @@ export default function App() {
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Temple Underground — Receipts</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Temple Underground — Finance log</h1>
             <p className="text-sm text-muted-foreground">
-              Staff finance capture: record payments, issue receipts, void, and refund receipts. Use HTTPS and trusted
-              devices only.
+              Personal operator tool: log cash you collected, draft invoices for upcoming dues, and optionally use formal
+              billing when you already have Supabase account and charge IDs. Same admin API key as the dashboard.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end lg:max-w-2xl">
@@ -95,11 +112,15 @@ export default function App() {
             </Field>
           </div>
         </div>
-        <nav className="flex flex-wrap gap-2 border-t border-border px-4 py-2" aria-label="Receipts sections">
+        <nav className="flex flex-wrap gap-2 border-t border-border px-4 py-2" aria-label="Finance sections">
           {(
             [
-              ['record', 'Record + receipt'],
-              ['lookup', 'Lookup (board)'],
+              ['quick', 'Cash log'],
+              ['invoice', 'Invoice'],
+              ['recent', 'Recent'],
+              ['formal', 'Formal billing'],
+              ['preview', 'Share preview'],
+              ['lookup', 'Board lookup'],
               ['void', 'Void receipt'],
               ['refund', 'Refund receipt'],
             ] as const
@@ -118,7 +139,11 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-3xl space-y-6 p-4 pb-16 md:p-6">
-        {tab === 'record' && <RecordReceiptTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
+        {tab === 'quick' && <QuickCashTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
+        {tab === 'invoice' && <InvoiceTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
+        {tab === 'recent' && <RecentTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
+        {tab === 'formal' && <FormalBillingTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
+        {tab === 'preview' && <SharePreviewTab />}
         {tab === 'lookup' && <LookupTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
         {tab === 'void' && <VoidReceiptTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
         {tab === 'refund' && <RefundReceiptTab apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />}
@@ -127,7 +152,445 @@ export default function App() {
   );
 }
 
-function RecordReceiptTab({
+function QuickCashTab({
+  apiBase,
+  adminKey,
+  requireKey,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+}) {
+  const [memberName, setMemberName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<(typeof PAYMENT_METHODS)[number]>('cash');
+  const [issuedBy, setIssuedBy] = useState('');
+  const [notes, setNotes] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variant, setVariant] = useState<'ok' | 'err'>('ok');
+  const [loading, setLoading] = useState(false);
+  const [lastId, setLastId] = useState<string | null>(null);
+  const [lastCents, setLastCents] = useState<number | null>(null);
+
+  const shareText = useMemo(() => {
+    if (!lastId || lastCents === null || !memberName.trim()) return '';
+    return buildQuickShareText({
+      name: memberName,
+      amountCents: lastCents,
+      entryId: lastId,
+      notes,
+    });
+  }, [lastId, lastCents, memberName, notes]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      return;
+    }
+    const cents = parseDollarsToCents(amount);
+    if (!memberName.trim() || !issuedBy.trim() || cents === null) {
+      setVariant('err');
+      setMsg('Member display name, issued-by, and a positive dollar amount are required.');
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const { ok, status, data } = await adminFetch<{ ok?: boolean; id?: string; error?: string }>(
+      apiBase,
+      adminKey,
+      '/api/admin/billing/personal-finance-entries',
+      {
+        method: 'POST',
+        json: {
+          entry_kind: 'cash_received',
+          member_display_name: memberName.trim(),
+          amount_cents: cents,
+          method,
+          issued_by: issuedBy.trim(),
+          notes: notes.trim() || undefined,
+        },
+      },
+    );
+    setLoading(false);
+    if (!ok || !data.id) {
+      setVariant('err');
+      setMsg(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      setLastId(null);
+      setLastCents(null);
+      return;
+    }
+    setVariant('ok');
+    setMsg(`Saved personal cash log. id=${data.id}`);
+    setLastId(data.id);
+    setLastCents(cents);
+  }
+
+  async function onShare() {
+    if (!shareText) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: shareText });
+        setVariant('ok');
+        setMsg('Shared via device share sheet.');
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setVariant('ok');
+      setMsg('Copied share text to clipboard.');
+    } catch {
+      setVariant('err');
+      setMsg('Unable to share or copy. Copy manually from the box below.');
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Log cash received</CardTitle>
+        <CardDescription>
+          Saves a row in `personal_finance_entries` (no account or charge UUIDs required). This is your day-to-day
+          memory of who paid and how much. Formal Supabase billing is optional and lives under Formal billing when you
+          want receipts tied to `payments` and `charges`.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <Field id="mn" label="Member display name">
+            <Input id="mn" value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Who paid" />
+          </Field>
+          <Field id="amt" label="Amount (USD)">
+            <Input id="amt" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="150.00" inputMode="decimal" />
+          </Field>
+          <Field id="meth" label="Payment method">
+            <select
+              id="meth"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={method}
+              onChange={(e) => setMethod(e.target.value as (typeof PAYMENT_METHODS)[number])}
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="by" label="Issued by (your name)">
+            <Input id="by" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} placeholder="You" />
+          </Field>
+          <Field id="notes" label="Notes">
+            <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Optional context" />
+          </Field>
+          <Button type="submit" disabled={loading}>
+            {loading ? 'Saving…' : 'Save cash log'}
+          </Button>
+        </form>
+        <StatusMessage message={msg} variant={variant} />
+        {lastId && shareText && (
+          <div className="mt-6 space-y-2 rounded-md border border-border bg-muted/30 p-3">
+            <p className="text-sm font-medium">Share draft (SMS or copy)</p>
+            <p className="whitespace-pre-wrap font-mono text-xs text-muted-foreground">{shareText}</p>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void onShare()}>
+              Share or copy
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InvoiceTab({
+  apiBase,
+  adminKey,
+  requireKey,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+}) {
+  const [memberName, setMemberName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [issuedBy, setIssuedBy] = useState('');
+  const [notes, setNotes] = useState('');
+  const [dueAt, setDueAt] = useState(defaultTomorrowIsoDate);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variant, setVariant] = useState<'ok' | 'err'>('ok');
+  const [loading, setLoading] = useState(false);
+  const [last, setLast] = useState<{ id: string; cents: number; due: string } | null>(null);
+
+  const shareText = useMemo(() => {
+    if (!last || !memberName.trim()) return '';
+    return buildInvoiceShareText({
+      name: memberName,
+      amountCents: last.cents,
+      dueAt: last.due,
+      entryId: last.id,
+      status: 'draft',
+    });
+  }, [last, memberName]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      return;
+    }
+    const cents = parseDollarsToCents(amount);
+    if (!memberName.trim() || !issuedBy.trim() || !dueAt.trim() || cents === null) {
+      setVariant('err');
+      setMsg('Member name, issued-by, due date, and a positive dollar amount are required.');
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const { ok, status, data } = await adminFetch<{ ok?: boolean; id?: string; error?: string }>(
+      apiBase,
+      adminKey,
+      '/api/admin/billing/personal-finance-entries',
+      {
+        method: 'POST',
+        json: {
+          entry_kind: 'invoice',
+          member_display_name: memberName.trim(),
+          amount_cents: cents,
+          issued_by: issuedBy.trim(),
+          notes: notes.trim() || undefined,
+          due_at: dueAt.trim(),
+          invoice_status: 'draft',
+        },
+      },
+    );
+    setLoading(false);
+    if (!ok || !data.id) {
+      setVariant('err');
+      setMsg(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      setLast(null);
+      return;
+    }
+    setVariant('ok');
+    setMsg(`Invoice draft saved. id=${data.id}`);
+    setLast({ id: data.id, cents, due: dueAt.trim() });
+  }
+
+  async function onShare() {
+    if (!shareText) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ text: shareText });
+        setVariant('ok');
+        setMsg('Shared via device share sheet.');
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    try {
+      await navigator.clipboard.writeText(shareText);
+      setVariant('ok');
+      setMsg('Copied share text to clipboard.');
+    } catch {
+      setVariant('err');
+      setMsg('Unable to share or copy.');
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Create invoice (draft)</CardTitle>
+        <CardDescription>
+          Lightweight reminder you can text someone before their subscription charge. Default due date is tomorrow. This
+          does not create a `charges` row yet; automation can be layered later (Discord, email, or generated charges).
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <Field id="inv-name" label="Member display name">
+            <Input id="inv-name" value={memberName} onChange={(e) => setMemberName(e.target.value)} />
+          </Field>
+          <Field id="inv-amt" label="Amount due (USD)">
+            <Input id="inv-amt" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
+          </Field>
+          <Field id="inv-due" label="Due date">
+            <Input id="inv-due" type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+          </Field>
+          <Field id="inv-by" label="Issued by (your name)">
+            <Input id="inv-by" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} />
+          </Field>
+          <Field id="inv-notes" label="Notes">
+            <Textarea id="inv-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+          </Field>
+          <Button type="submit" disabled={loading}>
+            {loading ? 'Saving…' : 'Save invoice draft'}
+          </Button>
+        </form>
+        <StatusMessage message={msg} variant={variant} />
+        {last && shareText && (
+          <>
+            <SharePreviewPanel
+              title="After save — invoice share"
+              payload={{
+                kind: 'invoice',
+                data: {
+                  name: memberName,
+                  amountCents: last.cents,
+                  dueAt: last.due,
+                  entryId: last.id,
+                  status: 'draft',
+                },
+              }}
+            />
+            <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => void onShare()}>
+              Device share or copy (same text)
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentTab({
+  apiBase,
+  adminKey,
+  requireKey,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+}) {
+  const [rows, setRows] = useState<PersonalEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variant, setVariant] = useState<'ok' | 'err'>('ok');
+
+  const load = useCallback(async () => {
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      setRows([]);
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const { ok, status, data } = await adminFetch<{ rows?: PersonalEntry[]; error?: string }>(
+      apiBase,
+      adminKey,
+      '/api/admin/billing/personal-finance-entries?limit=80',
+    );
+    setLoading(false);
+    if (!ok) {
+      setVariant('err');
+      setMsg(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      setRows([]);
+      return;
+    }
+    setVariant('ok');
+    setRows(Array.isArray(data.rows) ? data.rows : []);
+    setMsg(`Loaded ${Array.isArray(data.rows) ? data.rows.length : 0} entr(y/ies).`);
+  }, [apiBase, adminKey, requireKey]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function setInvoiceStatus(id: string, status: string) {
+    const k = requireKey();
+    if (k) return;
+    const { ok, status: st, data } = await adminFetch(apiBase, adminKey, `/api/admin/billing/personal-finance-entries/${id}/invoice-status`, {
+      method: 'POST',
+      json: { status },
+    });
+    if (!ok) {
+      setVariant('err');
+      setMsg(`Error ${st}: ${(data as { error?: string }).error ?? JSON.stringify(data)}`);
+      return;
+    }
+    await load();
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Recent personal entries</CardTitle>
+        <CardDescription>Cash logs and invoices you created here (not the full formal ledger).</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button type="button" variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </Button>
+        <StatusMessage message={msg} variant={variant} />
+        <div className="max-h-[65vh] overflow-auto rounded-md border border-border">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 z-10 border-b border-border bg-muted/90">
+              <tr>
+                <th className="px-2 py-2">When</th>
+                <th className="px-2 py-2">Kind</th>
+                <th className="px-2 py-2">Member</th>
+                <th className="px-2 py-2">Amount</th>
+                <th className="px-2 py-2">Meta</th>
+                <th className="px-2 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b border-border/60">
+                  <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                    {r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
+                  </td>
+                  <td className="px-2 py-1">{r.entry_kind}</td>
+                  <td className="px-2 py-1">{r.member_display_name}</td>
+                  <td className="px-2 py-1">{formatUsdFromCents(r.amount_cents)}</td>
+                  <td className="max-w-[10rem] px-2 py-1 align-top text-muted-foreground">
+                    {r.entry_kind === 'invoice' ? (
+                      <>
+                        due {r.due_at ?? '—'} · {r.invoice_status ?? '—'}
+                      </>
+                    ) : (
+                      <>{r.method ?? '—'}</>
+                    )}
+                  </td>
+                  <td className="px-2 py-1">
+                    {r.entry_kind === 'invoice' && r.invoice_status !== 'void' && r.invoice_status !== 'paid' ? (
+                      <div className="flex flex-wrap gap-1">
+                        {r.invoice_status === 'draft' && (
+                          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => void setInvoiceStatus(r.id, 'sent')}>
+                            Mark sent
+                          </Button>
+                        )}
+                        <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => void setInvoiceStatus(r.id, 'paid')}>
+                          Mark paid
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-[10px]" onClick={() => void setInvoiceStatus(r.id, 'void')}>
+                          Void
+                        </Button>
+                      </div>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FormalBillingTab({
   apiBase,
   adminKey,
   requireKey,
@@ -152,13 +615,14 @@ function RecordReceiptTab({
 
   const shareText = useMemo(() => {
     if (!last) return '';
-    return buildShareText({
+    return buildFormalShareText({
       name: memberName,
       amountCents: last.amountCents,
       paymentId: last.paymentId,
-      receiptId: last.receiptId ?? '',
+      receiptId: last.receiptId,
+      issuedBy: issuedBy.trim() || undefined,
     });
-  }, [last, memberName]);
+  }, [last, memberName, issuedBy]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -171,7 +635,7 @@ function RecordReceiptTab({
     const cents = parseDollarsToCents(amount);
     if (!accountId.trim() || !chargeId.trim() || !issuedBy.trim() || cents === null) {
       setVariant('err');
-      setMsg('Account ID, charge ID, issued-by name, and a positive dollar amount are required.');
+      setMsg('Account ID, charge ID, issued-by, and a positive dollar amount are required for formal billing.');
       return;
     }
     setLoading(true);
@@ -202,7 +666,7 @@ function RecordReceiptTab({
       return;
     }
     setVariant('ok');
-    setMsg(`Payment recorded. payment_id=${data.payment_id}${data.receipt_id ? ` receipt_id=${data.receipt_id}` : ''}`);
+    setMsg(`Formal payment recorded. payment_id=${data.payment_id}${data.receipt_id ? ` receipt_id=${data.receipt_id}` : ''}`);
     setLast({ paymentId: data.payment_id, receiptId: data.receipt_id ?? null, amountCents: cents });
   }
 
@@ -224,23 +688,24 @@ function RecordReceiptTab({
       setMsg('Copied share text to clipboard.');
     } catch {
       setVariant('err');
-      setMsg('Unable to share or copy. Copy manually from the box below.');
+      setMsg('Unable to share or copy.');
     }
   }
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Record payment + receipt</CardTitle>
+        <CardTitle className="text-base">Formal billing: payment plus receipt</CardTitle>
         <CardDescription>
-          Creates a succeeded payment with one allocation and optionally a money-in receipt. Use Lookup to pull IDs from
-          the payment board.
+          Optional path when you know the Supabase billing identifiers. An <strong>account</strong> is the billing bucket
+          tied to members; a <strong>charge</strong> is a receivable line (for example a monthly subscription invoice
+          row). This calls `record-payment` and can issue a real `receipts` row. Use Board lookup to copy UUIDs.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <Field id="member-name" label="Member display name (optional, for SMS text)">
-            <Input id="member-name" value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Jane Doe" />
+          <Field id="mn2" label="Member display name (optional, for SMS text only)">
+            <Input id="mn2" value={memberName} onChange={(e) => setMemberName(e.target.value)} />
           </Field>
           <Field id="acct" label="Account ID (UUID)">
             <Input id="acct" value={accountId} onChange={(e) => setAccountId(e.target.value)} className="font-mono text-xs" />
@@ -248,12 +713,12 @@ function RecordReceiptTab({
           <Field id="chg" label="Charge ID (UUID)">
             <Input id="chg" value={chargeId} onChange={(e) => setChargeId(e.target.value)} className="font-mono text-xs" />
           </Field>
-          <Field id="amt" label="Amount (USD)">
-            <Input id="amt" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="150.00" inputMode="decimal" />
+          <Field id="amt2" label="Amount (USD)">
+            <Input id="amt2" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
           </Field>
-          <Field id="meth" label="Method">
+          <Field id="meth2" label="Method">
             <select
-              id="meth"
+              id="meth2"
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={method}
               onChange={(e) => setMethod(e.target.value as (typeof PAYMENT_METHODS)[number])}
@@ -265,35 +730,115 @@ function RecordReceiptTab({
               ))}
             </select>
           </Field>
-          <Field id="by" label="Issued by (display name)">
-            <Input id="by" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} placeholder="Front desk" />
+          <Field id="by2" label="Issued by (your name)">
+            <Input id="by2" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} />
           </Field>
           <Field id="ref" label="Reference (optional)">
             <Input id="ref" value={reference} onChange={(e) => setReference(e.target.value)} />
           </Field>
-          <Field id="notes" label="Notes (optional)">
-            <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+          <Field id="notes2" label="Notes (optional)">
+            <Textarea id="notes2" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
           </Field>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={issueReceipt} onChange={(e) => setIssueReceipt(e.target.checked)} />
-            Issue money-in receipt
+            Issue money-in receipt in Postgres
           </label>
           <Button type="submit" disabled={loading}>
-            {loading ? 'Saving…' : 'Record payment'}
+            {loading ? 'Saving…' : 'Record formal payment'}
           </Button>
         </form>
         <StatusMessage message={msg} variant={variant} />
         {last && (
-          <div className="mt-6 space-y-2 rounded-md border border-border bg-muted/30 p-3">
-            <p className="text-sm font-medium">Share / SMS draft</p>
-            <p className="whitespace-pre-wrap font-mono text-xs text-muted-foreground">{shareText}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => void onShare()}>
-                Share or copy
+          <>
+            <SharePreviewPanel
+              title="After save — formal payment / receipt share"
+              payload={{
+                kind: 'formal',
+                data: {
+                  name: memberName.trim() || undefined,
+                  amountCents: last.amountCents,
+                  paymentId: last.paymentId,
+                  receiptId: last.receiptId,
+                  issuedBy: issuedBy.trim() || undefined,
+                },
+              }}
+            />
+            {shareText ? (
+              <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => void onShare()}>
+                Device share or copy (same text)
               </Button>
-            </div>
-          </div>
+            ) : null}
+          </>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+type PreviewScenario = 'quick' | 'invoice' | 'formal';
+
+function SharePreviewTab() {
+  const [scenario, setScenario] = useState<PreviewScenario>('formal');
+
+  const samplePayload = useMemo(() => {
+    if (scenario === 'quick') {
+      return {
+        kind: 'quick' as const,
+        data: {
+          name: 'Alex Rivera',
+          amountCents: 15_000,
+          entryId: '00000000-0000-4000-8000-000000000001',
+          notes: 'Day pass + guest',
+        },
+      };
+    }
+    if (scenario === 'invoice') {
+      return {
+        kind: 'invoice' as const,
+        data: {
+          name: 'Alex Rivera',
+          amountCents: 8900,
+          dueAt: '2026-04-30',
+          entryId: '00000000-0000-4000-8000-000000000002',
+          status: 'draft',
+        },
+      };
+    }
+    return {
+      kind: 'formal' as const,
+      data: {
+        name: 'Alex Rivera',
+        amountCents: 8900,
+        paymentId: 'pay_demo_abc123',
+        receiptId: 'rcpt_demo_xyz789',
+        issuedBy: 'Jordan',
+      },
+    };
+  }, [scenario]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Share preview (no API)</CardTitle>
+        <CardDescription>
+          Switch scenarios to see SMS-style text and the on-screen card before you record anything. Run{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">npm run test --workspace apps/receipts</code>{' '}
+          to lock copy in unit tests while you iterate on layout.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Field label="Scenario">
+          <select
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={scenario}
+            onChange={(e) => setScenario(e.target.value as PreviewScenario)}
+          >
+            <option value="formal">Formal payment + receipt IDs</option>
+            <option value="invoice">Invoice (draft)</option>
+            <option value="quick">Cash log</option>
+          </select>
+        </Field>
+        <SharePreviewPanel payload={samplePayload} title="Sample data" />
       </CardContent>
     </Card>
   );
@@ -337,7 +882,7 @@ function LookupTab({
     }
     setVariant('ok');
     setRows(Array.isArray(data.rows) ? data.rows : []);
-    setMsg(`Loaded ${Array.isArray(data.rows) ? data.rows.length : 0} row(s).`);
+    setMsg(`Loaded ${Array.isArray(data.rows) ? data.rows.length : 0} row(s). Tap a row to copy account_id and charge_id.`);
   }, [apiBase, adminKey, requireKey]);
 
   const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
@@ -347,8 +892,7 @@ function LookupTab({
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Payment board lookup</CardTitle>
         <CardDescription>
-          Read-only view of `view_member_payment_board`. Use account_id + charge_id on the Record tab. Tap a row to copy
-          IDs (clipboard).
+          Read-only `view_member_payment_board`. Use this when you want to run the Formal billing tab with real UUIDs.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -376,8 +920,7 @@ function LookupTab({
                     onClick={() => {
                       const aid = String(row.account_id ?? '');
                       const cid = String(row.charge_id ?? '');
-                      const line = `account_id=${aid}\ncharge_id=${cid}`;
-                      void navigator.clipboard.writeText(line);
+                      void navigator.clipboard.writeText(`account_id=${aid}\ncharge_id=${cid}`);
                     }}
                   >
                     {columns.map((c) => (
@@ -446,8 +989,8 @@ function VoidReceiptTab({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Void receipt</CardTitle>
-        <CardDescription>Soft void: sets voided_at + void_reason on the receipt row.</CardDescription>
+        <CardTitle className="text-base">Void formal receipt</CardTitle>
+        <CardDescription>Applies to rows in the `receipts` table (money-in), not the personal cash log.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -525,10 +1068,7 @@ function RefundReceiptTab({
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Issue refund receipt</CardTitle>
-        <CardDescription>
-          Requires an existing `payment_refunds` row. Voids active money-in receipt for that payment (if any) and inserts
-          money_out_refund.
-        </CardDescription>
+        <CardDescription>Formal billing only: requires an existing `payment_refunds` row.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -540,7 +1080,7 @@ function RefundReceiptTab({
               className="font-mono text-xs"
             />
           </Field>
-          <Field id="ib" label="Issued by (display name)">
+          <Field id="ib" label="Issued by (your name)">
             <Input id="ib" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} />
           </Field>
           <Field id="n" label="Notes (optional)">

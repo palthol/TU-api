@@ -514,4 +514,128 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       return res.status(500).json({ ok: false, error: 'server_error' });
     }
   });
+
+  /**
+   * Personal operator log (no account/charge required): cash received or lightweight invoice rows.
+   */
+  router.post('/billing/personal-finance-entries', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const {
+        entry_kind,
+        member_display_name,
+        amount_cents,
+        method,
+        issued_by,
+        notes,
+        due_at,
+        invoice_status,
+        account_id,
+        charge_id,
+      } = req.body || {};
+
+      if (entry_kind !== 'cash_received' && entry_kind !== 'invoice') {
+        return res.status(400).json({ ok: false, error: 'invalid_entry_kind' });
+      }
+      if (!member_display_name || typeof member_display_name !== 'string' || !member_display_name.trim()) {
+        return res.status(400).json({ ok: false, error: 'member_display_name_required' });
+      }
+      if (typeof amount_cents !== 'number' || amount_cents <= 0) {
+        return res.status(400).json({ ok: false, error: 'invalid_amount_cents' });
+      }
+      if (!issued_by || typeof issued_by !== 'string' || !issued_by.trim()) {
+        return res.status(400).json({ ok: false, error: 'issued_by_required' });
+      }
+
+      let row = {
+        entry_kind,
+        member_display_name: member_display_name.trim(),
+        amount_cents,
+        issued_by: issued_by.trim(),
+        notes: notes && typeof notes === 'string' ? notes.trim() : null,
+        account_id: account_id || null,
+        charge_id: charge_id || null,
+      };
+
+      if (entry_kind === 'cash_received') {
+        if (!method || typeof method !== 'string' || !PAYMENT_METHODS.has(method)) {
+          return res.status(400).json({ ok: false, error: 'invalid_payment_method' });
+        }
+        row = { ...row, method, due_at: null, invoice_status: null };
+      } else {
+        let due = due_at;
+        if (!due || typeof due !== 'string') {
+          const t = new Date();
+          t.setUTCDate(t.getUTCDate() + 1);
+          due = t.toISOString().slice(0, 10);
+        }
+        const invStatus =
+          invoice_status && typeof invoice_status === 'string' ? invoice_status.trim() : 'draft';
+        if (!['draft', 'sent', 'paid', 'void'].includes(invStatus)) {
+          return res.status(400).json({ ok: false, error: 'invalid_invoice_status' });
+        }
+        row = {
+          ...row,
+          method: method && typeof method === 'string' && PAYMENT_METHODS.has(method) ? method : null,
+          due_at: due,
+          invoice_status: invStatus,
+        };
+      }
+
+      const { data, error } = await supabase.from('personal_finance_entries').insert(row).select('id').single();
+      if (error) return res.status(400).json({ ok: false, error: error.message });
+      return res.json({ ok: true, id: data.id });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.get('/billing/personal-finance-entries', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const kind = typeof req.query.entry_kind === 'string' ? req.query.entry_kind.trim() : '';
+      let q = supabase.from('personal_finance_entries').select('*').order('created_at', { ascending: false }).limit(limit);
+      if (kind === 'cash_received' || kind === 'invoice') {
+        q = q.eq('entry_kind', kind);
+      }
+      const { data, error } = await q;
+      if (error) return res.status(400).json({ ok: false, error: error.message });
+      return res.json({ ok: true, rows: data ?? [] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.post('/billing/personal-finance-entries/:entryId/invoice-status', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const entryId = String(req.params.entryId || '').trim();
+      const { status } = req.body || {};
+      if (!entryId) return res.status(400).json({ ok: false, error: 'entry_id_required' });
+      if (!status || typeof status !== 'string' || !['draft', 'sent', 'paid', 'void'].includes(status.trim())) {
+        return res.status(400).json({ ok: false, error: 'invalid_status' });
+      }
+      const { data: row, error: findErr } = await supabase
+        .from('personal_finance_entries')
+        .select('id, entry_kind')
+        .eq('id', entryId)
+        .maybeSingle();
+      if (findErr || !row) return res.status(404).json({ ok: false, error: 'entry_not_found' });
+      if (row.entry_kind !== 'invoice') {
+        return res.status(400).json({ ok: false, error: 'only_invoice_entries_support_status' });
+      }
+      const { error: uErr } = await supabase
+        .from('personal_finance_entries')
+        .update({ invoice_status: status.trim() })
+        .eq('id', entryId);
+      if (uErr) return res.status(400).json({ ok: false, error: uErr.message });
+      return res.json({ ok: true, id: entryId, invoice_status: status.trim() });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
 }

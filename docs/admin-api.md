@@ -253,6 +253,65 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ---
 
+### `POST /api/admin/billing/personal-finance-entries`
+
+Operator-owned rows in **`personal_finance_entries`**: quick cash log or lightweight invoice drafts. Does **not** replace `payments` / `receipts`; use formal billing routes when you need allocations against `charges`.
+
+**Body — cash received**
+
+```json
+{
+  "entry_kind": "cash_received",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "method": "cash",
+  "issued_by": "Your name",
+  "notes": "optional",
+  "account_id": "optional uuid",
+  "charge_id": "optional uuid"
+}
+```
+
+**`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other`.
+
+**Body — invoice**
+
+```json
+{
+  "entry_kind": "invoice",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "issued_by": "Your name",
+  "notes": "optional",
+  "due_at": "2026-04-23",
+  "invoice_status": "draft"
+}
+```
+
+If `due_at` is omitted, the API defaults to **tomorrow (UTC date)**. `invoice_status` defaults to `draft` and must be one of `draft`, `sent`, `paid`, `void`.
+
+**Response:** `{ "ok": true, "id": "<uuid>" }`
+
+---
+
+### `GET /api/admin/billing/personal-finance-entries`
+
+**Query:** `limit` (optional, default `100`, max `500`), `entry_kind` (optional: `cash_received` or `invoice`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/personal-finance-entries/:entryId/invoice-status`
+
+Updates **`invoice_status`** for an **`invoice`** entry only.
+
+**Body:** `{ "status": "sent" }` — one of `draft`, `sent`, `paid`, `void`
+
+**Response:** `{ "ok": true, "id": "<uuid>", "invoice_status": "sent" }`
+
+---
+
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.

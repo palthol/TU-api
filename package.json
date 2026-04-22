@@ -23,6 +23,7 @@
     "build:receipts": "npm --workspace apps/receipts run build",
     "build:marketing": "npm --workspace apps/marketing run build",
     "test:marketing": "npm --workspace apps/marketing run test",
+    "test:receipts": "npm --workspace apps/receipts run test",
     "start": "npm --workspace services/api run start",
     "typecheck": "echo 'no types yet'",
     "lint": "echo 'no linter yet'",

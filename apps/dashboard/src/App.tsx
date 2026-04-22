@@ -281,9 +281,9 @@ export default function App() {
                   rel="noreferrer"
                   className="font-medium text-primary underline underline-offset-4"
                 >
-                  Open Receipts app
+                  Open finance log app
                 </a>{' '}
-                (record payments, receipts, voids — same API base and admin key).
+                (cash log, invoices, optional formal billing — same API base and admin key).
               </p>
             </div>
           </div>
