@@ -8,12 +8,12 @@
  * Env:
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required for --billing / --schedule
  *   TU_TEST_API_BASE (default http://localhost:3001) — waiver POST target
+ *   TU_TEST_API_TIMEOUT_MS (default 20000) — health + submit timeout
  *
  * Participants use email tu-test-<runId>-<n>@tu-test.invalid (see scripts/lib/tu-test-data.mjs).
  */
 
 import crypto from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
 import {
   assertTuTestEmail,
   tuTestDisplayName,
@@ -46,6 +46,43 @@ function addDaysIso(d, days) {
   return x.toISOString().slice(0, 10);
 }
 
+function requestTimeoutMs() {
+  const raw = process.env.TU_TEST_API_TIMEOUT_MS;
+  const n = raw ? Number.parseInt(raw, 10) : 20_000;
+  return Number.isFinite(n) && n >= 3000 ? n : 20_000;
+}
+
+function abortSignal() {
+  const ms = requestTimeoutMs();
+  return typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined;
+}
+
+function printApiUnreachableHelp(apiBase, err) {
+  const cause = err?.cause;
+  const code = cause?.code ?? cause?.errno;
+  console.error('\n--- API unreachable ---');
+  console.error(`URL tried: ${apiBase}`);
+  if (code) console.error(`Network: ${code} (${cause?.syscall ?? 'n/a'})`);
+  console.error(`Message: ${err?.message ?? err}`);
+  console.error('\nFix: start the waiver API, then retry.');
+  console.error('  From repo root: npm run dev:api');
+  console.error('If the API runs elsewhere, set TU_TEST_API_BASE or API_BASE_URL (no trailing slash).');
+  console.error('Example: set TU_TEST_API_BASE=http://127.0.0.1:3001\n');
+}
+
+async function assertApiReachable(apiBase) {
+  const healthUrl = `${apiBase}/health`;
+  try {
+    const res = await fetch(healthUrl, { method: 'GET', signal: abortSignal() });
+    if (!res.ok) {
+      console.warn(`Warning: ${healthUrl} returned HTTP ${res.status} (continuing anyway).`);
+    }
+  } catch (err) {
+    printApiUnreachableHelp(apiBase, err);
+    throw err;
+  }
+}
+
 async function main() {
   try {
     await import('dotenv/config');
@@ -56,6 +93,9 @@ async function main() {
   const { count, billing, schedule } = parseArgs(process.argv.slice(2));
   const runId = crypto.randomUUID().slice(0, 8);
   const apiBase = (process.env.TU_TEST_API_BASE || process.env.API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+
+  console.log(`API base: ${apiBase} (timeout ${requestTimeoutMs()} ms)`);
+  await assertApiReachable(apiBase);
 
   const created = [];
 
@@ -88,11 +128,19 @@ async function main() {
       content_version: `tu-test.seed.${runId}`,
     };
 
-    const res = await fetch(`${apiBase}/api/waivers/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    let res;
+    try {
+      res = await fetch(`${apiBase}/api/waivers/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: abortSignal(),
+      });
+    } catch (err) {
+      printApiUnreachableHelp(apiBase, err);
+      process.exitCode = 1;
+      return;
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.ok) {
       console.error(`Waiver submit failed for ${email}:`, res.status, body);
@@ -121,6 +169,7 @@ async function main() {
     return;
   }
 
+  const { createClient } = await import('@supabase/supabase-js');
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   if (billing && created[0]) {
@@ -236,4 +285,7 @@ async function main() {
   console.log('\nDone. runId=', runId, '\nCleanup: node scripts/tu-test-cleanup.mjs --execute');
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});
