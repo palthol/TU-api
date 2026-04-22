@@ -1,0 +1,55 @@
+name: Waiver Guardrails
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - v1-mvp-track
+  workflow_dispatch:
+
+jobs:
+  waiver-schema-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run waiver schema guard
+        run: npm run guard:waiver-schema
+
+  waiver-smoke-test:
+    runs-on: ubuntu-latest
+    needs: waiver-schema-guard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run waiver smoke test
+        env:
+          WAIVER_SMOKE_API_BASE_URL: ${{ secrets.WAIVER_SMOKE_API_BASE_URL }}
+          WAIVER_SMOKE_ADMIN_API_KEY: ${{ secrets.WAIVER_SMOKE_ADMIN_API_KEY }}
+        run: |
+          if [ -z "$WAIVER_SMOKE_API_BASE_URL" ] || [ -z "$WAIVER_SMOKE_ADMIN_API_KEY" ]; then
+            echo "Skipping smoke test: WAIVER_SMOKE_API_BASE_URL and/or WAIVER_SMOKE_ADMIN_API_KEY not set."
+            exit 0
+          fi
+          npm run test:waiver-smoke

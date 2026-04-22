@@ -29,7 +29,9 @@
     "supabase:push": "supabase db push",
     "supabase:pull": "supabase db pull",
     "supabase:start": "supabase start",
-    "supabase:stop": "supabase stop"
+    "supabase:stop": "supabase stop",
+    "guard:waiver-schema": "node scripts/guard-waiver-schema.mjs",
+    "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs"
   },
   "devDependencies": {
     "npm-run-all": "^4.1.5",

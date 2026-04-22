@@ -16,10 +16,36 @@ All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
+| **Discord** | Set **`DISCORD_WEBHOOK_URL`** on the API service for admin notification routes; messages are plain text (max ~2000 chars) |
 
 ---
 
 ## Endpoints
+
+### `POST /api/lead` (public)
+
+Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Rate-limit at the edge in production if needed.
+
+**Body (JSON)** — align with `apps/marketing` (`name`, `goals`, `preferredTime`; at least one of `email` or `phone`):
+
+```json
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "phone": "",
+  "goals": "first-class",
+  "preferredTime": "Evenings after 6pm",
+  "notes": "Optional"
+}
+```
+
+**`goals`:** `first-class` | `fitness-confidence` | `competition` | `weight-management` | `youth-inquiry`
+
+**Response:** `{ "ok": true }`
+
+**Errors:** `400` — `invalid_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+
+---
 
 ### `GET /api/admin/waivers/:id`
 
@@ -148,6 +174,103 @@ Policy:
 
 ---
 
+### `POST /api/admin/billing/record-payment`
+
+Creates a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), optionally a **`money_in`** receipt. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`).
+
+**Body (JSON):**
+
+```json
+{
+  "account_id": "uuid",
+  "amount_cents": 15000,
+  "method": "card",
+  "issued_by": "front_desk",
+  "allocations": [{ "charge_id": "uuid", "amount_cents": 15000 }],
+  "paid_at": "ISO-8601 optional",
+  "reference": "optional",
+  "notes": "optional",
+  "issue_receipt": true
+}
+```
+
+**`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other` (see `PAYMENT_METHODS` in `billing.js`).
+
+**Response:** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
+
+---
+
+### `POST /api/admin/billing/receipts/:receiptId/void`
+
+**Body:** `{ "void_reason": "required text" }`
+
+**Response:** `{ "ok": true, "receipt_id": "uuid" }`
+
+---
+
+### `POST /api/admin/billing/receipts/issue-for-refund`
+
+After a **`payment_refunds`** row exists: voids the active **`money_in`** receipt for that payment (if any) and inserts **`money_out_refund`** tied to the refund.
+
+**Body:** `{ "payment_refund_id": "uuid", "issued_by": "required", "notes": "optional" }`
+
+---
+
+### `GET /api/admin/billing/marketing-leads`
+
+**Query:** `limit` — optional, default `100`, max `500`
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `GET /api/admin/billing/operating-expenses`
+
+**Query:** `limit` — optional, default `100`, max `500`
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/operating-expenses`
+
+**Body:**
+
+```json
+{
+  "category": "rent",
+  "amount_cents": 120000,
+  "expense_date": "2026-04-01",
+  "vendor_name": "optional",
+  "notes": "optional",
+  "created_by": "optional"
+}
+```
+
+**`category`:** `rent` | `utilities` | `other`
+
+**Response:** `{ "ok": true, "id": "uuid" }`
+
+---
+
+### `POST /api/admin/notifications/discord/payment-reminders`
+
+Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
+
+**Response:** `{ "ok": true, "posted": true, "rowCount": N }`
+
+**Errors:** `500` — `discord_webhook_not_configured`; `502` — Discord HTTP failure
+
+---
+
+### `POST /api/admin/notifications/discord/daily-digest`
+
+Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 hours, counts for payment reminders, plus the same overdue / due-soon list as the payment-reminders route.
+
+**Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
+
+---
+
 ### `POST /api/admin/participants/merge`
 
 Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets `participants.merged_into_participant_id` and `merged_at` on the duplicate. Does **not** delete rows. If merging produces duplicate **active** `affiliate_referrals` rows for the same (referrer, referred), extras are ended (`status = ended`, `ended_at` set) so the partial unique index stays valid.
@@ -261,4 +384,5 @@ Mounted under `/api/waivers/*` with the same `requireAdmin` pattern where applic
 - `revenue-waterfall-monthly` includes quick date presets in the UI (`3M`, `6M`, `12M`, `YTD`) plus optional threshold filters for net cash / collected / refunded cents.
 - `npm run dev:dashboard` (from repo root; run `npm install` in the monorepo first)
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`
+- `apps/marketing` dev server proxies `/api/*` to `http://localhost:3001` so `POST /api/lead` works when the API is running locally
 - Paste **x-admin-key** only in trusted sessions; do not commit keys
