@@ -9,6 +9,7 @@ import { createOrBindParticipantAccount } from './services/accounts/createOrBind
 import { registerAdminBillingRoutes } from './routes/admin/billing.js';
 import { registerAdminParticipantRoutes } from './routes/admin/participants.js';
 import { registerAdminReportingRoutes } from './routes/admin/reporting.js';
+import { registerAdminNotificationRoutes } from './routes/admin/notifications.js';
 
 const app = express();
 // CORS: allow configured origin or all in dev
@@ -138,6 +139,60 @@ const summarizePayload = (body) => {
     content_version: typeof body.content_version === 'string',
   };
 };
+
+const GOALS = new Set(['first-class', 'fitness-confidence', 'competition', 'weight-management', 'youth-inquiry']);
+
+function parseLeadBody(body) {
+  if (!body || typeof body !== 'object') return { error: 'invalid_body' };
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (name.length < 2) return { error: 'invalid_name' };
+  const email =
+    typeof body.email === 'string' && body.email.trim().length
+      ? body.email.trim()
+      : null;
+  const phone =
+    typeof body.phone === 'string' && body.phone.trim().length ? body.phone.trim() : null;
+  if (!email && !phone) return { error: 'email_or_phone_required' };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'invalid_email' };
+  const goals = typeof body.goals === 'string' ? body.goals : '';
+  if (!GOALS.has(goals)) return { error: 'invalid_goals' };
+  const preferredTime =
+    typeof body.preferredTime === 'string' ? body.preferredTime.trim() : '';
+  if (preferredTime.length < 2) return { error: 'invalid_preferred_time' };
+  let notes = null;
+  if (body.notes != null) {
+    if (typeof body.notes !== 'string') return { error: 'invalid_notes' };
+    notes = body.notes.slice(0, 500);
+  }
+  return {
+    payload: {
+      name,
+      email,
+      phone,
+      goals,
+      preferred_time: preferredTime,
+      notes,
+      source: 'marketing_contact',
+    },
+  };
+}
+
+app.post('/api/lead', async (req, res) => {
+  try {
+    if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+    const parsed = parseLeadBody(req.body);
+    if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
+    const { error } = await supabase.from('marketing_leads').insert(parsed.payload);
+    if (error) {
+      console.error('marketing_leads.insert', error);
+      return res.status(500).json({ ok: false, error: 'db_error' });
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/health/deep', async (_req, res) => {
@@ -449,6 +504,7 @@ adminBillingRouter.use(requireAdmin);
 registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
+registerAdminNotificationRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
 app.listen(PORT, () => {
