@@ -22,6 +22,47 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
+  router.post('/billing/external-counterparty-accounts', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const { display_name, phone, email, notes, created_by } = req.body || {};
+      if (!display_name || typeof display_name !== 'string' || !display_name.trim()) {
+        return res.status(400).json({ ok: false, error: 'display_name_required' });
+      }
+
+      const cleanName = display_name.trim();
+      const cleanPhone = typeof phone === 'string' && phone.trim() ? phone.trim() : null;
+      const cleanEmail = typeof email === 'string' && email.trim() ? email.trim() : null;
+      const cleanNotes = typeof notes === 'string' && notes.trim() ? notes.trim() : null;
+      const createdBy = typeof created_by === 'string' && created_by.trim() ? created_by.trim() : 'admin_api';
+
+      const { data, error } = await supabase
+        .from('accounts')
+        .insert({
+          status: 'active',
+          primary_contact_name: cleanName,
+          primary_contact_phone: cleanPhone,
+          primary_contact_email: cleanEmail,
+          notes: [cleanNotes, `external_counterparty=true`, `created_by=${createdBy}`].filter(Boolean).join(' | '),
+        })
+        .select('id, status, primary_contact_name, primary_contact_phone, primary_contact_email, notes')
+        .single();
+      if (error || !data) {
+        console.error('external counterparty account insert', error);
+        return res.status(400).json({ ok: false, error: error?.message || 'account_insert_failed' });
+      }
+
+      return res.json({
+        ok: true,
+        account_id: data.id,
+        account: data,
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
   router.get('/billing/charge-discounts', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });

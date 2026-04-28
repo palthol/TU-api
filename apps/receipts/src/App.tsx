@@ -97,7 +97,7 @@ function ParticipantLookupField({
   requireKey: () => string | null;
   selected: { memberName: string; accountId: string | null } | null;
   onSelect: (row: ParticipantSearchRow) => void;
-  onExternalCounterparty: () => void;
+  onExternalCounterparty: (candidateName: string) => void;
 }) {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<ParticipantSearchRow[]>([]);
@@ -168,7 +168,7 @@ function ParticipantLookupField({
       ) : null}
       <div className="flex items-center justify-between rounded border border-dashed border-border px-2 py-2">
         <p className="text-xs text-muted-foreground">No suitable participant match?</p>
-        <Button type="button" size="sm" variant="ghost" onClick={onExternalCounterparty}>
+        <Button type="button" size="sm" variant="ghost" onClick={() => onExternalCounterparty(q.trim())}>
           Use external counterparty
         </Button>
       </div>
@@ -300,6 +300,43 @@ function QuickCashTab({
   const [lastCents, setLastCents] = useState<number | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
+  async function createExternalCounterparty(candidateName: string) {
+    const name = candidateName.trim() || memberName.trim();
+    if (!name) {
+      setVariant('err');
+      setMsg('Provide a name before creating an external counterparty account.');
+      return;
+    }
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      return;
+    }
+    const { ok, status, data } = await adminFetch<{ account_id?: string; error?: string }>(
+      apiBase,
+      adminKey,
+      '/api/admin/billing/external-counterparty-accounts',
+      {
+        method: 'POST',
+        json: {
+          display_name: name,
+          created_by: issuedBy.trim() || undefined,
+          notes: 'Created from receipts participant lookup fallback',
+        },
+      },
+    );
+    if (!ok || !data.account_id) {
+      setVariant('err');
+      setMsg(`External counterparty error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      return;
+    }
+    setMemberName(name);
+    setSelectedAccountId(data.account_id);
+    setVariant('ok');
+    setMsg(`Created external counterparty account. account_id=${data.account_id}`);
+  }
+
   const shareText = useMemo(() => {
     if (!lastId || lastCents === null || !memberName.trim()) return '';
     return buildQuickShareText({
@@ -400,9 +437,7 @@ function QuickCashTab({
               setMemberName(row.full_name);
               setSelectedAccountId(row.preferred_account_id ?? null);
             }}
-            onExternalCounterparty={() => {
-              setSelectedAccountId(null);
-            }}
+            onExternalCounterparty={(candidateName) => void createExternalCounterparty(candidateName)}
           />
           <Field id="mn" label="Member display name">
             <Input id="mn" value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Who paid" />
@@ -468,6 +503,43 @@ function InvoiceTab({
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<{ id: string; cents: number; due: string } | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+
+  async function createExternalCounterparty(candidateName: string) {
+    const name = candidateName.trim() || memberName.trim();
+    if (!name) {
+      setVariant('err');
+      setMsg('Provide a name before creating an external counterparty account.');
+      return;
+    }
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      return;
+    }
+    const { ok, status, data } = await adminFetch<{ account_id?: string; error?: string }>(
+      apiBase,
+      adminKey,
+      '/api/admin/billing/external-counterparty-accounts',
+      {
+        method: 'POST',
+        json: {
+          display_name: name,
+          created_by: issuedBy.trim() || undefined,
+          notes: 'Created from receipts participant lookup fallback',
+        },
+      },
+    );
+    if (!ok || !data.account_id) {
+      setVariant('err');
+      setMsg(`External counterparty error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      return;
+    }
+    setMemberName(name);
+    setSelectedAccountId(data.account_id);
+    setVariant('ok');
+    setMsg(`Created external counterparty account. account_id=${data.account_id}`);
+  }
 
   const shareText = useMemo(() => {
     if (!last || !memberName.trim()) return '';
@@ -568,9 +640,7 @@ function InvoiceTab({
               setMemberName(row.full_name);
               setSelectedAccountId(row.preferred_account_id ?? null);
             }}
-            onExternalCounterparty={() => {
-              setSelectedAccountId(null);
-            }}
+            onExternalCounterparty={(candidateName) => void createExternalCounterparty(candidateName)}
           />
           <Field id="inv-name" label="Member display name">
             <Input id="inv-name" value={memberName} onChange={(e) => setMemberName(e.target.value)} />
