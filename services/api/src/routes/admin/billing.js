@@ -22,6 +22,86 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
+  router.get('/billing/charge-discounts', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const chargeId = typeof req.query.charge_id === 'string' ? req.query.charge_id.trim() : '';
+      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
+      if (!chargeId) {
+        return res.status(400).json({ ok: false, error: 'charge_id_required' });
+      }
+      const { data, error } = await supabase
+        .from('charge_discounts')
+        .select('*')
+        .eq('charge_id', chargeId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) return res.status(400).json({ ok: false, error: error.message });
+      return res.json({ ok: true, rows: data ?? [] });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.post('/billing/charge-discounts', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const { charge_id, discount_type, flat_amount_cents, percent_basis_points, label, reason, created_by } = req.body || {};
+      if (!charge_id || typeof charge_id !== 'string') {
+        return res.status(400).json({ ok: false, error: 'charge_id_required' });
+      }
+      if (!discount_type || (discount_type !== 'flat' && discount_type !== 'percent')) {
+        return res.status(400).json({ ok: false, error: 'invalid_discount_type' });
+      }
+      if (!label || typeof label !== 'string' || !label.trim()) {
+        return res.status(400).json({ ok: false, error: 'label_required' });
+      }
+      if (discount_type === 'flat' && (!Number.isFinite(flat_amount_cents) || flat_amount_cents <= 0)) {
+        return res.status(400).json({ ok: false, error: 'invalid_flat_amount_cents' });
+      }
+      if (
+        discount_type === 'percent' &&
+        (!Number.isFinite(percent_basis_points) || percent_basis_points <= 0 || percent_basis_points > 10000)
+      ) {
+        return res.status(400).json({ ok: false, error: 'invalid_percent_basis_points' });
+      }
+
+      const insertRow = {
+        charge_id: charge_id.trim(),
+        discount_type,
+        flat_amount_cents: discount_type === 'flat' ? flat_amount_cents : null,
+        percent_basis_points: discount_type === 'percent' ? percent_basis_points : null,
+        applied_amount_cents: 1,
+        label: label.trim(),
+        reason: reason && typeof reason === 'string' ? reason.trim() : null,
+        created_by: created_by && typeof created_by === 'string' ? created_by.trim() : null,
+      };
+
+      const { data, error } = await supabase.from('charge_discounts').insert(insertRow).select('*').single();
+      if (error) {
+        console.error('charge_discounts.insert', error);
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+
+      const { data: netRow } = await supabase
+        .from('view_charge_net')
+        .select('net_due_cents')
+        .eq('charge_id', charge_id.trim())
+        .maybeSingle();
+
+      return res.json({
+        ok: true,
+        discount_id: data.id,
+        applied_amount_cents: data.applied_amount_cents,
+        net_due_cents: netRow?.net_due_cents ?? null,
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
   router.post('/billing/charge-adjustments', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });

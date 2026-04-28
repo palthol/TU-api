@@ -32,6 +32,19 @@ type PersonalEntry = {
   created_at?: string;
 };
 
+type ChargeDiscountRow = {
+  id: string;
+  charge_id: string;
+  discount_type: 'flat' | 'percent';
+  flat_amount_cents?: number | null;
+  percent_basis_points?: number | null;
+  applied_amount_cents: number;
+  label: string;
+  reason?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+};
+
 type ParticipantSearchAccount = {
   account_id: string;
   role?: string | null;
@@ -756,6 +769,27 @@ function FormalBillingTab({
   const [variant, setVariant] = useState<'ok' | 'err'>('ok');
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<{ paymentId: string; receiptId: string | null; amountCents: number } | null>(null);
+  const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
+  const [discountValue, setDiscountValue] = useState('');
+  const [discountLabel, setDiscountLabel] = useState('');
+  const [discountReason, setDiscountReason] = useState('');
+  const [discountLoading, setDiscountLoading] = useState(false);
+  const [discountRows, setDiscountRows] = useState<ChargeDiscountRow[]>([]);
+
+  async function loadDiscounts(currentChargeId: string) {
+    const id = currentChargeId.trim();
+    if (!id) {
+      setDiscountRows([]);
+      return;
+    }
+    const { ok, data } = await adminFetch<{ rows?: ChargeDiscountRow[] }>(
+      apiBase,
+      adminKey,
+      `/api/admin/billing/charge-discounts?charge_id=${encodeURIComponent(id)}&limit=20`,
+    );
+    if (!ok) return;
+    setDiscountRows(Array.isArray(data.rows) ? data.rows : []);
+  }
 
   const shareText = useMemo(() => {
     if (!last) return '';
@@ -814,6 +848,82 @@ function FormalBillingTab({
     setLast({ paymentId: data.payment_id, receiptId: data.receipt_id ?? null, amountCents: cents });
   }
 
+  async function onApplyDiscount() {
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      return;
+    }
+    if (!chargeId.trim()) {
+      setVariant('err');
+      setMsg('Charge ID is required before applying a discount.');
+      return;
+    }
+    if (!discountLabel.trim()) {
+      setVariant('err');
+      setMsg('Discount label is required (for explicit line-item visibility).');
+      return;
+    }
+    const n = Number.parseFloat(discountValue);
+    if (!Number.isFinite(n) || n <= 0) {
+      setVariant('err');
+      setMsg(discountType === 'flat' ? 'Enter a positive flat discount in dollars.' : 'Enter a positive percent (e.g. 10).');
+      return;
+    }
+    const payload =
+      discountType === 'flat'
+        ? {
+            charge_id: chargeId.trim(),
+            discount_type: 'flat' as const,
+            flat_amount_cents: Math.round(n * 100),
+            label: discountLabel.trim(),
+            reason: discountReason.trim() || undefined,
+            created_by: issuedBy.trim() || undefined,
+          }
+        : {
+            charge_id: chargeId.trim(),
+            discount_type: 'percent' as const,
+            percent_basis_points: Math.round(n * 100),
+            label: discountLabel.trim(),
+            reason: discountReason.trim() || undefined,
+            created_by: issuedBy.trim() || undefined,
+          };
+
+    setDiscountLoading(true);
+    const { ok, status, data } = await adminFetch<{
+      ok?: boolean;
+      error?: string;
+      discount_id?: string;
+      applied_amount_cents?: number;
+      net_due_cents?: number | null;
+    }>(apiBase, adminKey, '/api/admin/billing/charge-discounts', {
+      method: 'POST',
+      json: payload,
+    });
+    setDiscountLoading(false);
+    if (!ok || !data.discount_id) {
+      setVariant('err');
+      setMsg(`Discount error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      return;
+    }
+
+    setVariant('ok');
+    setMsg(
+      `Discount line saved. id=${data.discount_id} applied=${formatUsdFromCents(data.applied_amount_cents ?? 0)}${
+        Number.isFinite(data.net_due_cents as number) ? ` net_due=${formatUsdFromCents(data.net_due_cents as number)}` : ''
+      }`,
+    );
+    setDiscountValue('');
+    setDiscountReason('');
+    await loadDiscounts(chargeId);
+  }
+
+  useEffect(() => {
+    void loadDiscounts(chargeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chargeId, apiBase, adminKey]);
+
   async function onShare() {
     if (!shareText) return;
     try {
@@ -857,6 +967,62 @@ function FormalBillingTab({
           <Field id="chg" label="Charge ID (UUID)">
             <Input id="chg" value={chargeId} onChange={(e) => setChargeId(e.target.value)} className="font-mono text-xs" />
           </Field>
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <p className="text-sm font-medium">Explicit discount line item (optional)</p>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Discounts are explicit, auditable line items on charges and are never hidden in final price.
+            </p>
+            <div className="space-y-3">
+              <Field id="discount-type" label="Discount type">
+                <select
+                  id="discount-type"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={discountType}
+                  onChange={(e) => setDiscountType(e.target.value === 'percent' ? 'percent' : 'flat')}
+                >
+                  <option value="flat">Flat amount</option>
+                  <option value="percent">Percent</option>
+                </select>
+              </Field>
+              <Field id="discount-value" label={discountType === 'flat' ? 'Amount (USD)' : 'Percent (e.g. 10)'}>
+                <Input
+                  id="discount-value"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  inputMode="decimal"
+                  placeholder={discountType === 'flat' ? '10.00' : '10'}
+                />
+              </Field>
+              <Field id="discount-label" label="Label (required)">
+                <Input
+                  id="discount-label"
+                  value={discountLabel}
+                  onChange={(e) => setDiscountLabel(e.target.value)}
+                  placeholder="Membership loyalty discount"
+                />
+              </Field>
+              <Field id="discount-reason" label="Reason (optional)">
+                <Input id="discount-reason" value={discountReason} onChange={(e) => setDiscountReason(e.target.value)} />
+              </Field>
+              <Button type="button" variant="outline" disabled={discountLoading} onClick={() => void onApplyDiscount()}>
+                {discountLoading ? 'Applying discount…' : 'Apply discount line'}
+              </Button>
+            </div>
+            {discountRows.length > 0 ? (
+              <div className="mt-3 space-y-1 text-xs">
+                {discountRows.map((r) => (
+                  <p key={r.id} className="font-mono text-muted-foreground">
+                    {r.discount_type === 'percent'
+                      ? `${(r.percent_basis_points ?? 0) / 100}%`
+                      : formatUsdFromCents(r.flat_amount_cents ?? 0)}{' '}
+                    · applied {formatUsdFromCents(r.applied_amount_cents)} · {r.label}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">No discount lines applied to this charge yet.</p>
+            )}
+          </div>
           <Field id="amt2" label="Amount (USD)">
             <Input id="amt2" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
           </Field>

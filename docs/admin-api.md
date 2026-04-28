@@ -74,6 +74,51 @@ Insert a **write-off** row (`charge_adjustments`). Reduces **net due** via `view
 
 ---
 
+### `GET /api/admin/billing/charge-discounts`
+
+Lists explicit discount line-items applied to a charge.
+
+**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/charge-discounts`
+
+Creates an explicit discount line-item (flat amount or percent) for a charge. Discount math is enforced so
+`affiliate credits + write-offs + discounts <= charge gross`.
+
+**Body (flat):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "flat",
+  "flat_amount_cents": 2500,
+  "label": "Loyalty discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Body (percent):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "percent",
+  "percent_basis_points": 1000,
+  "label": "Referral discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Response:** `{ "ok": true, "discount_id": "uuid", "applied_amount_cents": 2500, "net_due_cents": 7500 }`
+
+---
+
 ### `POST /api/admin/billing/payment-refunds`
 
 Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_allocations` FIFO, reopens `charges.status` from `paid` → `open` when allocations no longer cover net due. When cumulative refunds for the payment reach the full payment amount, `payments.status` is set to **`refunded`**.
