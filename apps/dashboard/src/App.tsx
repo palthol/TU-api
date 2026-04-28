@@ -14,6 +14,11 @@ export const ANALYSIS_VIEWS = [
     hint: 'Expected revenue, actual revenue, visitors, and current monthly members.',
   },
   {
+    slug: 'finance-monthly-summary' as const,
+    label: 'Finance monthly summary',
+    hint: 'Revenue, expenses, operating delta, and deficit-to-cover for sustainability tracking.',
+  },
+  {
     slug: 'payment-board' as const,
     label: 'Payment board',
     hint: 'Charges, net due, allocations — main money & status picture.',
@@ -363,7 +368,11 @@ export default function App() {
             <PrimaryKpiConsole apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />
           )}
 
-          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug !== 'primary-kpis' && (
+          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug === 'finance-monthly-summary' && (
+            <FinanceMonthlySummaryConsole apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />
+          )}
+
+          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug !== 'primary-kpis' && nav.slug !== 'finance-monthly-summary' && (
             <DataExplorer
               apiBase={apiBase}
               adminKey={adminKey}
@@ -740,9 +749,138 @@ type PrimaryKpis = {
   current_monthly_members_active_count: number;
 };
 
+type FinanceMonthlySummary = {
+  month: string;
+  month_start: string;
+  month_end: string;
+  revenue_cents: number;
+  expenses_cents: number;
+  operating_delta_cents: number;
+  deficit_to_cover_cents: number;
+  owner_subsidy_cents: number;
+};
+
 function formatUsd(cents: number): string {
   const amount = Number.isFinite(cents) ? cents / 100 : 0;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+}
+
+function FinanceMonthlySummaryConsole({
+  apiBase,
+  adminKey,
+  requireKey,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+}) {
+  const [month, setMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  });
+  const [summary, setSummary] = useState<FinanceMonthlySummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [variant, setVariant] = useState<'ok' | 'err'>('ok');
+
+  const loadSummary = useCallback(async () => {
+    const k = requireKey();
+    if (k) {
+      setVariant('err');
+      setMsg(k);
+      setSummary(null);
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const { ok, status, data } = await adminFetch<{
+      ok?: boolean;
+      error?: string;
+      summary?: FinanceMonthlySummary;
+    }>(apiBase, adminKey, `/api/admin/finance/monthly-summary?month=${encodeURIComponent(month)}`);
+    setLoading(false);
+    if (!ok || !data.summary) {
+      setVariant('err');
+      setMsg(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
+      setSummary(null);
+      return;
+    }
+    setVariant('ok');
+    setSummary(data.summary);
+    setMsg(`Loaded finance summary for ${data.summary.month}.`);
+  }, [apiBase, adminKey, month, requireKey]);
+
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
+
+  const cardClass = 'w-full rounded-lg border border-border bg-card p-4 text-left';
+  const isDeficit = (summary?.deficit_to_cover_cents || 0) > 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 border-b border-border pb-4">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight">Finance monthly summary</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Monthly revenue and expense snapshot for business sustainability.
+          </p>
+        </div>
+        <Field id="finance-month" label="Month">
+          <Input
+            id="finance-month"
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="h-9 w-40 font-mono text-xs"
+          />
+        </Field>
+        <Button type="button" variant="secondary" className="h-9" onClick={() => void loadSummary()} disabled={loading}>
+          {loading ? 'Loading…' : 'Refresh summary'}
+        </Button>
+      </div>
+
+      <StatusMessage message={msg} variant={variant} />
+
+      {summary && (
+        <>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className={cardClass}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Revenue</p>
+              <p className="mt-2 text-2xl font-semibold">{formatUsd(summary.revenue_cents)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Net cash in ({summary.month})</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Expenses</p>
+              <p className="mt-2 text-2xl font-semibold">{formatUsd(summary.expenses_cents)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Operating costs in month</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Operating delta</p>
+              <p className="mt-2 text-2xl font-semibold">{formatUsd(summary.operating_delta_cents)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Revenue minus expenses</p>
+            </div>
+            <div className={cardClass}>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Deficit to cover</p>
+              <p className={`mt-2 text-2xl font-semibold ${isDeficit ? 'text-destructive' : ''}`}>
+                {formatUsd(summary.deficit_to_cover_cents)}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">Amount needed for self-sustainability</p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+            <p>
+              Range: <span className="font-mono">{summary.month_start}</span> to{' '}
+              <span className="font-mono">{summary.month_end}</span>
+            </p>
+            <p className="mt-1">
+              Owner/family subsidy tracked in this payload: <span className="font-mono">{formatUsd(summary.owner_subsidy_cents)}</span>
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function PrimaryKpiConsole({

@@ -32,6 +32,23 @@ type PersonalEntry = {
   created_at?: string;
 };
 
+type ParticipantSearchAccount = {
+  account_id: string;
+  role?: string | null;
+  account_status?: string | null;
+};
+
+type ParticipantSearchRow = {
+  participant_id: string;
+  full_name: string;
+  email?: string | null;
+  cell_phone?: string | null;
+  home_phone?: string | null;
+  account_count: number;
+  preferred_account_id?: string | null;
+  accounts?: ParticipantSearchAccount[];
+};
+
 function Field({ id, label, children }: { id?: string; label: string; children: ReactNode }) {
   return (
     <div className="grid gap-2">
@@ -51,6 +68,103 @@ function StatusMessage({ message, variant }: { message: string | null; variant: 
     <p role="status" className={`mt-4 rounded-md border px-3 py-2 text-sm whitespace-pre-wrap ${cls}`}>
       {message}
     </p>
+  );
+}
+
+function ParticipantLookupField({
+  apiBase,
+  adminKey,
+  requireKey,
+  selected,
+  onSelect,
+  onExternalCounterparty,
+}: {
+  apiBase: string;
+  adminKey: string;
+  requireKey: () => string | null;
+  selected: { memberName: string; accountId: string | null } | null;
+  onSelect: (row: ParticipantSearchRow) => void;
+  onExternalCounterparty: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState<ParticipantSearchRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function onSearch() {
+    const k = requireKey();
+    if (k) {
+      setMsg(k);
+      setRows([]);
+      return;
+    }
+    const query = q.trim();
+    if (query.length < 2) {
+      setMsg('Type at least 2 characters to search participants.');
+      setRows([]);
+      return;
+    }
+    setLoading(true);
+    setMsg(null);
+    const path = `/api/admin/participants/search?q=${encodeURIComponent(query)}&limit=8`;
+    const { ok, status, data } = await adminFetch<{ rows?: ParticipantSearchRow[]; error?: string }>(apiBase, adminKey, path);
+    setLoading(false);
+    if (!ok) {
+      setRows([]);
+      setMsg(`Search error ${status}: ${data.error ?? 'unknown error'}`);
+      return;
+    }
+    const results = Array.isArray(data.rows) ? data.rows : [];
+    setRows(results);
+    setMsg(results.length === 0 ? 'No participant match found. Use external counterparty below.' : null);
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border border-border bg-muted/20 p-3">
+      <p className="text-sm font-medium">Participant lookup (recommended first)</p>
+      <div className="flex gap-2">
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email, or phone" />
+        <Button type="button" variant="outline" onClick={() => void onSearch()} disabled={loading}>
+          {loading ? 'Searching…' : 'Search'}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        If matched, we prefill name and link a preferred `account_id` when available. If not matched, continue as an
+        external counterparty.
+      </p>
+      {msg ? <p className="text-xs text-muted-foreground">{msg}</p> : null}
+      {rows.length > 0 ? (
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <div key={row.participant_id} className="flex items-start justify-between gap-2 rounded border border-border px-2 py-2">
+              <div className="text-xs">
+                <p className="font-medium text-foreground">{row.full_name}</p>
+                <p className="text-muted-foreground">
+                  {row.email || row.cell_phone || row.home_phone || 'No contact on file'} · accounts {row.account_count}
+                </p>
+                <p className="text-muted-foreground">
+                  preferred_account_id: {row.preferred_account_id ?? 'none'}
+                </p>
+              </div>
+              <Button type="button" size="sm" variant="secondary" onClick={() => onSelect(row)}>
+                Use
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex items-center justify-between rounded border border-dashed border-border px-2 py-2">
+        <p className="text-xs text-muted-foreground">No suitable participant match?</p>
+        <Button type="button" size="sm" variant="ghost" onClick={onExternalCounterparty}>
+          Use external counterparty
+        </Button>
+      </div>
+      {selected ? (
+        <p className="text-xs text-muted-foreground">
+          Selected: <strong>{selected.memberName}</strong> · account_id: {selected.accountId ?? 'not linked'}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -171,6 +285,7 @@ function QuickCashTab({
   const [loading, setLoading] = useState(false);
   const [lastId, setLastId] = useState<string | null>(null);
   const [lastCents, setLastCents] = useState<number | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const shareText = useMemo(() => {
     if (!lastId || lastCents === null || !memberName.trim()) return '';
@@ -211,6 +326,7 @@ function QuickCashTab({
           method,
           issued_by: issuedBy.trim(),
           notes: notes.trim() || undefined,
+          account_id: selectedAccountId || undefined,
         },
       },
     );
@@ -262,6 +378,19 @@ function QuickCashTab({
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
+          <ParticipantLookupField
+            apiBase={apiBase}
+            adminKey={adminKey}
+            requireKey={requireKey}
+            selected={memberName.trim() ? { memberName: memberName.trim(), accountId: selectedAccountId } : null}
+            onSelect={(row) => {
+              setMemberName(row.full_name);
+              setSelectedAccountId(row.preferred_account_id ?? null);
+            }}
+            onExternalCounterparty={() => {
+              setSelectedAccountId(null);
+            }}
+          />
           <Field id="mn" label="Member display name">
             <Input id="mn" value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Who paid" />
           </Field>
@@ -325,6 +454,7 @@ function InvoiceTab({
   const [variant, setVariant] = useState<'ok' | 'err'>('ok');
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<{ id: string; cents: number; due: string } | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
   const shareText = useMemo(() => {
     if (!last || !memberName.trim()) return '';
@@ -367,6 +497,7 @@ function InvoiceTab({
           notes: notes.trim() || undefined,
           due_at: dueAt.trim(),
           invoice_status: 'draft',
+          account_id: selectedAccountId || undefined,
         },
       },
     );
@@ -415,6 +546,19 @@ function InvoiceTab({
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
+          <ParticipantLookupField
+            apiBase={apiBase}
+            adminKey={adminKey}
+            requireKey={requireKey}
+            selected={memberName.trim() ? { memberName: memberName.trim(), accountId: selectedAccountId } : null}
+            onSelect={(row) => {
+              setMemberName(row.full_name);
+              setSelectedAccountId(row.preferred_account_id ?? null);
+            }}
+            onExternalCounterparty={() => {
+              setSelectedAccountId(null);
+            }}
+          />
           <Field id="inv-name" label="Member display name">
             <Input id="inv-name" value={memberName} onChange={(e) => setMemberName(e.target.value)} />
           </Field>

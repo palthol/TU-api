@@ -347,6 +347,46 @@ Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets 
 
 ---
 
+### `GET /api/admin/participants/search`
+
+Participant-first lookup for finance and admin operator flows. Searches existing participants by name, email, or phone, then returns linked accounts and a preferred `account_id` when available.
+
+**Query:**
+
+- `q` — required string, minimum 2 characters
+- `limit` — optional, default `8`, min `1`, max `25`
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "rows": [
+    {
+      "participant_id": "uuid",
+      "full_name": "Jane Doe",
+      "email": "jane@example.com",
+      "cell_phone": "555-111-2222",
+      "home_phone": null,
+      "account_count": 1,
+      "preferred_account_id": "uuid",
+      "accounts": [
+        {
+          "account_id": "uuid",
+          "role": "payer",
+          "account_status": "active",
+          "account_primary_contact_name": "Jane Doe"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Errors:** `400` — `query_min_length_2` (or DB/select errors)
+
+---
+
 ## Database reporting (authenticated admins)
 
 - **`view_charge_net`:** `gross_cents`, `credit_applied_cents` (affiliate), `write_off_cents`, `net_due_cents`
@@ -427,6 +467,40 @@ Primary KPI summary for a month window used by dashboard cards.
   }
 }
 ```
+
+---
+
+### `GET /api/admin/finance/monthly-summary`
+
+Monthly finance summary contract for dashboard export and bookkeeping sustainability checks.
+
+**Query:**
+- `month` — optional `YYYY-MM`; defaults to current UTC month
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "summary": {
+    "month": "2026-04",
+    "month_start": "2026-04-01",
+    "month_end": "2026-04-30",
+    "revenue_cents": 185000,
+    "expenses_cents": 120000,
+    "operating_delta_cents": 65000,
+    "deficit_to_cover_cents": 0,
+    "owner_subsidy_cents": 0
+  }
+}
+```
+
+**Field definitions:**
+- `revenue_cents` — net member cash for month (from `view_analytics_revenue_waterfall_monthly.net_cash_collected_cents`)
+- `expenses_cents` — sum of `operating_expenses.amount_cents` for `expense_date` in month
+- `operating_delta_cents` — `revenue_cents - expenses_cents`
+- `deficit_to_cover_cents` — `max(0, expenses_cents - revenue_cents)`
+- `owner_subsidy_cents` — currently `0` placeholder until subsidy-specific storage is introduced
 
 ---
 
