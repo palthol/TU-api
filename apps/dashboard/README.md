@@ -7,6 +7,7 @@ shadcn-style UI (Tailwind + Radix) for admin workflows:
 - **Refund** (`POST /api/admin/billing/payment-refunds`)  
 - **Upgrade** (`POST /api/admin/billing/subscription-upgrade`)  
 - **Waiver** signed URL lookup (`GET /api/admin/waivers/:id`)
+- **Waiver viewer** mobile-first cards backed by `view_waiver_documents`
 
 See [docs/admin-api.md](../../docs/admin-api.md).
 
