@@ -47,7 +47,7 @@ describe('notifyWaiverSubmitted', () => {
   it('sends only to configured providers', async () => {
     process.env.DISCORD_WEBHOOK_URL = 'https://discord.example/webhook';
     delete process.env.SLACK_WEBHOOK_URL;
-    const fetchMock = vi.fn(async () => new Response('', { status: 204 }));
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const results = await notifyWaiverSubmitted({
