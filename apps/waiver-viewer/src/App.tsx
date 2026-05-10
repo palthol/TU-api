@@ -1,10 +1,7 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { adminFetch } from '@/lib/admin-api';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Label } from '@/components/ui/label';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
 type SortMode = 'recent' | 'name';
+type StatusKind = 'info' | 'error' | 'success';
 
 type WaiverDocument = {
   waiver_id: string;
@@ -66,32 +63,28 @@ type WaiverDocument = {
   audit_created_at: string | null;
 };
 
-type WaiverViewerProps = {
-  apiBase: string;
-  adminKey: string;
-  requireKey: () => string | null;
-};
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:3001';
 
 const sortConfig: Record<SortMode, { label: string; sort: string; order: 'asc' | 'desc' }> = {
   recent: { label: 'Most recent', sort: 'signed_at_utc', order: 'desc' },
   name: { label: 'Alphabetical', sort: 'participant_full_name', order: 'asc' },
 };
 
-const yesNo = (value: boolean | null | undefined) => {
+function yesNo(value: boolean | null | undefined) {
   if (value === true) return 'Yes';
   if (value === false) return 'No';
   return 'Not recorded';
-};
+}
 
-const text = (value: unknown) => {
+function displayText(value: unknown) {
   if (value === null || value === undefined || value === '') return 'Not recorded';
   if (typeof value === 'string') return value;
   if (typeof value === 'boolean') return yesNo(value);
   if (typeof value === 'number') return String(value);
   return JSON.stringify(value);
-};
+}
 
-const formatDateTime = (value: string | null | undefined) => {
+function formatDateTime(value: string | null | undefined) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -102,9 +95,9 @@ const formatDateTime = (value: string | null | undefined) => {
     hour: 'numeric',
     minute: '2-digit',
   });
-};
+}
 
-const formatDate = (value: string | null | undefined) => {
+function formatDate(value: string | null | undefined) {
   if (!value) return 'Not recorded';
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
@@ -113,28 +106,30 @@ const formatDate = (value: string | null | undefined) => {
     day: 'numeric',
     year: 'numeric',
   });
-};
+}
+
+async function adminFetch<T>(adminKey: string, path: string): Promise<{ ok: boolean; status: number; data: T }> {
+  const headers: Record<string, string> = {};
+  if (adminKey.trim()) headers['x-admin-key'] = adminKey.trim();
+  const response = await fetch(`${API_BASE}${path}`, { headers });
+  const data = (await response.json().catch(() => ({}))) as T;
+  return { ok: response.ok, status: response.status, data };
+}
 
 function DetailRow({ label, value }: { label: string; value: unknown }) {
   return (
-    <div className="rounded-md bg-muted/50 px-3 py-2">
-      <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-words text-sm text-foreground">{text(value)}</dd>
+    <div className="detail-row">
+      <dt>{label}</dt>
+      <dd>{displayText(value)}</dd>
     </div>
   );
 }
 
-function DetailSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="space-y-2">
-      <h4 className="text-sm font-semibold text-foreground">{title}</h4>
-      <dl className="grid gap-2 sm:grid-cols-2">{children}</dl>
+    <section className="detail-section">
+      <h3>{title}</h3>
+      <dl>{children}</dl>
     </section>
   );
 }
@@ -148,53 +143,39 @@ function WaiverCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const detailId = `waiver-details-${row.waiver_id}`;
-  const displayName = row.participant_full_name || 'Unnamed participant';
+  const detailId = `waiver-${row.waiver_id}`;
+  const name = row.participant_full_name || 'Unnamed participant';
   const phone = row.participant_cell_phone || row.participant_home_phone;
   const cityState = [row.participant_city, row.participant_state].filter(Boolean).join(', ');
 
   return (
-    <Card className="overflow-hidden">
+    <article className="waiver-card">
       <button
         type="button"
-        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="waiver-summary"
         aria-expanded={expanded}
         aria-controls={detailId}
         onClick={onToggle}
       >
-        <CardHeader className="space-y-3 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <CardTitle className="truncate text-lg leading-tight">{displayName}</CardTitle>
-              <CardDescription className="mt-1">
-                Signed {formatDateTime(row.signed_at_utc)}
-              </CardDescription>
-            </div>
-            <span className="shrink-0 rounded-full border border-border px-2 py-1 text-xs font-medium text-muted-foreground">
-              {expanded ? 'Hide' : 'View'}
-            </span>
-          </div>
-          <div className="grid gap-2 text-sm text-muted-foreground">
-            <p className="truncate">{row.participant_email || 'No email recorded'}</p>
-            <p>{phone || 'No phone recorded'}</p>
-            {cityState && <p>{cityState}</p>}
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-muted px-2 py-1 text-muted-foreground">
-              Review: {row.review_confirm_accuracy ? 'confirmed' : 'not confirmed'}
-            </span>
-            <span className="rounded-full bg-muted px-2 py-1 text-muted-foreground">
-              Medical: {row.medical_history_id ? 'on file' : 'missing'}
-            </span>
-            <span className="rounded-full bg-muted px-2 py-1 text-muted-foreground">
-              Emergency: {row.emergency_contact_id ? 'on file' : 'missing'}
-            </span>
-          </div>
-        </CardHeader>
+        <span className="summary-topline">
+          <span>
+            <span className="summary-name">{name}</span>
+            <span className="summary-date">Signed {formatDateTime(row.signed_at_utc)}</span>
+          </span>
+          <span className="summary-action">{expanded ? 'Hide' : 'View'}</span>
+        </span>
+        <span className="summary-contact">{row.participant_email || 'No email recorded'}</span>
+        <span className="summary-contact">{phone || 'No phone recorded'}</span>
+        {cityState && <span className="summary-contact">{cityState}</span>}
+        <span className="summary-tags">
+          <span>Review: {row.review_confirm_accuracy ? 'confirmed' : 'not confirmed'}</span>
+          <span>Medical: {row.medical_history_id ? 'on file' : 'missing'}</span>
+          <span>Emergency: {row.emergency_contact_id ? 'on file' : 'missing'}</span>
+        </span>
       </button>
 
       {expanded && (
-        <CardContent id={detailId} className="space-y-5 border-t border-border p-4">
+        <div id={detailId} className="waiver-details">
           <DetailSection title="Participant">
             <DetailRow label="Full name" value={row.participant_full_name} />
             <DetailRow label="Date of birth" value={formatDate(row.participant_date_of_birth)} />
@@ -259,66 +240,64 @@ function WaiverCard({
             <DetailRow label="Content version" value={row.content_version} />
             <DetailRow label="Audit created" value={formatDateTime(row.audit_created_at)} />
           </DetailSection>
-        </CardContent>
+        </div>
       )}
-    </Card>
+    </article>
   );
 }
 
-export function WaiverViewer({ apiBase, adminKey, requireKey }: WaiverViewerProps) {
+export default function App() {
+  const [adminKey, setAdminKey] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [rows, setRows] = useState<WaiverDocument[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ kind: StatusKind; message: string } | null>({
+    kind: 'info',
+    message: 'Enter the admin key to load waivers.',
+  });
   const [loading, setLoading] = useState(false);
 
   const selectedSort = sortConfig[sortMode];
 
-  const loadWaivers = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      const keyError = requireKey();
-      if (keyError) {
-        setRows([]);
-        if (!opts?.silent) setMessage(keyError);
-        return;
-      }
+  const loadWaivers = useCallback(async (mode: SortMode = sortMode) => {
+    if (!adminKey.trim()) {
+      setRows([]);
+      setStatus({ kind: 'error', message: 'Admin key is required.' });
+      return;
+    }
 
-      setLoading(true);
-      if (!opts?.silent) setMessage(null);
+    setLoading(true);
+    setStatus(null);
 
-      const params = new URLSearchParams({
-        limit: '200',
-        offset: '0',
-        sort: selectedSort.sort,
-        order: selectedSort.order,
-      });
-      const { ok, status, data } = await adminFetch<{
-        ok?: boolean;
-        error?: string;
-        rows?: WaiverDocument[];
-        rowCount?: number;
-      }>(apiBase, adminKey, `/api/admin/reporting/views/waiver-documents?${params}`);
+    const nextSort = sortConfig[mode];
+    const params = new URLSearchParams({
+      limit: '200',
+      offset: '0',
+      sort: nextSort.sort,
+      order: nextSort.order,
+    });
+    const { ok, status: httpStatus, data } = await adminFetch<{
+      ok?: boolean;
+      error?: string;
+      rows?: WaiverDocument[];
+      rowCount?: number;
+    }>(adminKey, `/api/admin/reporting/views/waiver-documents?${params}`);
 
-      setLoading(false);
-      if (!ok) {
-        setRows([]);
-        setMessage(`Error ${status}: ${data.error ?? JSON.stringify(data)}`);
-        return;
-      }
+    setLoading(false);
+    if (!ok) {
+      setRows([]);
+      setStatus({ kind: 'error', message: `Error ${httpStatus}: ${data.error ?? JSON.stringify(data)}` });
+      return;
+    }
 
-      const nextRows = Array.isArray(data.rows) ? data.rows : [];
-      setRows(nextRows);
-      setExpandedId((current) => (current && nextRows.some((row) => row.waiver_id === current) ? current : null));
-      if (!opts?.silent) {
-        setMessage(`Loaded ${data.rowCount ?? nextRows.length} waiver(s), sorted by ${selectedSort.label.toLowerCase()}.`);
-      }
-    },
-    [adminKey, apiBase, requireKey, selectedSort.label, selectedSort.order, selectedSort.sort],
-  );
-
-  useEffect(() => {
-    void loadWaivers({ silent: !adminKey.trim() });
-  }, [adminKey, apiBase, loadWaivers, sortMode]);
+    const nextRows = Array.isArray(data.rows) ? data.rows : [];
+    setRows(nextRows);
+    setExpandedId((current) => (current && nextRows.some((row) => row.waiver_id === current) ? current : null));
+    setStatus({
+      kind: 'success',
+      message: `Loaded ${data.rowCount ?? nextRows.length} waiver(s), sorted by ${nextSort.label.toLowerCase()}.`,
+    });
+  }, [adminKey, sortMode]);
 
   const recentCount = useMemo(() => {
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -330,62 +309,77 @@ export function WaiverViewer({ apiBase, adminKey, requireKey }: WaiverViewerProp
   }, [rows]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <div className="space-y-2 border-b border-border pb-4">
-        <h2 className="text-xl font-semibold tracking-tight">Waiver viewer</h2>
-        <p className="text-sm text-muted-foreground">
-          Mobile-first waiver cards from <code className="rounded bg-muted px-1">view_waiver_documents</code>. Tap a
-          card to expand the full waiver details.
+    <main className="app-shell">
+      <header className="hero-card">
+        <p className="eyebrow">Waiver operations</p>
+        <h1>Waiver Viewer</h1>
+        <p>
+          Review submitted waivers from your phone without loading the full dashboard. Data comes from the admin API
+          backed by the existing Supabase <code>view_waiver_documents</code> view.
         </p>
-      </div>
+      </header>
 
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="waiver-sort">Sort waivers</Label>
-              <select
-                id="waiver-sort"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={sortMode}
-                onChange={(event) => setSortMode(event.target.value as SortMode)}
-              >
-                <option value="recent">Most recent first</option>
-                <option value="name">Alphabetical by name</option>
-              </select>
-            </div>
-            <Button type="button" variant="secondary" onClick={() => void loadWaivers()} disabled={loading}>
-              {loading ? 'Loading...' : 'Refresh'}
-            </Button>
+      <section className="controls-card" aria-labelledby="controls-heading">
+        <div>
+          <h2 id="controls-heading">Access and sorting</h2>
+          <p>{API_BASE}</p>
+        </div>
+
+        <label className="form-field" htmlFor="admin-key">
+          <span>Admin key</span>
+          <input
+            id="admin-key"
+            type="password"
+            value={adminKey}
+            autoComplete="off"
+            placeholder="x-admin-key"
+            onChange={(event) => setAdminKey(event.target.value)}
+          />
+        </label>
+
+        <label className="form-field" htmlFor="sort-mode">
+          <span>Sort waivers</span>
+          <select
+            id="sort-mode"
+            value={sortMode}
+            onChange={(event) => {
+              const nextMode = event.target.value as SortMode;
+              setSortMode(nextMode);
+              if (rows.length > 0) void loadWaivers(nextMode);
+            }}
+          >
+            <option value="recent">Most recent first</option>
+            <option value="name">Alphabetical by name</option>
+          </select>
+        </label>
+
+        <button type="button" className="primary-button" disabled={loading} onClick={() => void loadWaivers()}>
+          {loading ? 'Loading...' : 'Load waivers'}
+        </button>
+
+        <div className="stats-grid">
+          <div>
+            <span>Loaded</span>
+            <strong>{rows.length}</strong>
           </div>
-
-          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-            <div className="rounded-md bg-muted/60 p-3">
-              <p className="text-xs text-muted-foreground">Loaded</p>
-              <p className="text-lg font-semibold">{rows.length}</p>
-            </div>
-            <div className="rounded-md bg-muted/60 p-3">
-              <p className="text-xs text-muted-foreground">Last 24h</p>
-              <p className="text-lg font-semibold">{recentCount}</p>
-            </div>
-            <div className="rounded-md bg-muted/60 p-3 col-span-2 sm:col-span-1">
-              <p className="text-xs text-muted-foreground">Sort</p>
-              <p className="text-sm font-medium">{selectedSort.label}</p>
-            </div>
+          <div>
+            <span>Last 24h</span>
+            <strong>{recentCount}</strong>
           </div>
+          <div>
+            <span>Sort</span>
+            <strong>{selectedSort.label}</strong>
+          </div>
+        </div>
 
-          {message && (
-            <p
-              role="status"
-              className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
-            >
-              {message}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        {status && (
+          <p role="status" className={`status ${status.kind}`}>
+            {status.message}
+          </p>
+        )}
+      </section>
 
-      <div className="space-y-3">
+      <section className="waiver-list" aria-label="Waiver list">
         {rows.map((row) => (
           <WaiverCard
             key={row.waiver_id}
@@ -394,13 +388,11 @@ export function WaiverViewer({ apiBase, adminKey, requireKey }: WaiverViewerProp
             onToggle={() => setExpandedId((current) => (current === row.waiver_id ? null : row.waiver_id))}
           />
         ))}
-      </div>
+      </section>
 
       {!loading && adminKey.trim() && rows.length === 0 && (
-        <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No waivers found.
-        </p>
+        <p className="empty-state">No waivers found. Try refreshing or confirm the admin API can access Supabase.</p>
       )}
-    </div>
+    </main>
   );
 }

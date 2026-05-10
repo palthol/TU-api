@@ -10,6 +10,8 @@ if (!isLinuxX64) {
 
 const optionalNativeModules = [
   '@rollup/rollup-linux-x64-gnu',
+  'lightningcss-linux-x64-gnu',
+  '@tailwindcss/oxide-linux-x64-gnu',
 ]
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))

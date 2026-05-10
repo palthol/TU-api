@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { WaiverViewer } from '@/pages/WaiverViewer';
 
 /** Analysis views: most operationally useful first */
 export const ANALYSIS_VIEWS = [
@@ -36,8 +35,8 @@ export const ANALYSIS_VIEWS = [
   },
   {
     slug: 'waiver-documents' as const,
-    label: 'Waiver viewer',
-    hint: 'Mobile-first cards for signed waivers, participant details, medical, emergency, and audit data.',
+    label: 'Waiver documents',
+    hint: 'Signed waivers linked to participants and audits.',
   },
   {
     slug: 'orphan-waiver-summary' as const,
@@ -352,11 +351,7 @@ export default function App() {
             <PrimaryKpiConsole apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />
           )}
 
-          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug === 'waiver-documents' && (
-            <WaiverViewer apiBase={apiBase} adminKey={adminKey} requireKey={requireKey} />
-          )}
-
-          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug !== 'primary-kpis' && nav.slug !== 'waiver-documents' && (
+          {nav.kind === 'analysis' && currentAnalysisMeta && nav.slug !== 'primary-kpis' && (
             <DataExplorer
               apiBase={apiBase}
               adminKey={adminKey}

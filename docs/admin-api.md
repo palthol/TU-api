@@ -69,7 +69,7 @@ Minimal authenticated list endpoint for future waiver review UI work. Reads `vie
 
 **Response:** `{ "ok": true, "limit": 50, "offset": 0, "rowCount": N, "rows": [...] }`
 
-The dashboard waiver viewer currently uses the richer reporting endpoint for the same underlying Supabase view:
+The standalone waiver viewer app (`apps/waiver-viewer`) uses the richer reporting endpoint for the same underlying Supabase view:
 
 ```text
 GET /api/admin/reporting/views/waiver-documents?sort=signed_at_utc&order=desc
