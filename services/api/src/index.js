@@ -6,10 +6,13 @@ import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createWaiverPdfRouter } from './routes/waivers/pdf.js';
 import { createOrBindParticipantAccount } from './services/accounts/createOrBindParticipantAccount.js';
+import { recordWaiverSubmittedEvent } from './services/events/recordWaiverSubmittedEvent.js';
+import { notifyWaiverSubmitted } from './services/notifications/notifyWaiverSubmitted.js';
 import { registerAdminBillingRoutes } from './routes/admin/billing.js';
 import { registerAdminParticipantRoutes } from './routes/admin/participants.js';
 import { registerAdminReportingRoutes } from './routes/admin/reporting.js';
 import { registerAdminNotificationRoutes } from './routes/admin/notifications.js';
+import { registerAdminWaiverRoutes } from './routes/admin/waivers.js';
 
 const app = express();
 // CORS: allow configured origin or all in dev
@@ -358,8 +361,9 @@ app.post('/api/waivers/submit', async (req, res) => {
     const documentPdfUrl = `${pdfBucket}/${pdfKey}`; // store object path; generate signed URL when reading
 
     // Insert waiver row
-    {
-      const { error: wErr } = await supabase.from('waivers').insert({
+    const { data: insertedWaiver, error: wErr } = await supabase
+      .from('waivers')
+      .insert({
         id: waiverId,
         participant_id: participantId,
         consent_acknowledged: Boolean(legalConfirmation?.accepted_terms),
@@ -370,9 +374,14 @@ app.post('/api/waivers/submit', async (req, res) => {
         signature_image_url: signatureImageUrl,
         signature_vector_json: signature.vectorJson ?? [],
         review_confirm_accuracy: Boolean(review?.confirm_accuracy),
-      });
-      if (wErr) console.error('waivers.insert error', wErr);
+      })
+      .select('id, signed_at_utc')
+      .single();
+    if (wErr || !insertedWaiver?.id) {
+      console.error('waivers.insert error', wErr);
+      return res.status(500).json({ ok: false, errors: [{ field: 'waiver', messageKey: 'server.db_insert_waiver_failed' }] });
     }
+    const submittedAt = insertedWaiver.signed_at_utc ?? new Date().toISOString();
 
     // Upsert emergency contact if provided
     if (hasEmergencyContactDetails(emergencyContact)) {
@@ -413,7 +422,52 @@ app.post('/api/waivers/submit', async (req, res) => {
         locale,
         content_version,
       });
-      if (aErr) console.error('audit_trails.insert error', aErr);
+      if (aErr) {
+        console.error('audit_trails.insert error', aErr);
+        return res.status(500).json({ ok: false, errors: [{ field: 'audit', messageKey: 'server.db_insert_audit_failed' }] });
+      }
+    }
+
+    try {
+      const event = await recordWaiverSubmittedEvent({
+        supabase,
+        waiverId,
+        participantId,
+        accountId: accountBinding.accountId,
+        participant,
+        submittedAt,
+      });
+      console.info('waiver.event.recorded', {
+        eventName: event.eventName,
+        eventId: event.id,
+        waiverId,
+        participantId,
+      });
+    } catch (eventError) {
+      const message = eventError instanceof Error ? eventError.message : String(eventError);
+      console.error('waiver.event.record_failed', {
+        eventName: 'waiver.submitted',
+        waiverId,
+        participantId,
+        error: message,
+      });
+    }
+
+    try {
+      await notifyWaiverSubmitted({
+        waiverId,
+        participantId,
+        participant,
+        submittedAt,
+      });
+    } catch (notificationError) {
+      const message = notificationError instanceof Error ? notificationError.message : String(notificationError);
+      console.error('waiver.notification.unhandled_error', {
+        eventName: 'waiver.submitted',
+        waiverId,
+        participantId,
+        error: message,
+      });
     }
 
     return res.json({
@@ -505,6 +559,7 @@ registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminNotificationRoutes(adminBillingRouter, { supabase });
+registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
 app.listen(PORT, () => {

@@ -35,6 +35,7 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 - **API** — In `services/api`, add a `.env` with at least:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
+  - Optional notifications: `DISCORD_WEBHOOK_URL` and/or `SLACK_WEBHOOK_URL`
 
 Keep `.env` out of git (already in `.gitignore`).
 
