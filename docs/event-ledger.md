@@ -94,6 +94,7 @@ Examples:
   - `payment_allocation.deleted`
 - Waivers:
   - `waiver.created`
+  - `waiver.submitted`
   - `waiver.updated`
   - `waiver.deleted`
 - Attendance:
@@ -103,7 +104,19 @@ Examples:
 
 ---
 
-## 5) Reason Codes (Cause Layer)
+## 5) API-Created Business Events
+
+Some API workflows append business-level events after a successful state change.
+These complement trigger-captured row events and are intended as automation hooks.
+
+- `waiver.submitted`
+  - Written by `POST /api/waivers/submit` after the waiver and audit rows are saved.
+  - `entity_type`: `waiver`
+  - `entity_id`: waiver UUID
+  - `payload_meta.payload`: `full_name`, `phone`, `email`, `submitted_at`
+  - Used by the first notification automation for Slack/Discord webhook fan-out.
+
+## 6) Reason Codes (Cause Layer)
 
 `reason_code` is the controlled cause field (not freeform tags).
 
@@ -120,7 +133,7 @@ Reason codes are currently supplied via DB context setting (`app.reason_code`) w
 
 ---
 
-## 6) Query Patterns
+## 7) Query Patterns
 
 ### Participant timeline
 
@@ -173,7 +186,7 @@ order by occurred_at asc;
 
 ---
 
-## 7) Operational Notes
+## 8) Operational Notes
 
 - This is a foundation ledger, not a complete business-event ontology yet.
 - Some business actions are represented by multiple low-level events (for example, a conversion may emit subscription + charge events).
@@ -183,7 +196,7 @@ order by occurred_at asc;
 
 ---
 
-## 8) Next Step Recommendations
+## 9) Next Step Recommendations
 
 1. Add API middleware to set DB session context (`app.source_system`, `app.reason_code`, `app.correlation_id`) per request.
 2. Add timeline views:

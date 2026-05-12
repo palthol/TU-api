@@ -15,6 +15,7 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 | Path | Purpose |
 |------|--------|
 | `apps/waiver-v2` | Waiver signup UI (Vite + React) |
+| `apps/waiver-viewer` | Standalone mobile-first waiver review UI for trusted operators |
 | `apps/dashboard` | Admin dashboard (Vite + React): waivers, participants, accounts, plans, subscriptions, billing, sessions, entitlement status; uses same Supabase DB |
 | `services/api` | Express API: waiver PDF generation, can be extended for other endpoints |
 | `supabase/migrations` | Database schema, RLS, view/function security, indexes (0001 → 0009). See `docs/database-overview.md` for what to expect. |
@@ -35,6 +36,8 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 - **API** — In `services/api`, add a `.env` with at least:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
+  - Optional notifications: `DISCORD_WEBHOOK_URL` and/or `SLACK_WEBHOOK_URL`
+- **Waiver viewer app** — Set `VITE_API_BASE_URL` if the API is not at `http://localhost:3001`. For convenience on a private/trusted deployment, set `VITE_ADMIN_API_KEY` to the same value as the API service's `ADMIN_API_KEY`; because Vite exposes `VITE_*` values in the browser bundle, only do this when access to the viewer itself is restricted.
 
 Keep `.env` out of git (already in `.gitignore`).
 

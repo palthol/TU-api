@@ -2,6 +2,8 @@
 
 All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the optional `apps/dashboard` merge UI is for trusted operators only).
 
+The standalone waiver viewer can optionally set `VITE_ADMIN_API_KEY` to that same `ADMIN_API_KEY` so you do not type it on each page load. This is convenient but browser-visible; only use it when the viewer deployment is private/trusted.
+
 **Base URL:** same host as `services/api` (e.g. `http://localhost:3001`).
 
 ---
@@ -16,7 +18,7 @@ All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
-| **Discord** | Set **`DISCORD_WEBHOOK_URL`** on the API service for admin notification routes; messages are plain text (max ~2000 chars) |
+| **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
 
 ---
 
@@ -44,6 +46,37 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
 **Response:** `{ "ok": true }`
 
 **Errors:** `400` — `invalid_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+
+---
+
+### `POST /api/waivers/submit` (public)
+
+Stores the waiver submission and then records a **`waiver.submitted`** event in `event_ledger`. After persistence, the API sends a notification to each configured webhook provider:
+
+- `DISCORD_WEBHOOK_URL`
+- `SLACK_WEBHOOK_URL`
+
+Notification failures are logged server-side and do **not** fail an otherwise successful waiver submission. If neither webhook is configured, the API logs a warning and returns the normal waiver response.
+
+---
+
+### `GET /api/admin/waivers`
+
+Minimal authenticated list endpoint for future waiver review UI work. Reads `view_waiver_documents`.
+
+**Query:**
+
+- `limit` — optional, default `50`, max `100`
+- `offset` — optional, default `0`
+
+**Response:** `{ "ok": true, "limit": 50, "offset": 0, "rowCount": N, "rows": [...] }`
+
+The standalone waiver viewer app (`apps/waiver-viewer`) uses the richer reporting endpoint for the same underlying Supabase view:
+
+```text
+GET /api/admin/reporting/views/waiver-documents?sort=signed_at_utc&order=desc
+GET /api/admin/reporting/views/waiver-documents?sort=participant_full_name&order=asc
+```
 
 ---
 
