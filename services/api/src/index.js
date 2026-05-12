@@ -46,6 +46,13 @@ const yesNoToBoolean = (value) => {
   return null;
 };
 
+const splitStorageObjectPath = (value) => {
+  const [bucket, ...keyParts] = String(value || '').split('/');
+  const key = keyParts.join('/');
+  if (!bucket || !key) return null;
+  return { bucket, key };
+};
+
 const hasEmergencyContactDetails = (contact) => {
   if (!contact || typeof contact !== 'object') return false;
   return Boolean(
@@ -235,6 +242,11 @@ app.post('/api/waivers/submit', async (req, res) => {
       errors.push({ field: 'legal_confirmation.indemnification_initials', messageKey: 'validation.required' });
     if (!legalConfirmation?.media_initials) errors.push({ field: 'legal_confirmation.media_initials', messageKey: 'validation.required' });
     if (!signature?.pngDataUrl) errors.push({ field: 'signature', messageKey: 'validation.required' });
+    const signatureBase64 =
+      typeof signature?.pngDataUrl === 'string' && signature.pngDataUrl.includes(',')
+        ? signature.pngDataUrl.split(',')[1]
+        : null;
+    if (!signatureBase64) errors.push({ field: 'signature.pngDataUrl', messageKey: 'validation.invalid' });
     if (errors.length) return res.status(400).json({ ok: false, errors });
 
     // Ensure we have Supabase configured
@@ -313,7 +325,7 @@ app.post('/api/waivers/submit', async (req, res) => {
     const waiverId = crypto.randomUUID();
 
     // Upload signature image if storage configured
-    const png = Buffer.from(signature.pngDataUrl.split(',')[1], 'base64');
+    const png = Buffer.from(signatureBase64, 'base64');
     const signatureBucket = SIGNATURES_BUCKET; // keep private
     const signatureKey = `${waiverId}.png`;
     {
@@ -328,7 +340,7 @@ app.post('/api/waivers/submit', async (req, res) => {
     const pdfDoc = await PDFDocument.create();
     const page = pdfDoc.addPage([612, 792]); // Letter
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const { width, height } = page.getSize();
+    const { height } = page.getSize();
     const fontSize = 12;
     page.drawText('Temple Underground — Health Assessment & Waiver', { x: 50, y: height - 50, size: 16, font });
     page.drawText(`Name: ${participant.full_name}`, { x: 50, y: height - 90, size: fontSize, font });
@@ -338,7 +350,7 @@ app.post('/api/waivers/submit', async (req, res) => {
 
     // Signature image embed
     try {
-      const pngBytes = Buffer.from(signature.pngDataUrl.split(',')[1], 'base64');
+      const pngBytes = Buffer.from(signatureBase64, 'base64');
       const pngImage = await pdfDoc.embedPng(pngBytes);
       const pngDims = pngImage.scale(0.5);
       page.drawText('Signature:', { x: 50, y: height - 200, size: fontSize, font });
@@ -516,12 +528,19 @@ app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {
     if (aErr || !audit) return res.status(404).json({ ok: false, error: 'audit_not_found' });
 
     // Create signed URLs (5 minutes)
-    const [sigBucket, sigKey] = String(waiver.signature_image_url).split('/');
-    const [pdfBucket, pdfKey] = String(audit.document_pdf_url).split('/');
+    const signaturePath = splitStorageObjectPath(waiver.signature_image_url);
+    const pdfPath = splitStorageObjectPath(audit.document_pdf_url);
+    if (!signaturePath || !pdfPath) {
+      return res.status(500).json({ ok: false, error: 'invalid_storage_path' });
+    }
     const expiresIn = 60 * 5;
 
-    const { data: sigSigned, error: sigErr } = await supabase.storage.from(sigBucket).createSignedUrl(sigKey, expiresIn);
-    const { data: pdfSigned, error: pdfErr } = await supabase.storage.from(pdfBucket).createSignedUrl(pdfKey, expiresIn);
+    const { data: sigSigned, error: sigErr } = await supabase.storage
+      .from(signaturePath.bucket)
+      .createSignedUrl(signaturePath.key, expiresIn);
+    const { data: pdfSigned, error: pdfErr } = await supabase.storage
+      .from(pdfPath.bucket)
+      .createSignedUrl(pdfPath.key, expiresIn);
     if (sigErr || pdfErr) {
       console.error('signed url error', sigErr || pdfErr);
       return res.status(500).json({ ok: false, error: 'signed_url_failed' });
