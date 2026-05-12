@@ -74,6 +74,51 @@ Insert a **write-off** row (`charge_adjustments`). Reduces **net due** via `view
 
 ---
 
+### `GET /api/admin/billing/charge-discounts`
+
+Lists explicit discount line-items applied to a charge.
+
+**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/charge-discounts`
+
+Creates an explicit discount line-item (flat amount or percent) for a charge. Discount math is enforced so
+`affiliate credits + write-offs + discounts <= charge gross`.
+
+**Body (flat):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "flat",
+  "flat_amount_cents": 2500,
+  "label": "Loyalty discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Body (percent):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "percent",
+  "percent_basis_points": 1000,
+  "label": "Referral discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Response:** `{ "ok": true, "discount_id": "uuid", "applied_amount_cents": 2500, "net_due_cents": 7500 }`
+
+---
+
 ### `POST /api/admin/billing/payment-refunds`
 
 Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_allocations` FIFO, reopens `charges.status` from `paid` → `open` when allocations no longer cover net due. When cumulative refunds for the payment reach the full payment amount, `payments.status` is set to **`refunded`**.
@@ -253,6 +298,65 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ---
 
+### `POST /api/admin/billing/personal-finance-entries`
+
+Operator-owned rows in **`personal_finance_entries`**: quick cash log or lightweight invoice drafts. Does **not** replace `payments` / `receipts`; use formal billing routes when you need allocations against `charges`.
+
+**Body — cash received**
+
+```json
+{
+  "entry_kind": "cash_received",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "method": "cash",
+  "issued_by": "Your name",
+  "notes": "optional",
+  "account_id": "optional uuid",
+  "charge_id": "optional uuid"
+}
+```
+
+**`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other`.
+
+**Body — invoice**
+
+```json
+{
+  "entry_kind": "invoice",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "issued_by": "Your name",
+  "notes": "optional",
+  "due_at": "2026-04-23",
+  "invoice_status": "draft"
+}
+```
+
+If `due_at` is omitted, the API defaults to **tomorrow (UTC date)**. `invoice_status` defaults to `draft` and must be one of `draft`, `sent`, `paid`, `void`.
+
+**Response:** `{ "ok": true, "id": "<uuid>" }`
+
+---
+
+### `GET /api/admin/billing/personal-finance-entries`
+
+**Query:** `limit` (optional, default `100`, max `500`), `entry_kind` (optional: `cash_received` or `invoice`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/personal-finance-entries/:entryId/invoice-status`
+
+Updates **`invoice_status`** for an **`invoice`** entry only.
+
+**Body:** `{ "status": "sent" }` — one of `draft`, `sent`, `paid`, `void`
+
+**Response:** `{ "ok": true, "id": "<uuid>", "invoice_status": "sent" }`
+
+---
+
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
@@ -285,6 +389,46 @@ Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets 
 ```
 
 **Response:** `{ "ok": true }`
+
+---
+
+### `GET /api/admin/participants/search`
+
+Participant-first lookup for finance and admin operator flows. Searches existing participants by name, email, or phone, then returns linked accounts and a preferred `account_id` when available.
+
+**Query:**
+
+- `q` — required string, minimum 2 characters
+- `limit` — optional, default `8`, min `1`, max `25`
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "rows": [
+    {
+      "participant_id": "uuid",
+      "full_name": "Jane Doe",
+      "email": "jane@example.com",
+      "cell_phone": "555-111-2222",
+      "home_phone": null,
+      "account_count": 1,
+      "preferred_account_id": "uuid",
+      "accounts": [
+        {
+          "account_id": "uuid",
+          "role": "payer",
+          "account_status": "active",
+          "account_primary_contact_name": "Jane Doe"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Errors:** `400` — `query_min_length_2` (or DB/select errors)
 
 ---
 
@@ -368,6 +512,40 @@ Primary KPI summary for a month window used by dashboard cards.
   }
 }
 ```
+
+---
+
+### `GET /api/admin/finance/monthly-summary`
+
+Monthly finance summary contract for dashboard export and bookkeeping sustainability checks.
+
+**Query:**
+- `month` — optional `YYYY-MM`; defaults to current UTC month
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "summary": {
+    "month": "2026-04",
+    "month_start": "2026-04-01",
+    "month_end": "2026-04-30",
+    "revenue_cents": 185000,
+    "expenses_cents": 120000,
+    "operating_delta_cents": 65000,
+    "deficit_to_cover_cents": 0,
+    "owner_subsidy_cents": 0
+  }
+}
+```
+
+**Field definitions:**
+- `revenue_cents` — net member cash for month (from `view_analytics_revenue_waterfall_monthly.net_cash_collected_cents`)
+- `expenses_cents` — sum of `operating_expenses.amount_cents` for `expense_date` in month
+- `operating_delta_cents` — `revenue_cents - expenses_cents`
+- `deficit_to_cover_cents` — `max(0, expenses_cents - revenue_cents)`
+- `owner_subsidy_cents` — currently `0` placeholder until subsidy-specific storage is introduced
 
 ---
 
