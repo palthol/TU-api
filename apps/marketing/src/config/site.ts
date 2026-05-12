@@ -1,11 +1,11 @@
 export const siteConfig = {
   business: {
     name: 'Temple Underground',
-    shortTagline: 'Breathing. Conditioning. Skill.',
+    shortTagline: 'Brazilian Jiu Jitsu, Boxing, Combative Self-Defense.',
     phone: '(555) 214-9000',
     email: 'hello@templeunderground.com',
-    addressLine1: '123 Warrior Lane',
-    cityStateZip: 'Your City, ST 00000',
+    addressLine1: 'Morristown Training Area',
+    cityStateZip: 'Morristown, Tennessee',
     mapUrl: 'https://maps.google.com',
     websiteUrl: 'https://templeunderground.example.com',
   },
@@ -62,9 +62,9 @@ export const siteConfig = {
     familyNote: 'Ask about family plans and sibling scheduling support.',
   },
   seo: {
-    defaultTitle: 'Temple Underground | Boxing + BJJ + Conditioning',
+    defaultTitle: 'Temple Underground | BJJ, Boxing, and Combative Self-Defense',
     defaultDescription:
-      'Coach-led martial arts training built around breathing, conditioning, and skill development. Structured for beginners, adults, and competitors.',
+      'Morristown, Tennessee combat sports academy teaching striking and grappling as one system for combat sport, combative self-defense, and conditioning.',
     ogImage: '/og-temple-underground.jpg',
   },
 } as const

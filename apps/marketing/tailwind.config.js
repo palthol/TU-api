@@ -8,6 +8,7 @@ export default {
           ink: '#0B0C0E',
           charcoal: '#272727',
           snow: '#F2F2F2',
+          accent: '#E4B744',
           red: '#8E1E1E',
           bronze: '#9E6B4B',
           gold: '#D4AF37',
