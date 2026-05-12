@@ -222,5 +222,41 @@ create policy "admin_all_charge_discounts" on public.charge_discounts
 
 grant select, insert, update, delete on public.charge_discounts to service_role;
 
+-- Auditability guard:
+-- Once discount line-items exist for a charge, lock charge.amount_cents.
+-- Corrections must happen via explicit finance events (void/reissue/adjustment),
+-- not by silently mutating the original charge gross.
+create or replace function public.prevent_discounted_charge_amount_mutation()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if tg_op <> 'UPDATE' then
+    return new;
+  end if;
+
+  if old.amount_cents is distinct from new.amount_cents then
+    if exists (
+      select 1
+      from public.charge_discounts cd
+      where cd.charge_id = old.id
+      limit 1
+    ) then
+      raise exception
+        'cannot update charges.amount_cents for charge % after discounts exist; use explicit correction events',
+        old.id;
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_charges_lock_amount_when_discounted on public.charges;
+create trigger trg_charges_lock_amount_when_discounted
+  before update on public.charges
+  for each row execute function public.prevent_discounted_charge_amount_mutation();
+
 comment on table public.charge_discounts is
   'Explicit charge-level discounts (flat or percent) represented as auditable line items.';
