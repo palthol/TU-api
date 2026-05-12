@@ -10,7 +10,7 @@ const truncate = (value, limit) => {
 /**
  * Send a Slack incoming webhook notification with block formatting.
  */
-export async function sendSlackNotification(webhookUrl, { title, fields, footerText }) {
+export async function sendSlackNotification(webhookUrl, { title, fields, footerText }, { timeoutMs = 3000 } = {}) {
   if (!webhookUrl || typeof webhookUrl !== 'string') {
     throw new Error('slack_webhook_not_configured');
   }
@@ -45,14 +45,27 @@ export async function sendSlackNotification(webhookUrl, { title, fields, footerT
     });
   }
 
-  const res = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text: truncate(fallbackLines.join('\n'), SLACK_TEXT_LIMIT),
-      blocks,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        text: truncate(fallbackLines.join('\n'), SLACK_TEXT_LIMIT),
+        blocks,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`slack_timeout_${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const text = await res.text();

@@ -476,14 +476,12 @@ app.post('/api/waivers/submit', async (req, res) => {
       });
     }
 
-    try {
-      await notifyWaiverSubmitted({
-        waiverId,
-        participantId,
-        participant,
-        submittedAt,
-      });
-    } catch (notificationError) {
+    void notifyWaiverSubmitted({
+      waiverId,
+      participantId,
+      participant,
+      submittedAt,
+    }).catch((notificationError) => {
       const message = notificationError instanceof Error ? notificationError.message : String(notificationError);
       console.error('waiver.notification.unhandled_error', {
         eventName: 'waiver.submitted',
@@ -491,7 +489,7 @@ app.post('/api/waivers/submit', async (req, res) => {
         participantId,
         error: message,
       });
-    }
+    });
 
     return res.json({
       ok: true,

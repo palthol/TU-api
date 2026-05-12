@@ -280,27 +280,37 @@ export default function App() {
       sort: nextSort.sort,
       order: nextSort.order,
     });
-    const { ok, status: httpStatus, data } = await adminFetch<{
-      ok?: boolean;
-      error?: string;
-      rows?: WaiverDocument[];
-      rowCount?: number;
-    }>(adminKey, `/api/admin/reporting/views/waiver-documents?${params}`);
+    try {
+      const { ok, status: httpStatus, data } = await adminFetch<{
+        ok?: boolean;
+        error?: string;
+        rows?: WaiverDocument[];
+        rowCount?: number;
+      }>(adminKey, `/api/admin/reporting/views/waiver-documents?${params}`);
 
-    setLoading(false);
-    if (!ok) {
+      if (!ok) {
+        setRows([]);
+        setStatus({ kind: 'error', message: `Error ${httpStatus}: ${data.error ?? JSON.stringify(data)}` });
+        return;
+      }
+
+      const nextRows = Array.isArray(data.rows) ? data.rows : [];
+      setRows(nextRows);
+      setExpandedId((current) => (current && nextRows.some((row) => row.waiver_id === current) ? current : null));
+      setStatus({
+        kind: 'success',
+        message: `Loaded ${data.rowCount ?? nextRows.length} waiver(s), sorted by ${nextSort.label.toLowerCase()}.`,
+      });
+    } catch (error) {
+      console.error('waiver-viewer.loadWaivers failed', error);
       setRows([]);
-      setStatus({ kind: 'error', message: `Error ${httpStatus}: ${data.error ?? JSON.stringify(data)}` });
-      return;
+      setStatus({
+        kind: 'error',
+        message: 'Unable to load waivers right now. Check API connectivity and try again.',
+      });
+    } finally {
+      setLoading(false);
     }
-
-    const nextRows = Array.isArray(data.rows) ? data.rows : [];
-    setRows(nextRows);
-    setExpandedId((current) => (current && nextRows.some((row) => row.waiver_id === current) ? current : null));
-    setStatus({
-      kind: 'success',
-      message: `Loaded ${data.rowCount ?? nextRows.length} waiver(s), sorted by ${nextSort.label.toLowerCase()}.`,
-    });
   }, [adminKey, sortMode]);
 
   useEffect(() => {

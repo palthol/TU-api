@@ -40,6 +40,7 @@ export async function notifyWaiverSubmitted({
   participantId,
   participant,
   submittedAt,
+  timeoutMs = 3000,
   logger = console,
 }) {
   const message = buildWaiverSubmittedNotification({ waiverId, participant, submittedAt });
@@ -65,36 +66,37 @@ export async function notifyWaiverSubmitted({
     return [];
   }
 
-  const results = [];
-  for (const provider of providers) {
-    logger.info('waiver.notification.attempt', {
-      eventName: EVENT_NAME,
-      provider: provider.name,
-      waiverId,
-      participantId,
-    });
+  const results = await Promise.all(
+    providers.map(async (provider) => {
+      logger.info('waiver.notification.attempt', {
+        eventName: EVENT_NAME,
+        provider: provider.name,
+        waiverId,
+        participantId,
+      });
 
-    try {
-      await provider.send(provider.webhookUrl, message);
-      logger.info('waiver.notification.sent', {
-        eventName: EVENT_NAME,
-        provider: provider.name,
-        waiverId,
-        participantId,
-      });
-      results.push({ provider: provider.name, ok: true });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('waiver.notification.failed', {
-        eventName: EVENT_NAME,
-        provider: provider.name,
-        waiverId,
-        participantId,
-        error: errorMessage,
-      });
-      results.push({ provider: provider.name, ok: false, error: errorMessage });
-    }
-  }
+      try {
+        await provider.send(provider.webhookUrl, message, { timeoutMs });
+        logger.info('waiver.notification.sent', {
+          eventName: EVENT_NAME,
+          provider: provider.name,
+          waiverId,
+          participantId,
+        });
+        return { provider: provider.name, ok: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error('waiver.notification.failed', {
+          eventName: EVENT_NAME,
+          provider: provider.name,
+          waiverId,
+          participantId,
+          error: errorMessage,
+        });
+        return { provider: provider.name, ok: false, error: errorMessage };
+      }
+    }),
+  );
 
   return results;
 }

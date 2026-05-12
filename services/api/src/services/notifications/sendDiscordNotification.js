@@ -10,7 +10,7 @@ const truncate = (value, limit) => {
 /**
  * Send a structured Discord webhook notification.
  */
-export async function sendDiscordNotification(webhookUrl, { title, fields, footerText }) {
+export async function sendDiscordNotification(webhookUrl, { title, fields, footerText }, { timeoutMs = 3000 } = {}) {
   if (!webhookUrl || typeof webhookUrl !== 'string') {
     throw new Error('discord_webhook_not_configured');
   }
@@ -21,21 +21,34 @@ export async function sendDiscordNotification(webhookUrl, { title, fields, foote
     inline: Boolean(field.inline),
   }));
 
-  const res = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      embeds: [
-        {
-          title: truncate(title, DISCORD_TITLE_LIMIT),
-          color: 0x2563eb,
-          fields: embedFields,
-          footer: footerText ? { text: truncate(footerText, 2048) } : undefined,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        embeds: [
+          {
+            title: truncate(title, DISCORD_TITLE_LIMIT),
+            color: 0x2563eb,
+            fields: embedFields,
+            footer: footerText ? { text: truncate(footerText, 2048) } : undefined,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`discord_timeout_${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const text = await res.text();
