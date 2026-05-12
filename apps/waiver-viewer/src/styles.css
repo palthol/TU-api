@@ -104,16 +104,35 @@ code {
   padding: 1rem;
 }
 
-.form-field {
+.form-field,
+.configured-key-note {
   display: grid;
   gap: 0.4rem;
   margin-top: 1rem;
 }
 
-.form-field span {
+.form-field span,
+.configured-key-note span {
   color: #344054;
   font-size: 0.86rem;
   font-weight: 700;
+}
+
+.configured-key-note {
+  border: 1px solid #bfdbfe;
+  border-radius: 0.8rem;
+  background: #eff6ff;
+  padding: 0.75rem 0.85rem;
+}
+
+.configured-key-note strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.configured-key-note small {
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .form-field input,
@@ -331,6 +350,7 @@ code {
   }
 
   .form-field,
+  .configured-key-note,
   .primary-button {
     margin-top: 0;
   }

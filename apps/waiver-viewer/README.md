@@ -36,7 +36,19 @@ http://localhost:5176
 
 Set `VITE_API_BASE_URL` if the API is not at `http://localhost:3001`.
 
-Paste the API `ADMIN_API_KEY` into the app when prompted. The key is held only in memory for the current page session.
+By default, paste the API `ADMIN_API_KEY` into the app when prompted. The key is held only in memory for the current page session.
+
+## Optional environment-configured admin key
+
+For a private/trusted deployment, you can configure:
+
+```text
+VITE_ADMIN_API_KEY=<same value as the API service ADMIN_API_KEY>
+```
+
+When this is present, the viewer uses it automatically and does not ask for a runtime key.
+
+Important: `VITE_ADMIN_API_KEY` is a browser-exposed build variable. Anyone who can access the built viewer can inspect this value. Only use this for a locked-down/internal deployment. Do not use the Supabase service-role key here.
 
 ## MVP behavior
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 type SortMode = 'recent' | 'name';
 type StatusKind = 'info' | 'error' | 'success';
@@ -64,6 +64,7 @@ type WaiverDocument = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:3001';
+const CONFIGURED_ADMIN_KEY = import.meta.env.VITE_ADMIN_API_KEY?.trim() || '';
 
 const sortConfig: Record<SortMode, { label: string; sort: string; order: 'asc' | 'desc' }> = {
   recent: { label: 'Most recent', sort: 'signed_at_utc', order: 'desc' },
@@ -247,16 +248,19 @@ function WaiverCard({
 }
 
 export default function App() {
-  const [adminKey, setAdminKey] = useState('');
+  const [manualAdminKey, setManualAdminKey] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [rows, setRows] = useState<WaiverDocument[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ kind: StatusKind; message: string } | null>({
     kind: 'info',
-    message: 'Enter the admin key to load waivers.',
+    message: CONFIGURED_ADMIN_KEY ? 'Admin key is configured from the app environment.' : 'Enter the admin key to load waivers.',
   });
   const [loading, setLoading] = useState(false);
+  const autoLoadedRef = useRef(false);
 
+  const adminKey = CONFIGURED_ADMIN_KEY || manualAdminKey;
+  const hasConfiguredAdminKey = CONFIGURED_ADMIN_KEY.length > 0;
   const selectedSort = sortConfig[sortMode];
 
   const loadWaivers = useCallback(async (mode: SortMode = sortMode) => {
@@ -299,6 +303,12 @@ export default function App() {
     });
   }, [adminKey, sortMode]);
 
+  useEffect(() => {
+    if (!hasConfiguredAdminKey || autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
+    void loadWaivers();
+  }, [hasConfiguredAdminKey, loadWaivers]);
+
   const recentCount = useMemo(() => {
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
     return rows.filter((row) => {
@@ -325,17 +335,25 @@ export default function App() {
           <p>{API_BASE}</p>
         </div>
 
-        <label className="form-field" htmlFor="admin-key">
-          <span>Admin key</span>
-          <input
-            id="admin-key"
-            type="password"
-            value={adminKey}
-            autoComplete="off"
-            placeholder="x-admin-key"
-            onChange={(event) => setAdminKey(event.target.value)}
-          />
-        </label>
+        {hasConfiguredAdminKey ? (
+          <div className="configured-key-note">
+            <span>Admin key</span>
+            <strong>Configured from environment</strong>
+            <small>Using VITE_ADMIN_API_KEY for this deployed viewer.</small>
+          </div>
+        ) : (
+          <label className="form-field" htmlFor="admin-key">
+            <span>Admin key</span>
+            <input
+              id="admin-key"
+              type="password"
+              value={manualAdminKey}
+              autoComplete="off"
+              placeholder="x-admin-key"
+              onChange={(event) => setManualAdminKey(event.target.value)}
+            />
+          </label>
+        )}
 
         <label className="form-field" htmlFor="sort-mode">
           <span>Sort waivers</span>
