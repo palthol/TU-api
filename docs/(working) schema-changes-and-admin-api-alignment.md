@@ -26,108 +26,97 @@ Previous doc baseline: `docs/(working) operations-table-process-map.md`.
 ### Added process areas not captured in previous doc
 
 1. **Charge Adjustments / Write-Offs**
-   - Added table: `charge_adjustments`
-   - Added enforcement triggers/functions:
-     - `enforce_charge_adjustment_totals()`
-     - `enforce_affiliate_application_totals()`
-   - Impact: net due now explicitly supports write-offs in addition to affiliate credits.
-
+  - Added table: `charge_adjustments`
+  - Added enforcement triggers/functions:
+    - `enforce_charge_adjustment_totals()`
+    - `enforce_affiliate_application_totals()`
+  - Impact: net due now explicitly supports write-offs in addition to affiliate credits.
 2. **Payment Refund Operations**
-   - Added table: `payment_refunds`
-   - Added RPC: `record_payment_refund(...)`
-   - Behavior:
-     - Refund creates `payment_refunds` row (idempotency supported by `idempotency_key`).
-     - Refund reduces `payment_allocations` FIFO.
-     - Charges can reopen (`paid` -> `open`) when allocations fall below net due.
-     - Full cumulative refund sets `payments.status = 'refunded'` (added in migration `0007`).
-
+  - Added table: `payment_refunds`
+  - Added RPC: `record_payment_refund(...)`
+  - Behavior:
+    - Refund creates `payment_refunds` row (idempotency supported by `idempotency_key`).
+    - Refund reduces `payment_allocations` FIFO.
+    - Charges can reopen (`paid` -> `open`) when allocations fall below net due.
+    - Full cumulative refund sets `payments.status = 'refunded'` (added in migration `0007`).
 3. **Participant Merge / Canonicalization**
-   - Added columns on `participants`:
-     - `merged_into_participant_id`
-     - `merged_at`
-   - Added RPC: `merge_participants(...)`
-   - Behavior: moves references to canonical participant and marks duplicate as merged (no hard delete).
-   - `0007` improvement: dedupes conflicting active `affiliate_referrals` rows after merge.
-
+  - Added columns on `participants`:
+    - `merged_into_participant_id`
+    - `merged_at`
+  - Added RPC: `merge_participants(...)`
+  - Behavior: moves references to canonical participant and marks duplicate as merged (no hard delete).
+  - `0007` improvement: dedupes conflicting active `affiliate_referrals` rows after merge.
 4. **Subscription Upgrade with Proration**
-   - Added RPC: `upgrade_subscription_prorated(...)`
-   - Behavior: upgrade-only flow (new plan must be higher price), creates prorated delta charge, updates subscription plan.
-
+  - Added RPC: `upgrade_subscription_prorated(...)`
+  - Behavior: upgrade-only flow (new plan must be higher price), creates prorated delta charge, updates subscription plan.
 5. **Monitoring Views**
-   - Added views:
-     - `view_orphan_waivers`
-     - `view_orphan_waiver_summary`
-   - Operational use: identify waiver participants not linked into billing account membership.
-
+  - Added views:
+    - `view_orphan_waivers`
+    - `view_orphan_waiver_summary`
+  - Operational use: identify waiver participants not linked into billing account membership.
 6. **Pay-Per-Class Operations**
-   - Added table: `class_charge_links`
-   - Added RPCs:
-     - `create_pay_per_class_charge(...)`
-     - `upgrade_per_class_to_monthly(...)`
-   - Behavior:
-     - manual class charge creation from `attendance_records` (`present` only)
-     - idempotency at attendance level via unique link
-     - conversion from `per_session` to `monthly` with no credit carryover
-
+  - Added table: `class_charge_links`
+  - Added RPCs:
+    - `create_pay_per_class_charge(...)`
+    - `upgrade_per_class_to_monthly(...)`
+  - Behavior:
+    - manual class charge creation from `attendance_records` (`present` only)
+    - idempotency at attendance level via unique link
+    - conversion from `per_session` to `monthly` with no credit carryover
 7. **Explicit Conversion Policy Mode**
-   - Upgraded RPC signature:
-     - `upgrade_per_class_to_monthly(..., p_conversion_policy text)`
-   - Allowed values:
-     - `no_credit`
-     - `manual_writeoff_allowed`
-   - Impact:
-     - makes admin intent explicit and auditable in notes
-     - avoids semantic confusion between monthly upgrade paths
-
+  - Upgraded RPC signature:
+    - `upgrade_per_class_to_monthly(..., p_conversion_policy text)`
+  - Allowed values:
+    - `no_credit`
+    - `manual_writeoff_allowed`
+  - Impact:
+    - makes admin intent explicit and auditable in notes
+    - avoids semantic confusion between monthly upgrade paths
 8. **Event Ledger Foundation**
-   - Added tables:
-     - `event_ledger` (append-only event store)
-     - `event_reason_codes` (controlled cause vocabulary)
-     - `event_capture_config` (capture toggles/settings)
-   - Added helpers:
-     - `private.append_event(...)`
-     - `private.event_capture_enabled(...)`
-     - `public.capture_event_ledger_phase1()`
-   - Added phase-1 triggers for:
-     - `participants`, `subscriptions`, `charges`, `payments`,
-       `payment_allocations`, `waivers`, `attendance_records`
-   - Impact:
-     - historical causality and timeline reconstruction are now supported at DB level.
-
+  - Added tables:
+    - `event_ledger` (append-only event store)
+    - `event_reason_codes` (controlled cause vocabulary)
+    - `event_capture_config` (capture toggles/settings)
+  - Added helpers:
+    - `private.append_event(...)`
+    - `private.event_capture_enabled(...)`
+    - `public.capture_event_ledger_phase1()`
+  - Added phase-1 triggers for:
+    - `participants`, `subscriptions`, `charges`, `payments`,
+    `payment_allocations`, `waivers`, `attendance_records`
+  - Impact:
+    - historical causality and timeline reconstruction are now supported at DB level.
 9. **Phase 2 High-Impact Ops/Finance Views (DB-only)**
-   - Added views:
-     - `view_ops_today_sessions`
-     - `view_ops_upcoming_access_issues`
-     - `view_ops_waiver_compliance_gaps`
-     - `view_ops_ar_aging`
-     - `view_ops_unallocated_or_partial_payment_risk`
-   - Impact:
-     - adds actionable queues for front-desk logistics, access risk, compliance risk,
-       AR prioritization, and billing allocation integrity.
-
+  - Added views:
+    - `view_ops_today_sessions`
+    - `view_ops_upcoming_access_issues`
+    - `view_ops_waiver_compliance_gaps`
+    - `view_ops_ar_aging`
+    - `view_ops_unallocated_or_partial_payment_risk`
+  - Impact:
+    - adds actionable queues for front-desk logistics, access risk, compliance risk,
+    AR prioritization, and billing allocation integrity.
 10. **Phase 3 Analytics Views (DB-ready)**
-   - Added analytics views:
-     - `view_analytics_revenue_waterfall_monthly`
-     - `view_analytics_subscription_movement`
-     - `view_analytics_attendance_utilization_weekly`
-     - `view_analytics_entitlement_burn`
-     - `view_analytics_affiliate_program_performance`
-     - `view_analytics_data_hygiene`
-   - Impact:
-     - expands decision-support from ops queues into monthly/weekly trend analytics.
+  - Added analytics views:
+    - `view_analytics_revenue_waterfall_monthly`
+    - `view_analytics_subscription_movement`
+    - `view_analytics_attendance_utilization_weekly`
+    - `view_analytics_entitlement_burn`
+    - `view_analytics_affiliate_program_performance`
+    - `view_analytics_data_hygiene`
+  - Impact:
+    - expands decision-support from ops queues into monthly/weekly trend analytics.
 
 ### Changed logic compared to earlier schema behavior
 
 1. **Entitlement remaining math fixed (`0007`)**
-   - `participant_entitlement_status.remaining` now aligns with `has_availability` for limited plans:
-   - Remaining = `max(0, limit - usage - credits_available)`.
-
+  - `participant_entitlement_status.remaining` now aligns with `has_availability` for limited plans:
+  - Remaining = `max(0, limit - usage - credits_available)`.
 2. **Affiliate credit application headroom fixed (`0007`)**
-   - `apply_credits_to_account(...)` now caps by `view_charge_net.net_due_cents` (write-off aware), not gross charge amount.
-
+  - `apply_credits_to_account(...)` now caps by `view_charge_net.net_due_cents` (write-off aware), not gross charge amount.
 3. **Function exposure hardened (`0007`)**
-   - Internal billing/affiliate functions revoked from `public`, `anon`, `authenticated`.
-   - Execute privilege granted to `service_role` only.
+  - Internal billing/affiliate functions revoked from `public`, `anon`, `authenticated`.
+  - Execute privilege granted to `service_role` only.
 
 ### Existing groups from prior doc that still remain valid
 
@@ -232,16 +221,18 @@ Reference doc: `docs/admin-api.md`.
 
 ### Endpoint coverage table
 
-| Endpoint | Schema objects required | Match status | Notes |
-|---|---|---|---|
-| `GET /api/admin/waivers/:id` | `waivers`, `audit_trails` (+ storage URLs in columns) | **Match** | Route reads waiver + latest audit and signs URLs; schema supports it. |
-| `POST /api/admin/billing/charge-adjustments` | `charge_adjustments`, trigger checks, `view_charge_net` downstream | **Match** | Write-off-only design matches constraint `adjustment_type in ('write_off')`. |
-| `POST /api/admin/billing/payment-refunds` | `payment_refunds`, `payment_allocations`, `charges`, `view_charge_net`, `record_payment_refund(...)` | **Match** | Behavior in doc matches RPC, including idempotency and status transition to `refunded` on full refund. |
-| `POST /api/admin/billing/subscription-upgrade` | `subscriptions`, `plan_definitions`, `charges`, `upgrade_subscription_prorated(...)` | **Match** | Upgrade-only and prorated delta logic exist in RPC. |
-| `POST /api/admin/billing/per-class/charge-from-attendance` | `attendance_records`, `sessions`, `subscriptions`, `plan_definitions`, `charges`, `class_charge_links`, `create_pay_per_class_charge(...)` | **Match** | Manual-only, `present`-only, idempotent per attendance row. |
-| `POST /api/admin/billing/per-class/upgrade-to-monthly` | `subscriptions`, `plan_definitions`, `charges`, `upgrade_per_class_to_monthly(...)` | **Match** | Converts active `per_session` to monthly with explicit `conversion_policy` mode; still no automatic deduction. |
-| `POST /api/admin/participants/merge` | `merge_participants(...)`, participant merge columns, dependent FK tables | **Match** | RPC includes FK repointing + merged marker behavior and affiliate dedupe fix. |
-| `GET /api/admin/reporting/views/:slug` | `view_member_payment_board`, `view_member_payment_reminders`, `view_orphan_waivers`, `view_orphan_waiver_summary`, `view_charge_net`, `view_waiver_documents`, `participant_entitlement_status` | **Match** | All documented slugs map to schema objects that exist. |
+
+| Endpoint                                                   | Schema objects required                                                                                                                                                                         | Match status | Notes                                                                                                          |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
+| `GET /api/admin/waivers/:id`                               | `waivers`, `audit_trails` (+ storage URLs in columns)                                                                                                                                           | **Match**    | Route reads waiver + latest audit and signs URLs; schema supports it.                                          |
+| `POST /api/admin/billing/charge-adjustments`               | `charge_adjustments`, trigger checks, `view_charge_net` downstream                                                                                                                              | **Match**    | Write-off-only design matches constraint `adjustment_type in ('write_off')`.                                   |
+| `POST /api/admin/billing/payment-refunds`                  | `payment_refunds`, `payment_allocations`, `charges`, `view_charge_net`, `record_payment_refund(...)`                                                                                            | **Match**    | Behavior in doc matches RPC, including idempotency and status transition to `refunded` on full refund.         |
+| `POST /api/admin/billing/subscription-upgrade`             | `subscriptions`, `plan_definitions`, `charges`, `upgrade_subscription_prorated(...)`                                                                                                            | **Match**    | Upgrade-only and prorated delta logic exist in RPC.                                                            |
+| `POST /api/admin/billing/per-class/charge-from-attendance` | `attendance_records`, `sessions`, `subscriptions`, `plan_definitions`, `charges`, `class_charge_links`, `create_pay_per_class_charge(...)`                                                      | **Match**    | Manual-only, `present`-only, idempotent per attendance row.                                                    |
+| `POST /api/admin/billing/per-class/upgrade-to-monthly`     | `subscriptions`, `plan_definitions`, `charges`, `upgrade_per_class_to_monthly(...)`                                                                                                             | **Match**    | Converts active `per_session` to monthly with explicit `conversion_policy` mode; still no automatic deduction. |
+| `POST /api/admin/participants/merge`                       | `merge_participants(...)`, participant merge columns, dependent FK tables                                                                                                                       | **Match**    | RPC includes FK repointing + merged marker behavior and affiliate dedupe fix.                                  |
+| `GET /api/admin/reporting/views/:slug`                     | `view_member_payment_board`, `view_member_payment_reminders`, `view_orphan_waivers`, `view_orphan_waiver_summary`, `view_charge_net`, `view_waiver_documents`, `participant_entitlement_status` | **Match**    | All documented slugs map to schema objects that exist.                                                         |
+
 
 ### Conventions in `docs/admin-api.md` vs schema
 
@@ -271,10 +262,13 @@ The previous operations map remains directionally correct for core flows, but it
 - orphan-waiver monitoring.
 
 Event ledger documentation:
+
 - `docs/event-ledger.md`
 
 Phase 2 view documentation:
+
 - `docs/phase2-high-impact-views.md`
 
 Phase 3 analytics documentation:
+
 - `docs/phase3-analytics-views.md`
