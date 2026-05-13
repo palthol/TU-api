@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
+import ExperienceToSystemSection from '../components/ExperienceToSystemSection'
 import FAQAccordion from '../components/FAQAccordion'
 import SectionHeader from '../components/SectionHeader'
 import TestimonialCard from '../components/TestimonialCard'
@@ -10,25 +11,25 @@ const faqs = [
   {
     question: 'Do I need experience to start?',
     answer:
-      'No. We coach beginners every week. You get clear structure, partner guidance, and a progression that matches your current level.',
+      'No. Beginners are coached every session with clear structure, partner guidance, and progressions that match where you are today.',
   },
   {
-    question: 'Is this just hard conditioning?',
+    question: 'Is training only for competitors?',
     answer:
-      'Conditioning is one pillar. We combine it with breathing control and real technical skill so your fitness supports performance.',
+      'Competition is one path, not the only one. Many members train for confidence, resilience, and self-defense while still learning the same integrated combat system.',
   },
   {
-    question: 'Can I train without competing?',
+    question: 'How does conditioning fit in?',
     answer:
-      'Absolutely. Many members train for confidence, stress control, and long-term health while still learning authentic martial arts.',
+      'Combat conditioning supports your striking and grappling—it is not separate “random hard workouts.” Breath, mobility, and durability are trained so they transfer to real movement.',
   },
 ]
 
 export default function HomePage() {
   useSeo({
-    title: 'Temple Underground | Brazilian Jiu Jitsu, Boxing, and Combative Self-Defense',
+    title: 'Temple Underground | Vale Tudo-style Jiu-Jitsu & Integrated Combat Training',
     description:
-      'Temple Underground in Morristown, Tennessee teaches Brazilian Jiu Jitsu, boxing, and combative self-defense as one integrated system.',
+      'Morristown, Tennessee academy teaching Vale Tudo-style Jiu-Jitsu: striking, grappling, and combat conditioning as one integrated combat system.',
     pathname: '/',
   })
 
@@ -60,29 +61,23 @@ export default function HomePage() {
             </div>
           </motion.div>
           <motion.p
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.08 }}
-            className="mx-auto mt-5 max-w-3xl text-base font-medium uppercase tracking-[0.08em] text-temple-snow/90 sm:text-xl"
+            className="mx-auto mt-6 max-w-2xl text-pretty text-base leading-7 text-temple-snow/90 sm:text-lg sm:leading-8"
           >
-            Brazilian Jiu Jitsu, Boxing, <span className="text-temple-accent">Combative Self-Defense</span>
+            Temple Underground teaches{' '}
+            <span className="font-semibold text-temple-accent">Vale Tudo-style Jiu-Jitsu</span>
+            —striking, grappling, and combat conditioning—as one integrated combat system for the purpose of self-defense, competition, and
+            self-improvement.
           </motion.p>
           <motion.p
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.1 }}
-            className="mx-auto mt-6 max-w-3xl text-base leading-7 text-temple-snow/84 sm:text-lg"
+            transition={{ duration: 0.55, delay: 0.12 }}
+            className="mx-auto mt-4 max-w-xl text-xs font-medium uppercase tracking-[0.14em] text-temple-snow/65 sm:text-sm"
           >
-            We are a unique combat sports academy that teaches striking, grappling, and submission as a single system. Our classes are
-            built to produce calm, durable, and exceptionally well-rounded fighters for combat sport and real-world self-defense.
-          </motion.p>
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.13 }}
-            className="mx-auto mt-5 max-w-2xl text-sm uppercase tracking-[0.12em] text-temple-snow/72"
-          >
-            Five days a week training - Sunday through Thursday
+            We have classes Sunday through Thursday
           </motion.p>
           <div className="mt-9 flex flex-wrap justify-center gap-3">
             <Link
@@ -101,122 +96,127 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="container-shell py-16 sm:py-20">
-        <SectionHeader
-          eyebrow="Why Temple Underground"
-          title="High-level instruction with practical outcomes"
-          description="Our coaching standard is built on proven competitive experience and practical teaching that develops well-rounded fighters."
-        />
-        <div className="mt-8 grid gap-5 lg:grid-cols-2">
-          <article className="hover-lift-card rounded-xl border border-temple-accent/35 bg-temple-ink/70 p-6 shadow-soft">
-            <p className="info-chip">Brazilian Jiu Jitsu & Submission Grappling</p>
-            <h3 className="mt-3 text-2xl font-semibold tracking-tight text-temple-snow">
-              <span className="key-stat">Nearly 70 Gold Medals</span> Since 2020
-            </h3>
-            <p className="mt-3 text-sm leading-7 text-temple-snow/84">
-              Team results across IBJJF, NAGA, Fuji, AGF, Chewjitsu, Good Fight, and Newbreed reflect a competition-tested coaching
-              environment focused on repeatable high-level outcomes.
-            </p>
-            <ul className="hover-list mt-4 space-y-2 text-sm text-temple-snow/84">
-              <li>
-                - <span className="key-phrase">Medals:</span> Nearly 70 gold medals from 2020 to present
-              </li>
-              <li>
-                - <span className="key-phrase">Victories:</span> Consistent wins across regional and national
-                tournament circuits
-              </li>
-              <li>
-                - <span className="key-phrase">Leadership:</span> IBJJF-assessed coaching with world, pan-American, and regional
-                championship pedigree
-              </li>
-            </ul>
-          </article>
-          <article className="hover-lift-card rounded-xl border border-temple-accent/35 bg-temple-ink/70 p-6 shadow-soft">
-            <p className="info-chip">Boxing Accolades</p>
-            <h3 className="mt-3 text-2xl font-semibold tracking-tight text-temple-snow">
-              <span className="key-stat">USA Boxing Experience</span> + Junior Olympic Pathway
-            </h3>
-            <p className="mt-3 text-sm leading-7 text-temple-snow/84">
-              Temple Underground coaching draws from competitive boxing and officiating experience in USA Boxing. The academy has produced
-              Tennessee representation in the 2018 Southeastern Regional Junior Olympic Trials.
-            </p>
-            <ul className="hover-list mt-4 space-y-2 text-sm text-temple-snow/84">
-              <li>
-                - <span className="key-phrase">Competition pipeline:</span> Athlete development through the Junior Olympic qualifying
-                pathway in the Southeastern District
-              </li>
-              <li>
-                - <span className="key-phrase">Officiating perspective:</span> Coaching informed by ring-side USA Boxing standards and
-                decision criteria
-              </li>
-              <li>
-                - <span className="key-phrase">Instruction focus:</span> Ring-tested fundamentals, tactical discipline, and performance
-                under pressure
-              </li>
-            </ul>
-          </article>
-        </div>
-      </section>
+      <ExperienceToSystemSection />
 
-      <section className="container-shell py-16">
-        <SectionHeader
-          eyebrow="Our System"
-          title="One singular integrated combat program"
-          description="Temple Underground teaches striking, grappling, and conditioning as one coherent system instead of separate, disconnected classes."
-        />
-        <div className="hover-lift-card mt-6 rounded-xl border border-temple-charcoal bg-temple-charcoal/35 p-6 sm:p-8">
-          <h3 className="text-2xl font-semibold text-temple-snow">Vale Tudo BJJ System</h3>
-          <p className="mt-3 max-w-4xl text-sm leading-7 text-temple-snow/84">
-            We teach pugilistic submission fighting as a <span className="key-phrase">single system</span>. Instead of separating
-            striking, grappling, and conditioning into unrelated classes, we train how these skills connect in real time so students become
-            complete fighters with practical self-defense ability.
-          </p>
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
-            <article className="hover-lift-card rounded-lg border border-temple-charcoal bg-temple-ink/55 p-5">
-              <p className="info-chip">What we practice</p>
-              <ul className="hover-list mt-3 space-y-2 text-sm text-temple-snow/82">
-                <li>- Brazilian Jiu Jitsu (gi + no-gi)</li>
-                <li>- Boxing fundamentals and applied striking</li>
-                <li>- Wrestling and takedown integration</li>
-                <li>- Judo entries and off-balancing concepts</li>
-                <li>- Combat sports conditioning</li>
-                <li>- Combative self-defense scenarios</li>
-              </ul>
-            </article>
-            <article className="hover-lift-card rounded-lg border border-temple-charcoal bg-temple-ink/55 p-5">
-              <p className="info-chip">Why we train this way</p>
-              <ul className="hover-list mt-3 space-y-2 text-sm text-temple-snow/82">
-                <li>- Build fighters who can strike, clinch, and grapple without disconnects</li>
-                <li>- Develop better decisions under fatigue and pressure</li>
-                <li>- Improve carryover from combat sport to practical self-defense</li>
-                <li>- Use judo-based balance breaking to improve wrestling and submission transitions</li>
-                <li>- Keep training realistic, structured, and coach-led from day one</li>
-              </ul>
-            </article>
+      <section className="border-t border-temple-charcoal/60 bg-temple-charcoal/15">
+        <div className="container-shell py-16 sm:py-20">
+          <SectionHeader
+            eyebrow="Combat conditioning"
+            title="Fitness that supports fighting—not noise for its own sake"
+            description="Conditioning is the physical development side of the same system: we build strength, mobility, and durability so striking and grappling hold up under real stress."
+          />
+
+          <div className="mx-auto mt-8 max-w-3xl space-y-4 text-sm leading-7 text-temple-snow/82 sm:text-[15px] sm:leading-7">
+            <p>
+              We train across <span className="key-phrase">isometric</span>, <span className="key-phrase">isokinetic</span>,{' '}
+              <span className="key-phrase">eccentric</span>, <span className="key-phrase">plyometric</span>, and{' '}
+              <span className="key-phrase">anaerobic</span> qualities. The emphasis stays on{' '}
+              <span className="key-phrase">isometrics</span> and <span className="key-phrase">targeted plyometrics</span> so power shows up
+              where you actually need it—not as random fatigue for its own sake.
+            </p>
+            <p>
+              Most work is <span className="key-phrase">bodyweight-first</span> so sessions stay scalable across levels. The facility also
+              has <span className="key-phrase">Olympic barbells and plates</span> when loaded work fits the progression. Day to day, we
+              prioritize <span className="key-phrase">calisthenics</span> and <span className="key-phrase">isometric conditioning</span>{' '}
+              over everything else.
+            </p>
+          </div>
+
+          <div className="mt-8 grid gap-5 lg:grid-cols-2">
+            <div className="rounded-xl border border-temple-charcoal bg-temple-ink/60 p-5 sm:p-6">
+              <p className="info-chip">Breathing</p>
+              <p className="mt-3 text-sm leading-7 text-temple-snow/82">
+                Breathing is treated as its own continuous skill: it stays deliberate whenever effort spikes, and it runs through all of
+                combat conditioning the same way it has to run while you <span className="key-phrase">strike</span> and{' '}
+                <span className="key-phrase">grapple</span>. If breath is unfocused, the work stops transferring—so we keep it central,
+                not optional.
+              </p>
+            </div>
+            <div className="rounded-xl border border-temple-charcoal bg-temple-ink/60 p-5 sm:p-6">
+              <p className="info-chip">Strength & structure</p>
+              <p className="mt-3 text-sm leading-7 text-temple-snow/82">
+                For a base of strength and <span className="key-phrase">relative strength</span>, we lean on isometrics: stabilize
+                positions for time, prioritize <span className="key-phrase">functional postures</span> that resemble grappling shapes, and
+                build the kind of structure you use to manage frames and distance—so conditioning reinforces the positions you fight from,
+                not generic gym poses.
+              </p>
+            </div>
+            <div className="rounded-xl border border-temple-charcoal bg-temple-ink/60 p-5 sm:p-6 lg:col-span-2">
+              <p className="info-chip">Mobility, proprioception & coordination</p>
+              <p className="mt-3 text-sm leading-7 text-temple-snow/82">
+                To support mobility, body awareness, and coordination, <span className="key-phrase">yoga</span>,{' '}
+                <span className="key-phrase">shadowboxing</span>, and <span className="key-phrase">shadow wrestling</span> stay core
+                activities—simple on paper, demanding in practice—because they connect timing, eyes, feet, and posture without turning
+                every session into reckless impact volume.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="container-shell py-16">
+      <section className="container-shell py-16 sm:py-20">
         <SectionHeader
-          eyebrow="Curriculum Leadership"
-          title="Program architecture overseen by Professor Singh"
-          description="Our curriculum for combat skills, combat sport, combative self-defense, and combat conditioning is composed and overseen by Professor Singh."
+          eyebrow="Values"
+          title="Personal development, expressed through training"
+          description="These ideas matter because they keep the room safe, serious, and sustainable—not because we perform toughness for its own sake."
         />
-        <div className="hover-lift-card mt-8 rounded-xl border border-temple-charcoal bg-temple-charcoal/35 p-6 sm:p-8">
-          <p className="text-sm leading-7 text-temple-snow/84">
-            Professor Singh holds a <span className="key-phrase">Master of Education in sports psychology</span> and a
-            <span className="key-phrase"> Master of Science in intercultural relations</span>. This leadership supports a system that
-            serves every part of the public in an <span className="key-phrase">equitable and diverse</span> training environment.
-          </p>
+        <div className="mt-8 grid gap-5 md:grid-cols-2">
+          <div className="rounded-xl border border-temple-charcoal bg-temple-charcoal/30 p-6 sm:p-7">
+            <h3 className="text-lg font-semibold text-temple-snow">Humility and coachability</h3>
+            <p className="mt-3 text-sm leading-7 text-temple-snow/80">
+              Progress is faster when ego does not get in the way of feedback. We protect a culture where questions are welcome and
+              standards are shared openly.
+            </p>
+          </div>
+          <div className="rounded-xl border border-temple-charcoal bg-temple-charcoal/30 p-6 sm:p-7">
+            <h3 className="text-lg font-semibold text-temple-snow">Discipline as a daily practice</h3>
+            <p className="mt-3 text-sm leading-7 text-temple-snow/80">
+              Discipline here means showing up prepared, keeping agreements with partners, and doing the boring details that make technique
+              reliable—not posturing.
+            </p>
+          </div>
+          <div className="rounded-xl border border-temple-charcoal bg-temple-charcoal/30 p-6 sm:p-7">
+            <h3 className="text-lg font-semibold text-temple-snow">Self-defense and civility</h3>
+            <p className="mt-3 text-sm leading-7 text-temple-snow/80">
+              Self-defense skill carries responsibility. We train capability alongside respect: control your power, choose calm first, and
+              keep accountability to the community you train with.
+            </p>
+          </div>
+          <div className="rounded-xl border border-temple-charcoal bg-temple-charcoal/30 p-6 sm:p-7">
+            <h3 className="text-lg font-semibold text-temple-snow">Growth over hype</h3>
+            <p className="mt-3 text-sm leading-7 text-temple-snow/80">
+              The goal is long-term development—physical, technical, and personal—supported by coaching relationships you can trust.
+            </p>
+          </div>
         </div>
       </section>
 
-      <section className="container-shell py-16">
+      <section className="border-y border-temple-charcoal/70 bg-temple-ink">
+        <div className="container-shell py-12 sm:py-14">
+          <div className="flex flex-col items-start justify-between gap-6 rounded-xl border border-temple-charcoal bg-temple-charcoal/25 p-6 sm:flex-row sm:items-center sm:p-8">
+            <div className="max-w-2xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-temple-accent">Lineage</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-temple-snow sm:text-2xl">For martial artists who want history and formal background</h2>
+              <p className="mt-2 text-sm leading-7 text-temple-snow/78">
+                Instructor credentials, ranking history, and lineage details are supplemental. They live off the main story so general
+                visitors are not asked to parse names and dates before they understand the system.
+              </p>
+            </div>
+            <Link
+              to="/about#lineage"
+              className="focus-ring shrink-0 rounded-md border border-temple-accent/60 px-5 py-2.5 text-sm font-semibold uppercase tracking-wide text-temple-accent hover:bg-temple-accent/10"
+            >
+              Read on About
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="container-shell py-16 sm:py-20">
         <SectionHeader
           eyebrow="Proof"
-          title="Real outcomes from consistent systems"
-          description="Replace random workouts with coached progression and standards you can track."
+          title="Outcomes from consistent coaching"
+          description="Members stay because the environment is clear: coached progression, transparent expectations, and a culture that rewards consistency."
         />
         <div className="mt-8 grid gap-5 md:grid-cols-3">
           <TestimonialCard
@@ -230,41 +230,38 @@ export default function HomePage() {
             context="Competition track athlete"
           />
           <TestimonialCard
-            quote="I needed a place that respected safety and discipline. Temple Underground delivered both."
+            quote="I needed a place that respected safety and real standards. Temple Underground delivered both."
             name="S. Patel"
             context="Parent and member"
           />
         </div>
       </section>
 
-      <section className="container-shell py-16">
+      <section className="container-shell py-16 sm:pb-20">
         <SectionHeader
-          eyebrow="First Class"
-          title="What to expect in your first class"
-          description="You will not be thrown into chaos. You will be coached."
+          eyebrow="First class"
+          title="What to expect when you visit"
+          description="You are guided—not thrown into confusion."
         />
-        <div className="hover-lift-card mt-8 rounded-xl border border-temple-charcoal bg-temple-charcoal/35 p-6">
-          <ol className="space-y-4 text-sm leading-6 text-temple-snow/82">
+        <div className="mt-8 rounded-xl border border-temple-charcoal bg-temple-charcoal/35 p-6 sm:p-8">
+          <ol className="space-y-4 text-sm leading-7 text-temple-snow/82">
             <li>
-              <strong className="key-phrase">1) Check-in + quick consult:</strong> we ask about goals, training background, and
-              any injuries.
+              <strong className="key-phrase">1) Check-in and quick consult:</strong> goals, prior training, injuries, and pacing preferences.
             </li>
             <li>
-              <strong className="key-phrase">2) Guided warm-up + breathing:</strong> you learn how to regulate pace and keep
-              composure early.
+              <strong className="key-phrase">2) Warm-up with breath and rhythm:</strong> learn how the room regulates effort before technical work.
             </li>
             <li>
-              <strong className="key-phrase">3) Technical block:</strong> fundamentals in boxing or BJJ with coach feedback and
-              partner structure.
+              <strong className="key-phrase">3) Technical block:</strong> fundamentals in striking or grappling with coach feedback and structured partner work.
             </li>
             <li>
-              <strong className="key-phrase">4) Controlled conditioning:</strong> performance-focused rounds scaled to your level.
+              <strong className="key-phrase">4) Conditioning block:</strong> performance-focused work scaled to your level that week.
             </li>
           </ol>
         </div>
       </section>
 
-      <section className="container-shell py-16">
+      <section className="container-shell pb-20 sm:pb-24">
         <SectionHeader eyebrow="FAQ" title="Quick answers before you visit" />
         <div className="mt-8">
           <FAQAccordion items={faqs} />

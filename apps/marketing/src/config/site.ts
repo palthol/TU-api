@@ -1,7 +1,7 @@
 export const siteConfig = {
   business: {
     name: 'Temple Underground',
-    shortTagline: 'Brazilian Jiu Jitsu, Boxing, Combative Self-Defense.',
+    shortTagline: 'Vale Tudo-style Jiu-Jitsu — striking, grappling, and combat conditioning as one system.',
     phone: '(555) 214-9000',
     email: 'hello@templeunderground.com',
     addressLine1: 'Morristown Training Area',
@@ -62,9 +62,9 @@ export const siteConfig = {
     familyNote: 'Ask about family plans and sibling scheduling support.',
   },
   seo: {
-    defaultTitle: 'Temple Underground | BJJ, Boxing, and Combative Self-Defense',
+    defaultTitle: 'Temple Underground | Vale Tudo-style Jiu-Jitsu & Integrated Combat Training',
     defaultDescription:
-      'Morristown, Tennessee combat sports academy teaching striking and grappling as one system for combat sport, combative self-defense, and conditioning.',
+      'Morristown academy for Vale Tudo-style Jiu-Jitsu: an integrated combat system combining striking, grappling, self-defense, competition coaching, and combat conditioning.',
     ogImage: '/og-temple-underground.jpg',
   },
 } as const
