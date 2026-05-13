@@ -1,3 +1,5 @@
+import { Medal, Trophy } from 'lucide-react'
+import ExpandableText from './ExpandableText'
 import SectionHeader from './SectionHeader'
 
 const journeySteps = [
@@ -57,6 +59,57 @@ const journeySteps = [
   },
 ]
 
+function JourneyStepsList() {
+  return (
+    <div className="relative md:mt-2">
+      <div
+        className="absolute left-[0.65rem] top-2 bottom-2 w-px bg-gradient-to-b from-temple-accent/55 via-temple-accent/25 to-temple-accent/45 md:left-3"
+        aria-hidden
+      />
+      <ol className="relative space-y-10 md:space-y-12">
+        {journeySteps.map((step, index) => (
+          <li key={step.title} className="relative pl-10 md:pl-14">
+            <span
+              className="absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-temple-accent/50 bg-temple-ink text-[11px] font-bold text-temple-accent md:left-1 md:h-7 md:w-7 md:text-xs"
+              aria-hidden
+            >
+              {index + 1}
+            </span>
+            <h3 className="text-lg font-semibold tracking-tight text-temple-snow md:text-xl">{step.title}</h3>
+            <div className="mt-2 max-w-3xl text-sm leading-7 text-temple-snow/82 md:text-[15px] md:leading-7">{step.body}</div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+const ourSystemLead = (
+  <p>
+    Temple Underground teaches <span className="key-phrase">striking</span> and <span className="key-phrase">grappling</span> as one
+    interconnected system. Distance collapses quickly: strikes from range feed standing grappling and clinch exchanges where striking is
+    still a real threat. Work from the feet often moves to the ground, and the person on the bottom carries clear danger—especially when
+    strikes stay in play. That is why we train distance management and dependable tools at every range relative to your opponent, and why a
+    complete system has to account for both striking and grappling.
+  </p>
+)
+
+const ourSystemExpanded = (
+  <div className="max-w-3xl space-y-4 text-sm leading-7 text-temple-snow/82 md:text-[15px] md:leading-7">
+    <p>
+      For longevity and effective training, <span className="key-phrase">defense comes first</span>: structure is the base that future
+      progress sits on, and sound defense becomes part of your offensive timing and pressure. To stay capable across positions and phases,
+      we emphasize full-contact training at <span className="key-phrase">scaled resistance</span>. Sequences are taught as connected
+      systems—technique chains you can repeat with intent—rather than isolated tricks.
+    </p>
+    <p>
+      Skills are wired together on purpose, so the habits you build support self-defense, competition, and the discipline the practice
+      demands. The attentiveness the work requires helps keep the room focused and human—an environment where steady self-improvement stays
+      realistic.
+    </p>
+  </div>
+)
+
 export default function ExperienceToSystemSection() {
   return (
     <section className="relative overflow-hidden">
@@ -76,25 +129,41 @@ export default function ExperienceToSystemSection() {
 
           <div className="relative p-6 sm:p-10 lg:p-12">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-temple-accent/90">Experience</p>
-            <div className="relative mt-8 md:mt-10">
-              <div
-                className="absolute left-[0.65rem] top-2 bottom-2 w-px bg-gradient-to-b from-temple-accent/55 via-temple-accent/25 to-temple-accent/45 md:left-3"
-                aria-hidden
-              />
-              <ol className="relative space-y-10 md:space-y-12">
-                {journeySteps.map((step, index) => (
-                  <li key={step.title} className="relative pl-10 md:pl-14">
-                    <span
-                      className="absolute left-0 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-temple-accent/50 bg-temple-ink text-[11px] font-bold text-temple-accent md:left-1 md:h-7 md:w-7 md:text-xs"
-                      aria-hidden
-                    >
-                      {index + 1}
-                    </span>
-                    <h3 className="text-lg font-semibold tracking-tight text-temple-snow md:text-xl">{step.title}</h3>
-                    <div className="mt-2 max-w-3xl text-sm leading-7 text-temple-snow/82 md:text-[15px] md:leading-7">{step.body}</div>
-                  </li>
-                ))}
-              </ol>
+
+            <div className="mt-8 overflow-hidden rounded-xl border border-temple-charcoal/70 bg-temple-ink/35">
+              <div className="grid gap-4 p-5 sm:grid-cols-2 sm:gap-5 sm:p-6">
+                <article className="flex gap-4 rounded-lg border border-temple-accent/25 bg-temple-charcoal/30 p-4 sm:p-5">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-temple-accent/40 bg-temple-accent/10 text-temple-accent">
+                    <Medal className="h-6 w-6" aria-hidden />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold tracking-tight text-temple-snow sm:text-3xl">70+</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-temple-accent">Gold medals</p>
+                    <p className="mt-2 text-sm leading-6 text-temple-snow/78">
+                      Competition team results across regional and national Brazilian Jiu-Jitsu tournaments.
+                    </p>
+                  </div>
+                </article>
+                <article className="flex gap-4 rounded-lg border border-temple-accent/25 bg-temple-charcoal/30 p-4 sm:p-5">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-temple-accent/40 bg-temple-accent/10 text-temple-accent">
+                    <Trophy className="h-6 w-6" aria-hidden />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold tracking-tight text-temple-snow sm:text-3xl">200+</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-temple-accent">Podium finishes</p>
+                    <p className="mt-2 text-sm leading-6 text-temple-snow/78">
+                      In six years of BJJ competition—podium means <span className="text-temple-snow/90">gold, silver, or bronze</span>—not
+                      participation medals.
+                    </p>
+                  </div>
+                </article>
+              </div>
+              <p className="px-5 pb-3 pt-1 text-center text-xs leading-relaxed text-temple-snow/65 sm:text-sm">
+                Coaching depth, pro corners, officiating, and how the room runs—expand to read the full story.
+              </p>
+              <ExpandableText collapsedLabel="Read full experience" expandedLabel="Hide full experience">
+                <JourneyStepsList />
+              </ExpandableText>
             </div>
 
             <div className="relative mt-14 md:mt-16">
@@ -118,25 +187,16 @@ export default function ExperienceToSystemSection() {
               <h3 className="mt-3 text-2xl font-semibold tracking-tight text-temple-snow sm:text-3xl">
                 Vale Tudo-style Jiu-Jitsu as an integrated combat system
               </h3>
-              <div className="mt-4 max-w-3xl space-y-4 text-sm leading-7 text-temple-snow/82 md:text-[15px] md:leading-7">
-                <p>
-                  Temple Underground teaches <span className="key-phrase">striking</span> and <span className="key-phrase">grappling</span>{' '}
-                  as one interconnected system. Distance collapses quickly: strikes from range feed standing grappling and clinch exchanges
-                  where striking is still a real threat. Work from the feet often moves to the ground, and the person on the bottom carries
-                  clear danger—especially when strikes stay in play. That is why we train distance management and dependable tools at every
-                  range relative to your opponent, and why a complete system has to account for both striking and grappling.
-                </p>
-                <p>
-                  For longevity and effective training, <span className="key-phrase">defense comes first</span>: structure is the base that
-                  future progress sits on, and sound defense becomes part of your offensive timing and pressure. To stay capable across
-                  positions and phases, we emphasize full-contact training at <span className="key-phrase">scaled resistance</span>. Sequences
-                  are taught as connected systems—technique chains you can repeat with intent—rather than isolated tricks.
-                </p>
-                <p>
-                  Skills are wired together on purpose, so the habits you build support self-defense, competition, and the discipline the
-                  practice demands. The attentiveness the work requires helps keep the room focused and human—an environment where steady
-                  self-improvement stays realistic.
-                </p>
+              <div className="mt-4 max-w-3xl text-sm leading-7 text-temple-snow/82 md:text-[15px] md:leading-7">{ourSystemLead}</div>
+
+              <div className="mt-6 max-w-3xl">
+                <ExpandableText
+                  className="overflow-hidden rounded-xl border border-temple-charcoal/70 bg-temple-ink/30"
+                  collapsedLabel="Read more about how we train"
+                  expandedLabel="Hide extra detail"
+                >
+                  {ourSystemExpanded}
+                </ExpandableText>
               </div>
 
               <div className="mt-10">
