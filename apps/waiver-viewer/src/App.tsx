@@ -63,8 +63,13 @@ type WaiverDocument = {
   audit_created_at: string | null;
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:3001';
-const CONFIGURED_ADMIN_KEY = import.meta.env.VITE_ADMIN_API_KEY?.trim() || '';
+const VIEWER_WAIVERS_PATH = '/api/viewer/waiver-documents';
+
+function viewerApiUrl(path: string) {
+  const base = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '');
+  if (base) return `${base}${path}`;
+  return path;
+}
 
 const sortConfig: Record<SortMode, { label: string; sort: string; order: 'asc' | 'desc' }> = {
   recent: { label: 'Most recent', sort: 'signed_at_utc', order: 'desc' },
@@ -109,10 +114,10 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-async function adminFetch<T>(adminKey: string, path: string): Promise<{ ok: boolean; status: number; data: T }> {
-  const headers: Record<string, string> = {};
-  if (adminKey.trim()) headers['x-admin-key'] = adminKey.trim();
-  const response = await fetch(`${API_BASE}${path}`, { headers });
+async function viewerFetch<T>(path: string): Promise<{ ok: boolean; status: number; data: T }> {
+  const response = await fetch(viewerApiUrl(path), {
+    credentials: 'same-origin',
+  });
   const data = (await response.json().catch(() => ({}))) as T;
   return { ok: response.ok, status: response.status, data };
 }
@@ -248,28 +253,18 @@ function WaiverCard({
 }
 
 export default function App() {
-  const [manualAdminKey, setManualAdminKey] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [rows, setRows] = useState<WaiverDocument[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ kind: StatusKind; message: string } | null>({
     kind: 'info',
-    message: CONFIGURED_ADMIN_KEY ? 'Admin key is configured from the app environment.' : 'Enter the admin key to load waivers.',
+    message: 'Tap Load waivers to fetch the latest submissions.',
   });
   const [loading, setLoading] = useState(false);
   const autoLoadedRef = useRef(false);
-
-  const adminKey = CONFIGURED_ADMIN_KEY || manualAdminKey;
-  const hasConfiguredAdminKey = CONFIGURED_ADMIN_KEY.length > 0;
   const selectedSort = sortConfig[sortMode];
 
   const loadWaivers = useCallback(async (mode: SortMode = sortMode) => {
-    if (!adminKey.trim()) {
-      setRows([]);
-      setStatus({ kind: 'error', message: 'Admin key is required.' });
-      return;
-    }
-
     setLoading(true);
     setStatus(null);
 
@@ -281,16 +276,26 @@ export default function App() {
       order: nextSort.order,
     });
     try {
-      const { ok, status: httpStatus, data } = await adminFetch<{
+      const { ok, status: httpStatus, data } = await viewerFetch<{
         ok?: boolean;
         error?: string;
         rows?: WaiverDocument[];
         rowCount?: number;
-      }>(adminKey, `/api/admin/reporting/views/waiver-documents?${params}`);
+      }>(`${VIEWER_WAIVERS_PATH}?${params}`);
 
       if (!ok) {
         setRows([]);
-        setStatus({ kind: 'error', message: `Error ${httpStatus}: ${data.error ?? JSON.stringify(data)}` });
+        const hint =
+          httpStatus === 401
+            ? 'Sign in through Cloudflare Access, then reload.'
+            : httpStatus === 403
+              ? 'Your account is not authorized for the waiver viewer.'
+              : '';
+        const detail = data.error ?? JSON.stringify(data);
+        setStatus({
+          kind: 'error',
+          message: `Error ${httpStatus}: ${detail}${hint ? ` ${hint}` : ''}`,
+        });
         return;
       }
 
@@ -311,13 +316,13 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [adminKey, sortMode]);
+  }, [sortMode]);
 
   useEffect(() => {
-    if (!hasConfiguredAdminKey || autoLoadedRef.current) return;
+    if (autoLoadedRef.current) return;
     autoLoadedRef.current = true;
     void loadWaivers();
-  }, [hasConfiguredAdminKey, loadWaivers]);
+  }, [loadWaivers]);
 
   const recentCount = useMemo(() => {
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -341,29 +346,10 @@ export default function App() {
 
       <section className="controls-card" aria-labelledby="controls-heading">
         <div>
-          <h2 id="controls-heading">Access and sorting</h2>
-          <p>{API_BASE}</p>
+          <h2 id="controls-heading">Sorting</h2>
+          <p className="api-base-line">{viewerApiUrl(VIEWER_WAIVERS_PATH)}</p>
+          <p className="access-note">Access is enforced by Cloudflare Access and the viewer API proxy (no browser admin key).</p>
         </div>
-
-        {hasConfiguredAdminKey ? (
-          <div className="configured-key-note">
-            <span>Admin key</span>
-            <strong>Configured from environment</strong>
-            <small>Using VITE_ADMIN_API_KEY for this deployed viewer.</small>
-          </div>
-        ) : (
-          <label className="form-field" htmlFor="admin-key">
-            <span>Admin key</span>
-            <input
-              id="admin-key"
-              type="password"
-              value={manualAdminKey}
-              autoComplete="off"
-              placeholder="x-admin-key"
-              onChange={(event) => setManualAdminKey(event.target.value)}
-            />
-          </label>
-        )}
 
         <label className="form-field" htmlFor="sort-mode">
           <span>Sort waivers</span>
@@ -418,7 +404,7 @@ export default function App() {
         ))}
       </section>
 
-      {!loading && adminKey.trim() && rows.length === 0 && (
+      {!loading && rows.length === 0 && (
         <p className="empty-state">No waivers found. Try refreshing or confirm the admin API can access Supabase.</p>
       )}
     </main>

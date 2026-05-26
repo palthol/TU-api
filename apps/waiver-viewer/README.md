@@ -6,24 +6,28 @@ It intentionally lives outside the full dashboard so a phone can open only the w
 
 ## Data source
 
-The app calls the API with `x-admin-key` and reads:
+The app calls the **viewer proxy** (not admin routes directly):
 
 ```text
-GET /api/admin/reporting/views/waiver-documents
+GET /api/viewer/waiver-documents
 ```
 
-That endpoint is backed by the existing Supabase view:
+That endpoint is protected by Cloudflare Access (production) or a local dev bypass, and reads from the existing Supabase view:
 
 ```text
 view_waiver_documents
 ```
 
-No browser service-role key is used.
+No browser service-role key or `VITE_ADMIN_API_KEY` is used.
 
-## Run
+## Run locally
 
 ```bash
 # from repo root
+# API: allow local dev without Cloudflare Access
+# (set in services/api/.env or your shell)
+WAIVER_VIEWER_DEV_BYPASS=true
+
 npm run dev:api
 npm run dev:waiver-viewer
 ```
@@ -34,21 +38,19 @@ Open the Vite URL, usually:
 http://localhost:5176
 ```
 
-Set `VITE_API_BASE_URL` if the API is not at `http://localhost:3001`.
+Vite proxies `/api` to `http://localhost:3001`.
 
-By default, paste the API `ADMIN_API_KEY` into the app when prompted. The key is held only in memory for the current page session.
+Optional: set `VITE_API_BASE_URL` if the API is not on the same origin during dev.
 
-## Optional environment-configured admin key
+## Deploy with Cloudflare Access
 
-For a private/trusted deployment, you can configure:
+See [cloudflare/README.md](./cloudflare/README.md) for:
 
-```text
-VITE_ADMIN_API_KEY=<same value as the API service ADMIN_API_KEY>
-```
-
-When this is present, the viewer uses it automatically and does not ask for a runtime key.
-
-Important: `VITE_ADMIN_API_KEY` is a browser-exposed build variable. Anyone who can access the built viewer can inspect this value. Only use this for a locked-down/internal deployment. Do not use the Supabase service-role key here.
+- GitHub login via Cloudflare Zero Trust
+- Email allowlist on the API
+- Session duration / “remember device”
+- Tunnel + single-hostname routing
+- Phone home-screen shortcut
 
 ## MVP behavior
 

@@ -96,6 +96,16 @@ code {
   line-height: 1.55;
 }
 
+.access-note {
+  font-size: 0.85rem;
+}
+
+.api-base-line {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  word-break: break-all;
+}
+
 .controls-card {
   position: sticky;
   top: 0;

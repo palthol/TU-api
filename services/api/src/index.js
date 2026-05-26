@@ -13,6 +13,8 @@ import { registerAdminParticipantRoutes } from './routes/admin/participants.js';
 import { registerAdminReportingRoutes } from './routes/admin/reporting.js';
 import { registerAdminNotificationRoutes } from './routes/admin/notifications.js';
 import { registerAdminWaiverRoutes } from './routes/admin/waivers.js';
+import { createRequireViewerAccess } from './lib/cloudflareAccess.js';
+import { registerViewerWaiverRoutes } from './routes/viewer/waivers.js';
 import { warnIfSupabaseKeyIsNotServiceRole } from './lib/warnIfSupabaseKeyIsNotServiceRole.js';
 import { exposeSupabaseError } from './lib/exposeSupabaseError.js';
 
@@ -589,6 +591,11 @@ registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminNotificationRoutes(adminBillingRouter, { supabase });
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
+
+const viewerRouter = express.Router();
+viewerRouter.use(createRequireViewerAccess());
+registerViewerWaiverRoutes(viewerRouter, { supabase });
+app.use('/api/viewer', viewerRouter);
 
 app.listen(PORT, () => {
   console.log(`API listening on :${PORT}`);
