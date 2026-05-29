@@ -1,6 +1,7 @@
 # API ↔ Supabase schema audit (live verification)
 
-**Date:** 2026-05-29
+**Date:** 2026-05-29  
+**Product map:** See [api-capability-audit.md](./api-capability-audit.md) for notifications, finance, and scheduling vs API coverage and phased roadmap.  
 **Project:** Temple Underground — Supabase `jhxzecxkccqlgyazhsnb` (production, live traffic)
 **Audited API:** `services/api` (this repo — the deployed admin/waiver API)
 **Method:** Live introspection of the production database (tables, views, functions,
