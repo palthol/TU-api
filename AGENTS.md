@@ -40,11 +40,10 @@ There is **no build step** for the API and **no typecheck** (plain JS). Tests:
 ## Database workflow (read before changing schema)
 
 - The schema lives in `supabase/migrations/NNNN_*.sql`, applied in numeric order.
-- **Known drift (verify first):** as of 2026-05-29 the live project is applied through
-  `0016`, but the repo contains `0017` (`personal_finance_entries`), `0018` (private-schema
-  grants), and `0019` (`charge_discounts` + discount-aware `view_charge_net`). The API
-  already depends on `0017` and `0019`. See `docs/api-schema-audit.md`. Check
-  `list_migrations` (Supabase MCP) before assuming the DB matches the repo.
+- **Migration sync:** live project is applied through **`0019`** (including
+  `personal_finance_entries`, private-schema grants, `charge_discounts`). Before new
+  schema work, confirm in Supabase Dashboard → Database → Migrations or `list_migrations`.
+  See `docs/api-schema-audit.md` and `docs/api-capability-audit.md`.
 - To add schema: write a new numbered migration, apply it (`supabase db push` or the
   Supabase MCP `apply_migration`), then re-verify with `list_tables` / `execute_sql`.
 - Migrations should be idempotent (`create table if not exists`, `create or replace`,

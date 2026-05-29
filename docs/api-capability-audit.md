@@ -11,14 +11,14 @@
 | Area | Schema | API writes | API reads / automation | Operator UI today |
 |------|--------|------------|------------------------|-------------------|
 | **Notifications** | Views for reminders; no `notifications` table | Webhook fan-out only (Discord/Slack) | Admin **POST** triggers for Discord reminders/digest; waiver submit auto-notify | No in-app notification center; staff channel = Discord |
-| **Finance / receipts** | Full billing + receipts + personal log + expenses (migrations through **0019** in repo) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `apps/receipts` — **blocked on prod** until migrations **0017–0019** applied |
+| **Finance / receipts** | Full billing + receipts + personal log + expenses (through **0019** on live) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `apps/receipts` — personal log + formal billing **ready** (0017–0019 applied) |
 | **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements | **No session/attendance CRUD routes** | Read-only via **reporting views**; one billing RPC from attendance | Dashboard lists sessions via **direct Supabase**; marketing schedule is **static config** |
 
-**Headline blocker:** Live production is migrated through **0016**; repo/API depend on **0017** (`personal_finance_entries`), **0018** (private schema grants), **0019** (`charge_discounts`). Until those are applied, the receipts app’s primary workflows fail even though the API code is correct. See [api-schema-audit.md](./api-schema-audit.md).
+**Schema sync:** Production includes migrations **0017–0019** (confirmed in Supabase Dashboard). Repo and live DB align through **0019**; next work is **smoke-testing** receipts/finance endpoints. See [api-schema-audit.md](./api-schema-audit.md).
 
 **Recommended iteration order:**
 
-1. Apply migrations **0017–0019** and smoke-test finance + waiver paths.
+1. Smoke-test finance + waiver paths (`apps/receipts` cash/invoice/discount tabs; personal-finance API routes).
 2. Wire **scheduled** calls to existing Discord notification routes (Render cron or external scheduler).
 3. Harden **record-payment** with an atomic RPC; add receipt clone/correct if product requires full §6 lifecycle.
 4. Add **scheduling API** (sessions + attendance writes) once participant/class data entry UX is defined.
@@ -150,9 +150,9 @@ All routes under `/api/admin` with `x-admin-key`. Full request/response shapes: 
 | 0014 | `receipts`, receipt event capture | record-payment, void, issue-for-refund |
 | 0015 | `marketing_leads` | lead route + digest |
 | 0016 | `operating_expenses` | operating-expenses routes |
-| **0017** | `personal_finance_entries` | personal-finance routes — **BLOCKED on live** |
-| **0018** | private schema grants | waiver event capture — verify on live |
-| **0019** | `charge_discounts`, `view_charge_net` update | charge-discounts routes — **BLOCKED on live** |
+| **0017** | `personal_finance_entries` | personal-finance routes — **applied** |
+| **0018** | private schema grants | waiver event capture — **applied** |
+| **0019** | `charge_discounts`, `view_charge_net` update | charge-discounts routes — **applied** |
 
 ### 3.4 What `apps/receipts` needs from the API
 
@@ -238,10 +238,10 @@ See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slug
 |--------|-----------------|--------------|-----|
 | Waivers | High | High | — |
 | Participants / accounts | High | Medium (search, merge; no full CRUD) | Create participant outside waiver path is dashboard/SQL |
-| Billing / charges / payments | High | High | Atomic record-payment; prod migration drift |
+| Billing / charges / payments | High | High | Atomic record-payment |
 | Receipts (formal) | High | Medium–high | Clone/correct receipt flow per v1 map §6 optional |
-| Personal finance log | In repo, not on live | High (code) | **Apply 0017** |
-| Charge discounts | In repo, not on live | High (code) | **Apply 0019** |
+| Personal finance log | High (0017 applied) | High | Smoke-test receipts tabs |
+| Charge discounts | High (0019 applied) | High | Smoke-test formal billing discounts |
 | Operating expenses | On live (0016) | High | — |
 | Notifications | Views only | Low–medium (webhooks, manual POST) | Schedulers; personal invoice reminders |
 | Scheduling | High | **Low** (reads + one RPC) | CRUD routes + session generation |
@@ -252,11 +252,11 @@ See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slug
 
 ## 7. Iterative roadmap
 
-### Phase 0 — Unblock finance (ops, no new features)
+### Phase 0 — Verify finance on live (ops)
 
-- [ ] Apply `0017`, `0018`, `0019` to production (`npm run supabase:push`).
+- [x] Apply `0017`, `0018`, `0019` to production (confirmed in Supabase Dashboard).
 - [ ] Smoke-test: personal-finance-entries (3 routes), charge-discounts (2 routes), waiver submit + event ledger.
-- [ ] Document completion in [api-schema-audit.md](./api-schema-audit.md) checklist.
+- [ ] Document smoke-test results in [api-schema-audit.md](./api-schema-audit.md) checklist.
 
 ### Phase 1 — Notifications automation (small API surface)
 

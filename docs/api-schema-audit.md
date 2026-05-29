@@ -1,7 +1,6 @@
 # API ↔ Supabase schema audit (live verification)
 
-**Date:** 2026-05-29  
-**Product map:** See [api-capability-audit.md](./api-capability-audit.md) for notifications, finance, and scheduling vs API coverage and phased roadmap.  
+**Date:** 2026-05-29
 **Project:** Temple Underground — Supabase `jhxzecxkccqlgyazhsnb` (production, live traffic)
 **Audited API:** `services/api` (this repo — the deployed admin/waiver API)
 **Method:** Live introspection of the production database (tables, views, functions,
@@ -83,8 +82,7 @@ where table_schema='public' and table_name='view_charge_net' and column_name='ne
 
 ## 2. Endpoint-by-endpoint alignment
 
-Legend: **OK** = exists & matches; **BLOCKED** = correct code, blocked only by the
-unapplied migration above.
+Legend: **OK** = exists & matches.
 
 ### Billing (`routes/admin/billing.js`)
 
