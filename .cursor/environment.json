@@ -1,0 +1,10 @@
+{
+  "$schema": "https://cursor.com/schemas/environment.json",
+  "install": "npm install && (cp -n services/api/.env.example services/api/.env 2>/dev/null || true)",
+  "terminals": [
+    {
+      "name": "api-dev",
+      "command": "npm run dev:api"
+    }
+  ]
+}
