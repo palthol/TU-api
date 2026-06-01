@@ -17,6 +17,9 @@ import { createRequireViewerAccess } from './lib/cloudflareAccess.js';
 import { registerViewerWaiverRoutes } from './routes/viewer/waivers.js';
 import { warnIfSupabaseKeyIsNotServiceRole } from './lib/warnIfSupabaseKeyIsNotServiceRole.js';
 import { exposeSupabaseError } from './lib/exposeSupabaseError.js';
+import { requireAdmin } from './lib/requireAdmin.js';
+import { createRequireAdminOrCron } from './lib/requireAdminOrCron.js';
+import { registerAdminSchedulingRoutes } from './routes/admin/scheduling.js';
 
 const app = express();
 // CORS: allow configured origin or all in dev
@@ -507,15 +510,6 @@ app.post('/api/waivers/submit', async (req, res) => {
   }
 });
 
-// Simple admin gate: require ADMIN_API_KEY header match
-function requireAdmin(req, res, next) {
-  const key = req.header('x-admin-key');
-  if (!process.env.ADMIN_API_KEY || key !== process.env.ADMIN_API_KEY) {
-    return res.status(401).json({ ok: false, error: 'unauthorized' });
-  }
-  next();
-}
-
 // Admin: fetch waiver metadata and return signed URLs
 app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {
   try {
@@ -588,9 +582,14 @@ adminBillingRouter.use(requireAdmin);
 registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
-registerAdminNotificationRoutes(adminBillingRouter, { supabase });
+registerAdminSchedulingRoutes(adminBillingRouter, { supabase });
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
+
+const adminCronRouter = express.Router();
+adminCronRouter.use(createRequireAdminOrCron(requireAdmin));
+registerAdminNotificationRoutes(adminCronRouter, { supabase });
+app.use('/api/admin', adminCronRouter);
 
 const viewerRouter = express.Router();
 viewerRouter.use(createRequireViewerAccess());

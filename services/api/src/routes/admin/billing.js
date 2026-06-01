@@ -203,6 +203,73 @@ export function registerAdminBillingRoutes(router, { supabase }) {
     }
   });
 
+  router.post('/billing/subscriptions', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const {
+        participant_id,
+        plan_definition_id,
+        starts_at,
+        ends_at,
+        account_id,
+        create_initial_charge,
+        notes,
+        created_by,
+      } = req.body || {};
+
+      if (!participant_id || typeof participant_id !== 'string') {
+        return res.status(400).json({ ok: false, error: 'participant_id_required' });
+      }
+      if (!plan_definition_id || typeof plan_definition_id !== 'string') {
+        return res.status(400).json({ ok: false, error: 'plan_definition_id_required' });
+      }
+      if (starts_at != null && typeof starts_at !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_starts_at' });
+      }
+      if (ends_at != null && typeof ends_at !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_ends_at' });
+      }
+      if (account_id != null && typeof account_id !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_account_id' });
+      }
+      if (create_initial_charge != null && typeof create_initial_charge !== 'boolean') {
+        return res.status(400).json({ ok: false, error: 'invalid_create_initial_charge' });
+      }
+      if (notes != null && typeof notes !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_notes' });
+      }
+
+      const { data, error } = await supabase.rpc('create_subscription', {
+        p_participant_id: participant_id.trim(),
+        p_plan_definition_id: plan_definition_id.trim(),
+        p_starts_at: starts_at || null,
+        p_ends_at: ends_at || null,
+        p_account_id: account_id || null,
+        p_create_initial_charge: create_initial_charge ?? false,
+        p_notes: notes || null,
+        p_created_by: typeof created_by === 'string' && created_by.trim() ? created_by.trim() : 'admin_api',
+      });
+
+      if (error) {
+        console.error('create_subscription', error);
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+
+      const result = data && typeof data === 'object' ? data : {};
+      return res.json({
+        ok: true,
+        subscription_id: result.subscription_id ?? null,
+        account_id: result.account_id ?? null,
+        participant_id: result.participant_id ?? participant_id,
+        plan_definition_id: result.plan_definition_id ?? plan_definition_id,
+        initial_charge_id: result.initial_charge_id ?? null,
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
   router.post('/billing/subscription-upgrade', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });

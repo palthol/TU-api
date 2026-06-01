@@ -13,7 +13,8 @@ The standalone waiver viewer can optionally set `VITE_ADMIN_API_KEY` to that sam
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
+| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`) |
 | **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id` |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
@@ -171,6 +172,42 @@ Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_a
 **Response:** `{ "ok": true, "refund_id": "<uuid>" }`
 
 **Validation (RPC):** payment must be `succeeded`; refund total ≤ payment amount; refund ≤ sum of allocations for that payment.
+
+---
+
+### `POST /api/admin/billing/subscriptions`
+
+Creates an **active** subscription for a participant on a plan (enrollment). Calls RPC `create_subscription` (migration **0020**).
+
+**Body (JSON):**
+
+```json
+{
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "starts_at": "YYYY-MM-DD optional; defaults to current date in DB",
+  "ends_at": "YYYY-MM-DD optional",
+  "account_id": "uuid optional; defaults to participant's first account_members row",
+  "create_initial_charge": "boolean optional; defaults to false — only for monthly plans",
+  "notes": "optional text",
+  "created_by": "optional; defaults to admin_api"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "subscription_id": "uuid",
+  "account_id": "uuid",
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "initial_charge_id": "uuid | null"
+}
+```
+
+**Errors:** `400` — participant/plan not found, inactive plan, no account binding, `create_initial_charge` on non-monthly plan, date validation failures (Postgres exception message in `error`).
 
 ---
 
@@ -390,9 +427,75 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ---
 
+### Scheduling (`/api/admin/scheduling/*`)
+
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`).
+
+#### `GET /api/admin/scheduling/sessions`
+
+List sessions with optional filters.
+
+**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200), `offset` (default 0)
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+#### `GET /api/admin/scheduling/sessions/:sessionId`
+
+Single session plus its `attendance_records`.
+
+**Response:** `{ "ok": true, "session": { ... }, "attendance": [ ... ] }`
+
+#### `POST /api/admin/scheduling/sessions`
+
+**Body (JSON):**
+
+```json
+{
+  "starts_at": "ISO-8601 datetime",
+  "ends_at": "ISO-8601 datetime",
+  "session_label": "optional e.g. Class 1",
+  "schedule_template_id": "uuid optional",
+  "notes": "optional"
+}
+```
+
+**Response:** `{ "ok": true, "session": { ... } }`
+
+#### `PATCH /api/admin/scheduling/sessions/:sessionId`
+
+Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
+
+**Response:** `{ "ok": true, "session": { ... } }`
+
+#### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
+
+Upserts attendance for one or more participants (unique per session + participant).
+
+**Body (JSON):**
+
+```json
+{
+  "records": [
+    { "participant_id": "uuid", "status": "present | no_show | cancelled", "recorded_by": "optional" }
+  ],
+  "enforce_entitlement": true,
+  "recorded_by": "optional default for rows without recorded_by"
+}
+```
+
+When `enforce_entitlement` is true (default), `present` rows call `can_attend_group_session` first; blocked participants appear in `blocked` and are not upserted.
+
+**Response:** `{ "ok": true, "session_id", "upserted": [ ... ], "blocked": [ { "participant_id", "reason" } ] }`
+
+**Errors:** `400` — `session_cancelled`, `all_records_blocked`, validation errors
+
+---
+
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
+
+**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "rowCount": N }`
 
@@ -403,6 +506,8 @@ Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and post
 ### `POST /api/admin/notifications/discord/daily-digest`
 
 Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 hours, counts for payment reminders, plus the same overdue / due-soon list as the payment-reminders route.
+
+**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
 
