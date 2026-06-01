@@ -19,7 +19,7 @@ alwaysApply: false
   be atomic — prefer a Postgres function/RPC over sequential inserts.
 - **Schema changes:** add a new numbered migration, keep it idempotent, apply it, then
   re-verify against the live DB (`list_migrations`, `list_tables`). Confirm the live project
-  is actually at the migration you expect — there is known drift (live `0016` vs repo `0019`);
+  is actually at the migration you expect (live through `0019` as of 2026-05-29);
   see `docs/api-schema-audit.md`.
 - **Don't rename fields or invent endpoints** the front-ends consume; update `docs/admin-api.md`
   when behavior changes so the `admin` repo design docs stay accurate.
