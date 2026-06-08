@@ -48,6 +48,9 @@
   "validation": {
     "required": "Este campo es obligatorio.",
     "email": "Ingresa un correo válido.",
+    "firstNameMin": "Ingresa tu nombre (al menos 2 caracteres).",
+    "lastNameMin": "Ingresa tu apellido (al menos 2 caracteres).",
+    "invalid_name": "Ingresa nombre y apellido (al menos 2 caracteres cada uno).",
     "initials_length": "Ingresa exactamente dos letras.",
     "accept_terms": "Debes aceptar los términos.",
     "signature_required": "Se requiere una firma.",
@@ -87,7 +90,8 @@
     "description": "Esta información nos ayuda a identificarte y a contactar a alguien si es necesario.",
     "requiredBadge": "Obligatorio",
     "fields": {
-      "fullName": "Nombre completo",
+      "firstName": "Nombre",
+      "lastName": "Apellido",
       "dateOfBirth": "Fecha de nacimiento",
       "addressLine1": "Dirección línea 1",
       "addressLine2": "Dirección línea 2 (opcional)",
@@ -184,7 +188,8 @@
       "legalConfirmation": "Confirmación legal"
     },
     "fields": {
-      "fullName": "Nombre completo",
+      "firstName": "Nombre",
+      "lastName": "Apellido",
       "dateOfBirth": "Fecha de nacimiento",
       "addressLine1": "Dirección línea 1",
       "addressLine2": "Dirección línea 2",

@@ -3,7 +3,8 @@ import type { WaiverFormInput } from '../hooks/useWaiverForm'
 
 export const SAMPLE_WAIVER: WaiverFormInput = {
   personalInfo: {
-    fullName: 'Sample Participant',
+    firstName: 'Sample',
+    lastName: 'Participant',
     dateOfBirth: '1995-07-04',
     addressLine1: '123 Sample Street',
     addressLine2: 'Unit 5',

@@ -1,6 +1,6 @@
 # Admin API — Temple Underground
 
-All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the optional `apps/dashboard` merge UI is for trusted operators only).
+All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the `admin/apps/dashboard` merge UI is for trusted operators only).
 
 The standalone waiver viewer can optionally set `VITE_ADMIN_API_KEY` to that same `ADMIN_API_KEY` so you do not type it on each page load. This is convenient but browser-visible; only use it when the viewer deployment is private/trusted.
 
@@ -29,11 +29,12 @@ The standalone waiver viewer can optionally set `VITE_ADMIN_API_KEY` to that sam
 
 Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Rate-limit at the edge in production if needed.
 
-**Body (JSON)** — align with `apps/marketing` (`name`, `goals`, `preferredTime`; at least one of `email` or `phone`):
+**Body (JSON)** — align with marketing lead forms (`firstName`, `lastName`, `goals`, `preferredTime`; at least one of `email` or `phone`):
 
 ```json
 {
-  "name": "Jane Doe",
+  "firstName": "Jane",
+  "lastName": "Doe",
   "email": "jane@example.com",
   "phone": "",
   "goals": "first-class",
@@ -46,7 +47,7 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
 
 **Response:** `{ "ok": true }`
 
-**Errors:** `400` — `invalid_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
 
 ---
 
@@ -693,12 +694,16 @@ Mounted under `/api/waivers/*` with the same `requireAdmin` pattern where applic
 
 ---
 
-## Local dashboard (`apps/dashboard`)
+## Local operator UIs (sibling repos)
 
-- **Sidebar layout:** **Analysis** now starts with **Primary KPIs** (expected revenue, actual revenue, visitors, monthly members), then whitelisted reporting views for deeper inspection. **Administration** groups **Merge**, **Write-off**, **Refund**, **Upgrade**, **Pay-per-class**, and **Waiver** URLs.
-- Sticky header: API base + admin key. Changing analysis view (or pasting the key) auto-loads data; **Refresh** re-fetches with the current row limit (max 500).
-- `revenue-waterfall-monthly` includes quick date presets in the UI (`3M`, `6M`, `12M`, `YTD`) plus optional threshold filters for net cash / collected / refunded cents.
-- `npm run dev:dashboard` (from repo root; run `npm install` in the monorepo first)
-- Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`
-- `apps/marketing` dev server proxies `/api/*` to `http://localhost:3001` so `POST /api/lead` works when the API is running locally
-- Paste **x-admin-key** only in trusted sessions; do not commit keys
+Dashboard and receipts live in the **`admin`** repo; marketing lives in **`marketing/TU-web`**.
+
+- **Dashboard** (`admin/apps/dashboard`): Analysis views (KPIs, payment board, entitlements) and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). Run `npm run dev:dashboard` from the `admin` repo.
+- **Receipts** (`admin/apps/receipts`): Cash log, invoices, formal billing. Run `npm run dev:receipts` from the `admin` repo.
+- **Marketing** (`marketing/TU-web`): Public site; dev server proxies `/api/*` to `http://localhost:3001` so `POST /api/lead` works when the API is running locally.
+
+For all operator apps:
+
+- Start the API first: `npm run dev:api` (this repo).
+- Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
+- Paste **x-admin-key** only in trusted sessions; do not commit keys.

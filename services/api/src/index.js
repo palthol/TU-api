@@ -160,16 +160,43 @@ const summarizePayload = (body) => {
 
 const GOALS = new Set(['first-class', 'fitness-confidence', 'competition', 'weight-management', 'youth-inquiry']);
 
+function normalizeLeadPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length !== 10) return null;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function validateParticipantFullName(fullName) {
+  if (typeof fullName !== 'string' || !fullName.trim()) {
+    return { error: { field: 'participant.full_name', messageKey: 'validation.required' } };
+  }
+  const trimmed = fullName.trim();
+  const spaceIdx = trimmed.indexOf(' ');
+  if (spaceIdx <= 0) {
+    return { error: { field: 'participant.full_name', messageKey: 'validation.invalid_name' } };
+  }
+  const firstName = trimmed.slice(0, spaceIdx).trim();
+  const lastName = trimmed.slice(spaceIdx + 1).trim();
+  if (firstName.length < 2 || lastName.length < 2) {
+    return { error: { field: 'participant.full_name', messageKey: 'validation.invalid_name' } };
+  }
+  return { fullName: `${firstName} ${lastName}` };
+}
+
 function parseLeadBody(body) {
   if (!body || typeof body !== 'object') return { error: 'invalid_body' };
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (name.length < 2) return { error: 'invalid_name' };
+  const firstName = typeof body.firstName === 'string' ? body.firstName.trim() : '';
+  const lastName = typeof body.lastName === 'string' ? body.lastName.trim() : '';
+  if (firstName.length < 2) return { error: 'invalid_first_name' };
+  if (lastName.length < 2) return { error: 'invalid_last_name' };
   const email =
     typeof body.email === 'string' && body.email.trim().length
       ? body.email.trim()
       : null;
-  const phone =
+  const phoneRaw =
     typeof body.phone === 'string' && body.phone.trim().length ? body.phone.trim() : null;
+  const phone = phoneRaw ? normalizeLeadPhone(phoneRaw) : null;
+  if (phoneRaw && !phone) return { error: 'invalid_phone' };
   if (!email && !phone) return { error: 'email_or_phone_required' };
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'invalid_email' };
   const goals = typeof body.goals === 'string' ? body.goals : '';
@@ -184,7 +211,8 @@ function parseLeadBody(body) {
   }
   return {
     payload: {
-      name,
+      first_name: firstName,
+      last_name: lastName,
       email,
       phone,
       goals,
@@ -239,7 +267,9 @@ app.post('/api/waivers/submit', async (req, res) => {
       content_version = 'waiver.v1',
     } = req.body || {};
     const errors = [];
-    if (!participant?.full_name) errors.push({ field: 'participant.full_name', messageKey: 'validation.required' });
+    const nameCheck = validateParticipantFullName(participant?.full_name);
+    if (nameCheck.error) errors.push(nameCheck.error);
+    const participantFullName = nameCheck.fullName;
     if (!participant?.date_of_birth) errors.push({ field: 'participant.date_of_birth', messageKey: 'validation.required' });
     if (!participant?.email) errors.push({ field: 'participant.email', messageKey: 'validation.required' });
     if (!participant?.phone) errors.push({ field: 'participant.phone', messageKey: 'validation.required' });
@@ -256,6 +286,7 @@ app.post('/api/waivers/submit', async (req, res) => {
         : null;
     if (!signatureBase64) errors.push({ field: 'signature.pngDataUrl', messageKey: 'validation.invalid' });
     if (errors.length) return res.status(400).json({ ok: false, errors });
+    participant.full_name = participantFullName;
 
     // Ensure we have Supabase configured
     if (!supabase) {

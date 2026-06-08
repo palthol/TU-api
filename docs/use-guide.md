@@ -14,11 +14,13 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 
 | Path | Purpose |
 |------|--------|
-| `apps/waiver-v2` | Waiver signup UI (Vite + React) |
-| `apps/waiver-viewer` | Standalone mobile-first waiver review UI for trusted operators |
-| `apps/dashboard` | Admin dashboard (Vite + React): waivers, participants, accounts, plans, subscriptions, billing, sessions, entitlement status; uses same Supabase DB |
-| `services/api` | Express API: waiver PDF generation, can be extended for other endpoints |
-| `supabase/migrations` | Database schema, RLS, view/function security, indexes (0001 → 0009). See `docs/database-overview.md` for what to expect. |
+| `apps/waiver-v2` | Waiver signup UI (Vite + React) — **this repo** |
+| `apps/waiver-viewer` | Standalone mobile-first waiver review UI for trusted operators — **this repo** (also in `admin`) |
+| `services/api` | Express API: waiver PDF generation, admin routes, lead capture — **this repo** |
+| `supabase/migrations` | Database schema, RLS, view/function security, indexes — **this repo** |
+| `admin/apps/dashboard` | Admin dashboard: waivers, participants, billing, sessions, reporting — **`admin` repo** |
+| `admin/apps/receipts` | Operator finance tool: cash log, invoices, formal billing — **`admin` repo** |
+| `marketing/TU-web` | Public marketing site and lead form — **`marketing` repo** |
 
 ---
 
@@ -32,7 +34,7 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 ### 2.2 Environment
 
 - **Waiver app** — If it talks to Supabase directly, set Supabase URL and anon key (e.g. in Vite env).
-- **Dashboard app** — In `apps/dashboard`, copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same project as waiver). Use the **anon** / **public** (publishable) key from Project Settings → API, not the service_role key. Sign in with the admin user you add to `app_admin`.
+- **Dashboard app** — In the **`admin`** repo (`admin/apps/dashboard`), copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same project as waiver). Use the **anon** / **public** (publishable) key from Project Settings → API, not the service_role key. Sign in with the admin user you add to `app_admin`.
 - **API** — In `services/api`, add a `.env` with at least:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
@@ -230,12 +232,12 @@ select can_attend_group_session('PARTICIPANT_UUID', null);
 
 ### npm scripts (from repo root)
 
-- `npm run dev` — Waiver app + API
+- `npm run dev` — Waiver apps + API (this repo)
 - `npm run dev:waiver` — Waiver app only
-- `npm run dev:dashboard` — Dashboard app (port 5174)
 - `npm run dev:api` — API only
-- `npm run build` / `npm run build:waiver` / `npm run build:dashboard` — Build
+- `npm run build` / `npm run build:waiver` / `npm run build:waiver-viewer` — Build waiver apps
 - `npm run start` — Run API (production)
+- `npm run dev:dashboard` / `npm run dev:receipts` — Run from the **`admin`** repo
 
 ---
 

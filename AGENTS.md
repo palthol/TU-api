@@ -11,15 +11,16 @@ npm-workspaces monorepo. Node >= 22, npm >= 10.
 services/api/        Express + JS backend (admin + viewer + public waiver/lead routes). DEPLOYED.
 supabase/migrations/ Ordered SQL migrations — the schema source of truth.
 apps/waiver-v2/      Public waiver signing app.
-apps/waiver-viewer/  Cloudflare-Access waiver review app.
-apps/dashboard/      Operator dashboard (reporting views + admin actions).
-apps/receipts/       Operator finance tool (cash log, invoices, formal billing).
-apps/marketing/      Marketing site (POST /api/lead).
 docs/                Architecture, admin-api reference, finance subsystem, audits.
 ```
 
-> A separate **`admin`** repo holds front-end design docs for the admin apps. It has **no
-> backend** — never point it at a second API. All backend work happens here.
+**Sibling repos (front-ends live elsewhere):**
+
+- **`admin`** — `apps/dashboard`, `apps/receipts`, `apps/waiver-viewer` (no backend).
+- **`marketing`** — `TU-web` (public site), `TU-marketing` (campaign minisite).
+
+> Never add a second API or duplicate operator/marketing apps here. All backend work
+> happens in this repo; UI work happens in `admin` or `marketing`.
 
 ## Commands
 
@@ -27,15 +28,26 @@ docs/                Architecture, admin-api reference, finance subsystem, audit
 npm install              # installs all workspaces
 npm run dev:api          # API on :3001 (node --watch)
 npm run start            # production start (node src/index.js)
-npm run dev:dashboard    # operator dashboard
-npm run dev:receipts     # receipts finance tool
+npm run dev:waiver       # public waiver signing app
 npm run supabase:push    # apply pending migrations to the linked project
 npm run supabase:pull    # pull schema from the linked project
 ```
 
-There is **no build step** for the API and **no typecheck** (plain JS). Tests:
-`npm run test:receipts`, `npm run test:marketing`, and the API's own `vitest` suite
-(`npm --workspace services/api run test`).
+There is **no build step** for the API and **no typecheck** (plain JS). Tests: the API's
+own `vitest` suite (`npm --workspace services/api run test`), plus waiver guard/smoke
+scripts at the repo root.
+
+Operator and marketing UIs run from sibling repos:
+
+```bash
+# admin repo (dashboard, receipts, waiver-viewer)
+npm run dev:dashboard
+npm run dev:receipts
+npm run dev:waiver-viewer
+
+# marketing repo (TU-web)
+cd TU-web && npm run dev
+```
 
 ## Database workflow (read before changing schema)
 

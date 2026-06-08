@@ -1,6 +1,6 @@
 # API ↔ Supabase schema audit (live verification)
 
-**Date:** 2026-05-29  
+**Date:** 2026-06-01 (updated; original audit 2026-05-29)  
 **Product map:** [api-capability-audit.md](./api-capability-audit.md) (notifications, finance, scheduling).  
 **Project:** Temple Underground — Supabase `jhxzecxkccqlgyazhsnb` (production, live traffic)
 **Audited API:** `services/api` (this repo — the deployed admin/waiver API)
@@ -17,57 +17,30 @@ columns, check constraints) cross-checked against every route in
 
 The API code is **structurally aligned** with the database: every RPC it calls, every
 view it reads, and every column it writes exists in the live schema with matching names,
-types, and check-constraint vocabularies — **with one exception that breaks 6 endpoints**:
+types, and check-constraint vocabularies.
 
-> **The live database is migrated through `0016`. The repo contains `0017`, `0018`, and
-> `0019`, which are committed but NOT applied to production.** The API already depends on
-> the objects those migrations create.
+**All repo migrations are applied on production.** `list_migrations` on the live project
+returns `0001`–`0020`, matching every file in `supabase/migrations/`. There is **no
+migration drift** between repo and live DB as of 2026-06-01.
 
-Apply `0017`–`0019` and the API and schema are fully in sync. No code changes are
-required for alignment.
+Remaining work is **operational smoke-testing** (finance, scheduling, subscriptions) and
+**engineering hardening** (non-transactional write paths — see §3).
 
 ---
 
-## 1. Migration drift (the headline finding)
+## 1. Migration status
 
-`list_migrations` on the live project returns `0001`–`0016`. The repo's
-`supabase/migrations/` folder contains three more that have never been pushed:
+`list_migrations` on the live project returns **`0001`–`0020`**. The repo's
+`supabase/migrations/` folder contains **20 migrations** — all applied on production.
 
 | Migration | Creates | API code that depends on it |
 | --- | --- | --- |
 | `0017_personal_finance_entries.sql` | table `personal_finance_entries` (+ checks, RLS, indexes) | `billing.js`: `POST/GET /billing/personal-finance-entries`, `POST .../:id/invoice-status` |
 | `0018_fix_private_schema_grants_for_event_capture.sql` | `grant usage on schema private` + execute grants to `service_role` for event-capture functions | waiver submission path (`participants` INSERT → event-capture trigger → `private.*`) |
 | `0019_charge_discounts.sql` | table `charge_discounts`, trigger `charge_discounts_set_applied_amount()`, discount-aware rewrite of `view_charge_net`, total-guard triggers, `charges.amount_cents` lock trigger | `billing.js`: `GET/POST /billing/charge-discounts` (and the discount line in the receipts "Formal billing" tab) |
+| `0020_tier1_subscription_and_session_cancel.sql` | `sessions.cancelled_at`, RPC `create_subscription(...)`, updated `view_ops_today_sessions` | `billing.js`: `POST /billing/subscriptions`; `scheduling.js`: session list/get/create/patch + attendance upsert |
 
-### Impact while unapplied
-
-- **`personal_finance_entries` does not exist** → the Cash log, Invoice, and Recent tabs
-  of the receipts app fail (PostgREST `relation does not exist`). These are the 3 primary
-  receipts workflows.
-- **`charge_discounts` does not exist** → the "Apply discount line" action and the
-  discount list in Formal billing fail.
-- **`view_charge_net` is the pre-discount version** (`gross − affiliate credits −
-  write-offs`). Until `0019`, discounts cannot reduce net due even if the table existed.
-- **`0018` grants**: production waivers are currently submitting successfully and
-  `event_ledger` is growing, so these grants appear to already be in place in prod
-  (likely applied out-of-band). Treat `0018` as **verify-then-apply** — it is idempotent
-  (`grant` statements), so re-applying is safe.
-
-### Remediation
-
-Apply in order, then regenerate any generated types (this API is plain JS, so there are
-no TypeScript DB types to regenerate here):
-
-```bash
-# from repo root, with the project linked
-npm run supabase:push        # supabase db push — applies 0017, 0018, 0019
-```
-
-Or apply individually via the Supabase MCP `apply_migration` tool (one migration per
-call, in numeric order). All three are idempotent (`create table if not exists`,
-`create or replace`, `grant`).
-
-**Post-apply verification:**
+**Verification (2026-06-01):**
 
 ```sql
 select table_name from information_schema.tables
@@ -75,26 +48,31 @@ where table_schema='public' and table_name in ('personal_finance_entries','charg
 -- expect 2 rows
 
 select column_name from information_schema.columns
-where table_schema='public' and table_name='view_charge_net' and column_name='net_due_cents';
--- expect net_due_cents to now subtract discount_cents (see 0019 view body)
+where table_schema='public' and table_name='sessions' and column_name='cancelled_at';
+-- expect 1 row
+
+select proname from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and proname = 'create_subscription';
+-- expect 1 row
 ```
 
 ---
 
 ## 2. Endpoint-by-endpoint alignment
 
-Legend: **OK** = exists & matches; **BLOCKED** = correct code, blocked only by the
-unapplied migration above.
+Legend: **OK** = exists & matches.
 
 ### Billing (`routes/admin/billing.js`)
 
 | Endpoint | DB objects | Status |
 | --- | --- | --- |
 | `POST /billing/external-counterparty-accounts` | `accounts` (insert; `status='active'`) | OK — `accounts.status` check allows `active`/`inactive` |
-| `GET /billing/charge-discounts` | `charge_discounts` | BLOCKED (0019) |
-| `POST /billing/charge-discounts` | `charge_discounts` (+ `view_charge_net`) | BLOCKED (0019) — see §3 note on `applied_amount_cents` |
+| `GET /billing/charge-discounts` | `charge_discounts` | OK |
+| `POST /billing/charge-discounts` | `charge_discounts` (+ `view_charge_net`) | OK — see §3 note on `applied_amount_cents` |
 | `POST /billing/charge-adjustments` | `charge_adjustments` | OK — `adjustment_type='write_off'`, `amount_cents>0` match checks |
 | `POST /billing/payment-refunds` | RPC `record_payment_refund(p_payment_id,p_amount_cents,p_reason,p_created_by,p_idempotency_key)` | OK — signature matches exactly |
+| `POST /billing/subscriptions` | RPC `create_subscription(...)` | OK — signature matches exactly (0020) |
 | `POST /billing/subscription-upgrade` | RPC `upgrade_subscription_prorated(...)` | OK |
 | `POST /billing/per-class/charge-from-attendance` | RPC `create_pay_per_class_charge(p_attendance_id,p_due_at,p_notes,p_created_by)` | OK |
 | `POST /billing/per-class/upgrade-to-monthly` | RPC `upgrade_per_class_to_monthly(...)` | OK |
@@ -103,9 +81,9 @@ unapplied migration above.
 | `POST /billing/receipts/issue-for-refund` | `payment_refunds`, `payments`, `receipts` | OK — satisfies `check_receipt_kind_refs` (money_out_refund needs payment_id + payment_refund_id) |
 | `GET /billing/marketing-leads` | `marketing_leads` | OK |
 | `GET/POST /billing/operating-expenses` | `operating_expenses` | OK — `category in (rent,utilities,other)` matches |
-| `POST /billing/personal-finance-entries` | `personal_finance_entries` | BLOCKED (0017) |
-| `GET /billing/personal-finance-entries` | `personal_finance_entries` | BLOCKED (0017) |
-| `POST /billing/personal-finance-entries/:id/invoice-status` | `personal_finance_entries` | BLOCKED (0017) |
+| `POST /billing/personal-finance-entries` | `personal_finance_entries` | OK |
+| `GET /billing/personal-finance-entries` | `personal_finance_entries` | OK |
+| `POST /billing/personal-finance-entries/:id/invoice-status` | `personal_finance_entries` | OK |
 
 ### Participants (`routes/admin/participants.js`)
 
@@ -133,12 +111,22 @@ All 19 reporting-view slugs were confirmed present in the live DB:
 `view_analytics_attendance_utilization_weekly`, `view_analytics_entitlement_burn`,
 `view_analytics_affiliate_program_performance`, `view_analytics_data_hygiene`.
 
+### Scheduling (`routes/admin/scheduling.js`)
+
+| Endpoint | DB objects | Status |
+| --- | --- | --- |
+| `GET /scheduling/sessions` | `sessions` | OK — includes `cancelled_at` (0020) |
+| `GET /scheduling/sessions/:sessionId` | `sessions`, `attendance_records` | OK |
+| `POST /scheduling/sessions` | `sessions` | OK — `check_session_times` enforced in API + DB |
+| `PATCH /scheduling/sessions/:sessionId` | `sessions` | OK — supports reschedule, notes, soft cancel via `cancelled_at` |
+| `POST /scheduling/sessions/:sessionId/attendance` | `attendance_records`, RPC `can_attend_group_session` | OK — upsert on `(session_id, participant_id)` |
+
 ### Waivers / viewer / public
 
 | Endpoint | DB objects | Status |
 | --- | --- | --- |
 | `POST /api/lead` | `marketing_leads` | OK |
-| `POST /api/waivers/submit` | `participants`, `accounts`, `account_members`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails`, storage buckets, event ledger | OK — all insert payload columns exist |
+| `POST /api/waivers/submit` | `participants`, `accounts`, `account_members`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails`, storage buckets, event ledger | OK — all insert payload columns exist; see §3 waiver atomicity caveat |
 | `GET /api/admin/waivers` | `view_waiver_documents` | OK — selected columns exist |
 | `GET /api/admin/waivers/:id` | `waivers`, `audit_trails` + signed storage URLs | OK |
 | `GET /api/viewer/waiver-documents` | `view_waiver_documents` (Cloudflare Access) | OK |
@@ -156,12 +144,20 @@ All 19 reporting-view slugs were confirmed present in the live DB:
    `1` to compute in JS** — that would double-handle the math and diverge from the DB
    source of truth.
 
-2. **`record-payment` is not transactional.** It performs sequential inserts (payment →
-   allocations → receipt) with per-step validation but no surrounding transaction. A
-   failure after the payment insert can leave a payment with partial/no allocations or no
-   receipt. Recommendation (future hardening, not an alignment issue): move the
-   payment+allocations+receipt write into a single Postgres RPC (e.g. `record_payment(...)`)
-   so it's atomic, mirroring `record_payment_refund`.
+2. **Some write paths are not atomic (all-or-nothing).** An **atomic** operation either
+   completes every step successfully or rolls back as if nothing happened — the client
+   never sees a half-finished state. These handlers perform **sequential** database/storage
+   steps without a single Postgres transaction wrapping them:
+
+   - **`record-payment`:** payment → allocations → receipt. A failure after the payment
+     insert can leave a payment with partial/no allocations or no receipt.
+   - **`POST /api/waivers/submit`:** storage uploads → waiver row → audit row (and related
+     rows). A failure after storage upload or waiver insert can leave orphaned files or
+     duplicate waivers if the client retries after a 500.
+
+   Recommendation (future hardening, not an alignment issue): move multi-step writes into
+   a single Postgres RPC (e.g. `record_payment(...)`) or add idempotency keys, mirroring
+   `record_payment_refund`.
 
 3. **Response envelope.** This API returns `200` with `{ ok: true, ... }` on success and
    `{ ok: false, error }` on failure. The receipts client (`adminFetch`) keys off
@@ -177,23 +173,21 @@ All 19 reporting-view slugs were confirmed present in the live DB:
 
 ---
 
-## 4. Data integrity snapshot (live, 2026-05-29)
+## 4. Data integrity snapshot (live, 2026-06-01)
 
-Counts increased mid-audit (participants 5→7, waivers 8→10) confirming **live production
-traffic**. Integrity checks were clean:
+Counts confirm **live production traffic**. Integrity checks were clean:
 
 | Check | Result |
 | --- | --- |
-| participants | 7 |
+| participants | 9 |
 | participants merged (`merged_into_participant_id` set) | 0 |
 | participants with no `account_members` link | **0** (every participant is tethered to an account) |
-| waivers | 10 |
+| waivers | 12 |
 | waivers with null `participant_id` | **0** |
-| audit_trails | 10 |
-| emergency_contacts / medical_histories | 8 / 10 |
+| waivers with no matching `audit_trails` row | **0** |
+| audit_trails | 12 |
 | charges / payments / receipts | 0 / 0 / 0 (formal billing not yet exercised) |
-| marketing_leads | 0 |
-| event_ledger | 25 (append-only, growing) |
+| event_ledger | 31 (append-only, growing) |
 
 No orphaned, dangling, or merged-but-unresolved rows were found. The
 `createOrBindParticipantAccount` tether in the waiver path is doing its job (0 unlinked
@@ -203,11 +197,13 @@ participants).
 
 ## 5. Action checklist
 
-- [ ] **Apply migrations `0017`, `0018`, `0019`** to the live project (idempotent; see §1).
-- [ ] Verify `personal_finance_entries` and `charge_discounts` exist and `view_charge_net`
-      includes the discount term.
-- [ ] Smoke-test the 6 previously-blocked endpoints against the live DB.
-- [ ] (Optional hardening) Wrap `record-payment` writes in an atomic RPC.
+- [x] **Apply migrations `0017`–`0020`** to the live project (confirmed 2026-06-01).
+- [x] Verify `personal_finance_entries`, `charge_discounts`, `sessions.cancelled_at`, and
+      `create_subscription` exist on production.
+- [ ] Smoke-test finance endpoints (personal-finance, charge-discounts, record-payment).
+- [ ] Smoke-test Tier 1 endpoints (scheduling CRUD, subscription enrollment, cron auth).
+- [ ] (Optional hardening) Wrap `record-payment` and waiver submit in atomic RPCs or add
+      idempotency keys.
 - [ ] Update `docs/(working) schema-changes-and-admin-api-alignment.md` — it is pinned to
-      migrations `0001–0012` and predates `0014–0019` (receipts, leads, expenses,
-      personal finance, discounts).
+      migrations `0001–0012` and predates `0014–0020` (receipts, leads, expenses,
+      personal finance, discounts, Tier 1 scheduling/subscriptions).

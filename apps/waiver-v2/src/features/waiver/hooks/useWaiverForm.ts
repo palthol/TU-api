@@ -29,7 +29,8 @@ export type UseWaiverFormReturn = {
 
 export const createDefaultValues = (): WaiverFormInput => ({
   personalInfo: {
-    fullName: '',
+    firstName: '',
+    lastName: '',
     dateOfBirth: '',
     addressLine1: '',
     addressLine2: '',

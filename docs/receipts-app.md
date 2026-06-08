@@ -1,4 +1,8 @@
-# Receipts / finance log app (`apps/receipts`)
+# Receipts / finance log app (`admin/apps/receipts`)
+
+> **Location:** The receipts UI lives in the **`admin`** repo (`apps/receipts`). This doc
+> describes the finance operator workflow and its API contract from the API repo's perspective.
+> For tab-by-tab UI wiring, see `admin/docs/frontend-design/receipts-app.md`.
 
 ## Who it is for
 
@@ -43,10 +47,13 @@ See `docs/admin-api.md` sections for:
 
 ## Local run
 
-From repo root:
+Start the API from this repo, then the receipts app from the **`admin`** repo:
 
 ```bash
+# this repo (API)
 npm run dev:api
+
+# admin repo
 npm run dev:receipts
 ```
 

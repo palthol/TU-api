@@ -48,6 +48,9 @@
   "validation": {
     "required": "This field is required.",
     "email": "Enter a valid email.",
+    "firstNameMin": "Please enter your first name (at least 2 characters).",
+    "lastNameMin": "Please enter your last name (at least 2 characters).",
+    "invalid_name": "Please enter both a first and last name (at least 2 characters each).",
     "initials_length": "Enter exactly two letters.",
     "accept_terms": "You must accept the terms.",
     "signature_required": "Signature is required.",
@@ -87,7 +90,8 @@
     "description": "This information helps us identify you and reach someone if we need to.",
     "requiredBadge": "Required",
     "fields": {
-      "fullName": "Full name",
+      "firstName": "First name",
+      "lastName": "Last name",
       "dateOfBirth": "Date of birth",
       "addressLine1": "Address line 1",
       "addressLine2": "Address line 2 (optional)",
@@ -184,7 +188,8 @@
       "legalConfirmation": "Legal Confirmation"
     },
     "fields": {
-      "fullName": "Full name",
+      "firstName": "First name",
+      "lastName": "Last name",
       "dateOfBirth": "Date of birth",
       "addressLine1": "Address line 1",
       "addressLine2": "Address line 2",

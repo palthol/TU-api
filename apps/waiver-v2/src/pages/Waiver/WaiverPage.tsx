@@ -86,7 +86,7 @@ export const WaiverPage: React.FC = () => {
 
   const serverFieldMap = React.useMemo(() => {
     const map = {
-      'participant.full_name': 'personalInfo.fullName',
+      'participant.full_name': 'personalInfo.firstName',
       'participant.date_of_birth': 'personalInfo.dateOfBirth',
       'participant.address_line': 'personalInfo.addressLine1',
       'participant.address_line_2': 'personalInfo.addressLine2',
@@ -129,6 +129,12 @@ export const WaiverPage: React.FC = () => {
   const applyServerErrors = React.useCallback(
     (errors: SubmitWaiverFieldError[]) => {
       errors.forEach(({ field, messageKey }) => {
+        if (field === 'participant.full_name') {
+          const message = translateMessageKey(messageKey) ?? t('submission.error.validation')
+          methods.setError('personalInfo.firstName', { type: 'server', message })
+          methods.setError('personalInfo.lastName', { type: 'server', message })
+          return
+        }
         const formPath = serverFieldMap[field]
         if (formPath) {
           methods.setError(formPath, {
@@ -140,14 +146,6 @@ export const WaiverPage: React.FC = () => {
     },
     [methods, serverFieldMap, t, translateMessageKey],
   )
-
-  const extractLastName = React.useCallback((fullName: string) => {
-    const parts = fullName
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-    return parts.length > 1 ? parts.at(-1) ?? '' : ''
-  }, [])
 
   const hasEmergencyContactValues = React.useCallback((emergencyContact: WaiverFormInput['emergencyContact']) => {
     return Boolean(
@@ -171,7 +169,7 @@ export const WaiverPage: React.FC = () => {
         phone: formValues.personalInfo.phone ?? '',
         email: formValues.personalInfo.email ?? '',
       },
-      householdLastName: extractLastName(formValues.personalInfo.fullName ?? ''),
+      householdLastName: formValues.personalInfo.lastName?.trim() ?? '',
       emergencyContact: {
         name: formValues.emergencyContact.name ?? '',
         relationship: formValues.emergencyContact.relationship ?? '',
@@ -179,7 +177,7 @@ export const WaiverPage: React.FC = () => {
         email: formValues.emergencyContact.email ?? '',
       },
     }),
-    [extractLastName],
+    [],
   )
 
   const applyReusePrefills = React.useCallback(
@@ -201,7 +199,7 @@ export const WaiverPage: React.FC = () => {
       }
 
       if (options.lastName && context.householdLastName) {
-        methods.setValue('personalInfo.fullName', context.householdLastName, { shouldDirty: true })
+        methods.setValue('personalInfo.lastName', context.householdLastName, { shouldDirty: true })
       }
 
       if (options.emergencyContact) {

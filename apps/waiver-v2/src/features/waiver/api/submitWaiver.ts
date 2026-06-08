@@ -44,8 +44,11 @@ const normalizeOptional = (value: string | undefined | null) => {
   return trimmed.length ? trimmed : null
 }
 
+export const composeParticipantFullName = (firstName: string, lastName: string) =>
+  `${firstName.trim()} ${lastName.trim()}`
+
 const mapParticipant = (input: WaiverFormInput['personalInfo']) => ({
-  full_name: input.fullName,
+  full_name: composeParticipantFullName(input.firstName, input.lastName),
   date_of_birth: input.dateOfBirth,
   email: input.email,
   phone: input.phone,

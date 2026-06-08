@@ -59,8 +59,11 @@ export const PersonalInfoStep: React.FC = () => {
         subtitle={t('personalInfo.description')}
       >
         <div className="grid gap-6 lg:grid-cols-2">
-          <Field label={t('personalInfo.fields.fullName')} required error={errorMessage('fullName') || undefined}>
-            <input type="text" className={inputBaseClasses} {...register(field('fullName'))} />
+          <Field label={t('personalInfo.fields.firstName')} required error={errorMessage('firstName') || undefined}>
+            <input type="text" className={inputBaseClasses} autoComplete="given-name" {...register(field('firstName'))} />
+          </Field>
+          <Field label={t('personalInfo.fields.lastName')} required error={errorMessage('lastName') || undefined}>
+            <input type="text" className={inputBaseClasses} autoComplete="family-name" {...register(field('lastName'))} />
           </Field>
           <Field
             label={t('personalInfo.fields.dateOfBirth')}

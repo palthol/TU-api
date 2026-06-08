@@ -1,6 +1,6 @@
 # Finance subsystem — design document
 
-Temple Underground’s **finance subsystem** is a **private internal bookkeeping module** inside the broader operational platform. It is **not** a standalone customer product. **Supabase Postgres** is the **system of record**; the module surfaces workflows (for example via `apps/receipts` and the admin API) and must respect **application ownership** and **identity** boundaries described below.
+Temple Underground’s **finance subsystem** is a **private internal bookkeeping module** inside the broader operational platform. It is **not** a standalone customer product. **Supabase Postgres** is the **system of record**; the module surfaces workflows (for example via `admin/apps/receipts` and the admin API) and must respect **application ownership** and **identity** boundaries described below.
 
 **Audience:** single trusted operator (initially one person).
 
@@ -168,7 +168,7 @@ This maps existing surfaces to the subsystem vocabulary.
 | Operating expenses | Shop rent / utilities / other | `POST/GET /api/admin/billing/operating-expenses` |
 | Refunds (member) | Shrinks allocations, updates statuses | `POST /api/admin/billing/payment-refunds` |
 
-UI tabs in `apps/receipts` mirror: Cash log, Invoice, Recent, Formal, Preview, Lookup, Void, Refund ([receipts-app.md](./receipts-app.md)).
+UI tabs in `admin/apps/receipts` mirror: Cash log, Invoice, Recent, Formal, Preview, Lookup, Void, Refund ([receipts-app.md](./receipts-app.md)).
 
 **Explicit gap (documented):** personal **invoice** rows do not yet auto-create `charges`; linking draft → charge is a later automation ([receipts-app.md](./receipts-app.md)).
 

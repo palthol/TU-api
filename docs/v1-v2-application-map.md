@@ -18,22 +18,29 @@ This document defines how the monorepo is structured, what “done” means at a
 
 ## 1. Deployable applications (inventory)
 
-There are **four** workspace packages that represent deployable surfaces:
+**This repo** (`temple underground signup`):
 
 | # | Workspace | Package name | Role |
 |---|-----------|--------------|------|
-| 1 | `apps/marketing` | `marketing` | Public marketing site (schedule, pricing, contact/trial, SEO). |
-| 2 | `apps/waiver-v2` | `waiver-v2` | Participant-facing digital waiver wizard → API. |
-| 3 | `apps/dashboard` | `dashboard` | Staff console: auth + read views + admin actions via `x-admin-key`. |
-| 4 | `services/api` | `waiver-api` | Express: waiver submit, PDF routes, **admin API** (billing RPCs, reporting, service role). |
+| 1 | `apps/waiver-v2` | `waiver-v2` | Participant-facing digital waiver wizard → API. |
+| 2 | `apps/waiver-viewer` | `waiver-viewer` | Cloudflare-Access waiver review UI. |
+| 3 | `services/api` | `waiver-api` | Express: waiver submit, PDF routes, **admin API** (billing RPCs, reporting, service role). |
 
-Root scripts: `dev:marketing`, `dev:waiver`, `dev:api`, `dev:dashboard`; `start` runs the API only.
+**Sibling repos:**
+
+| Repo | Workspace | Role |
+|------|-----------|------|
+| `marketing` | `TU-web` | Public marketing site (schedule, pricing, contact/trial, SEO). |
+| `admin` | `apps/dashboard` | Staff console: auth + read views + admin actions via `x-admin-key`. |
+| `admin` | `apps/receipts` | Operator finance tool: cash log, invoices, formal billing. |
+
+Root scripts (this repo): `dev:waiver`, `dev:waiver-viewer`, `dev:api`; `start` runs the API only.
 
 ---
 
 ## 2. Purpose and “done” criteria by application
 
-### 2.1 Marketing (`apps/marketing`)
+### 2.1 Marketing (`marketing/TU-web`)
 
 | | |
 |--|--|
@@ -49,7 +56,7 @@ Root scripts: `dev:marketing`, `dev:waiver`, `dev:api`, `dev:dashboard`; `start`
 | **V1 done** | Submit works end-to-end; storage + participant/waiver rows; content version tracked. |
 | **V2 done** | Stronger PDF/legal workflow, UX/a11y, optional member portal, i18n completeness. |
 
-### 2.3 Dashboard (`apps/dashboard`)
+### 2.3 Dashboard (`admin/apps/dashboard`)
 
 | | |
 |--|--|

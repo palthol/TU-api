@@ -1,7 +1,7 @@
 # API capability audit — notifications, finance, scheduling
 
-**Date:** 2026-05-29  
-**Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs operator apps (`apps/receipts`, `apps/dashboard`, `apps/marketing`, `apps/waiver-v2`).  
+**Date:** 2026-06-01 (updated; original audit 2026-05-29)  
+**Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs front-ends (`admin/apps/receipts`, `admin/apps/dashboard`, `marketing/TU-web`, `apps/waiver-v2`).  
 **Companion docs:** [admin-api.md](./admin-api.md) (route contracts), [api-schema-audit.md](./api-schema-audit.md) (live DB alignment), [finance-subsystem-design.md](./finance-subsystem-design.md), [receipts-app.md](./receipts-app.md), [v1-v2-application-map.md](./v1-v2-application-map.md).
 
 ---
@@ -11,17 +11,20 @@
 | Area | Schema | API writes | API reads / automation | Operator UI today |
 |------|--------|------------|------------------------|-------------------|
 | **Notifications** | Views for reminders; no `notifications` table | Webhook fan-out only (Discord/Slack) | Admin **POST** triggers for Discord reminders/digest; waiver submit auto-notify | No in-app notification center; staff channel = Discord |
-| **Finance / receipts** | Full billing + receipts + personal log + expenses (through **0019** on live) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `apps/receipts` — personal log + formal billing **ready** (0017–0019 applied) |
-| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements | **No session/attendance CRUD routes** | Read-only via **reporting views**; one billing RPC from attendance | Dashboard lists sessions via **direct Supabase**; marketing schedule is **static config** |
+| **Finance / receipts** | Full billing + receipts + personal log + expenses (through **0019** on live) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `admin/apps/receipts` — personal log + formal billing **ready** (0017–0019 applied) |
+| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11) | Reporting views + entitlement check on attendance; billing RPC from attendance | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** |
 
-**Schema sync:** Production includes migrations **0017–0019** (confirmed in Supabase Dashboard). Repo and live DB align through **0019**; next work is **smoke-testing** receipts/finance endpoints. See [api-schema-audit.md](./api-schema-audit.md).
+**Schema sync:** Production includes migrations **0017–0020** (confirmed 2026-06-01 via
+`list_migrations`). Repo and live DB are fully aligned through **0020**; next work is
+**smoke-testing** finance, scheduling, and subscription endpoints. See
+[api-schema-audit.md](./api-schema-audit.md).
 
 **Recommended iteration order:**
 
-1. Smoke-test finance + waiver paths (`apps/receipts` cash/invoice/discount tabs; personal-finance API routes).
-2. Wire **scheduled** calls to existing Discord notification routes (Render cron or external scheduler).
-3. Harden **record-payment** with an atomic RPC; add receipt clone/correct if product requires full §6 lifecycle.
-4. Add **scheduling API** (sessions + attendance writes) once participant/class data entry UX is defined.
+1. Smoke-test finance + waiver paths (`admin/apps/receipts` cash/invoice/discount tabs; personal-finance API routes).
+2. Smoke-test Tier 1 scheduling + subscription enrollment routes.
+3. Wire **scheduled** calls to existing Discord notification routes (Render cron or external scheduler).
+4. Harden **record-payment** and waiver submit with atomic RPCs or idempotency keys.
 5. V2: payment processor webhooks, member pay links, email/SMS delivery (not just share-sheet text).
 
 ---
@@ -31,12 +34,12 @@
 ```mermaid
 flowchart TB
   subgraph public [Public]
-    Marketing[apps/marketing]
+    Marketing[marketing/TU-web]
     Waiver[apps/waiver-v2]
   end
-  subgraph staff [Staff tools]
-    Dashboard[apps/dashboard]
-    Receipts[apps/receipts]
+  subgraph staff [Staff tools - admin repo]
+    Dashboard[admin/apps/dashboard]
+    Receipts[admin/apps/receipts]
   end
   API[services/api]
   DB[(Supabase Postgres + Storage)]
@@ -64,7 +67,7 @@ There is **no** first-class `notifications` table, push service, or email-to-mem
 | Waiver submitted | `POST /api/waivers/submit` (after DB persist) | Discord and/or Slack if env set | **No** — logged, submission still succeeds |
 | Payment reminders | `POST /api/admin/notifications/discord/payment-reminders` | Discord (`DISCORD_WEBHOOK_URL`) | N/A (admin-only) |
 | Daily digest | `POST /api/admin/notifications/discord/daily-digest` | Discord | N/A |
-| Receipt / invoice “send” | Operator action in `apps/receipts` | **Copy/share sheet** (SMS, Messages, etc.) — not API email | N/A |
+| Receipt / invoice “send” | Operator action in `admin/apps/receipts` | **Copy/share sheet** (SMS, Messages, etc.) — not API email | N/A |
 
 **Implementation files:**
 
@@ -109,7 +112,7 @@ From [v1-v2-application-map.md](./v1-v2-application-map.md):
 | **Personal log** | `personal_finance_entries` | `POST/GET .../personal-finance-entries`, `POST .../:id/invoice-status` | Cash log, Invoice, Recent |
 | **Formal billing** | `payments`, `payment_allocations`, `charges`, `receipts`, `payment_refunds` | `record-payment`, void/issue-for-refund, refunds, discounts, RPCs | Formal, Lookup, Void, Refund |
 
-**Sharing receipts/invoices:** Implemented in the **UI** (`apps/receipts/src/lib/shareFormats.ts`) as plain-text templates for the device share sheet — **not** `POST /send-email` or similar. “Send invoice” today means: create row → mark `invoice_status` → operator copies text to SMS.
+**Sharing receipts/invoices:** Implemented in the **UI** (`admin/apps/receipts/src/lib/shareFormats.ts`) as plain-text templates for the device share sheet — **not** `POST /send-email` or similar. “Send invoice” today means: create row → mark `invoice_status` → operator copies text to SMS.
 
 ### 3.2 Finance API surface (admin)
 
@@ -125,9 +128,10 @@ All routes under `/api/admin` with `x-admin-key`. Full request/response shapes: 
 | Refund member payment | `POST /billing/payment-refunds` | RPC `record_payment_refund` |
 | Charge write-off | `POST /billing/charge-adjustments` | `charge_adjustments` |
 | Charge discounts | `GET/POST /billing/charge-discounts` | `charge_discounts`, discount-aware `view_charge_net` (**0019**) |
+| Subscription enrollment | `POST /billing/subscriptions` | RPC `create_subscription` (**0020**) |
+| Subscription upgrade (prorated) | `POST /billing/subscription-upgrade` | RPC `upgrade_subscription_prorated` |
 | Per-class charge from attendance | `POST /billing/per-class/charge-from-attendance` | RPC `create_pay_per_class_charge` |
 | Upgrade per-class → monthly | `POST /billing/per-class/upgrade-to-monthly` | RPC `upgrade_per_class_to_monthly` |
-| Subscription upgrade (prorated) | `POST /billing/subscription-upgrade` | RPC `upgrade_subscription_prorated` |
 | External walk-in payer | `POST /billing/external-counterparty-accounts` | `accounts` insert |
 | Operating expenses | `GET/POST /billing/operating-expenses` | `operating_expenses` (**0016**) |
 | Marketing leads list | `GET /billing/marketing-leads` | `marketing_leads` |
@@ -153,8 +157,9 @@ All routes under `/api/admin` with `x-admin-key`. Full request/response shapes: 
 | **0017** | `personal_finance_entries` | personal-finance routes — **applied** |
 | **0018** | private schema grants | waiver event capture — **applied** |
 | **0019** | `charge_discounts`, `view_charge_net` update | charge-discounts routes — **applied** |
+| **0020** | `sessions.cancelled_at`, `create_subscription` RPC | scheduling routes + subscription enrollment — **applied** |
 
-### 3.4 What `apps/receipts` needs from the API
+### 3.4 What `admin/apps/receipts` needs from the API
 
 Documented in [receipts-app.md](./receipts-app.md). Every feature maps to an existing admin route **except** automated Discord reminders for personal invoices (planned, not built).
 
@@ -164,9 +169,13 @@ Documented in [receipts-app.md](./receipts-app.md). Every feature maps to an exi
 
 ## 4. Scheduling
 
+> **CRUD** stands for **Create, Read, Update, Delete** — the four basic operations on
+> stored data. In this API, "Delete" for sessions is implemented as a **soft cancel**
+> (`cancelled_at` timestamp) so attendance history is retained rather than hard-deleted.
+
 ### 4.1 Your mental model vs the codebase
 
-You described: participants → programmatic classes (e.g. “Class 1, 7–9am”) → applicants A/B/C assigned. **The database model supports this**; **the API does not yet expose scheduling CRUD.**
+You described: participants → programmatic classes (e.g. "Class 1, 7–9am") → applicants A/B/C assigned. **The database model supports this**, and **Tier 1 admin APIs now expose session and attendance CRUD** (migration `0020`, PR #11). Template management and batch session generation are still future work.
 
 ### 4.2 Schema (exists)
 
@@ -175,41 +184,53 @@ From `0001_foundation_schema.sql` and later views:
 | Table | Role |
 |-------|------|
 | `schedule_templates` | Recurring patterns (e.g. weekly class slots) |
-| `sessions` | Concrete instances (`starts_at`, `ends_at`, `session_label`, optional `schedule_template_id`) |
+| `sessions` | Concrete instances (`starts_at`, `ends_at`, `session_label`, optional `schedule_template_id`, `cancelled_at`) |
 | `attendance_records` | Participant ↔ session (`status`, etc.) — drives group entitlement consumption |
 | `private_usage`, `entitlement_credits`, `access_overrides` | Private minutes, bonuses, overrides |
 | `plan_entitlements`, `subscriptions` | What a member is allowed to attend |
 
-**DB helpers (not called from API routes today):** e.g. `can_attend_group_session(participant_id, session_label)`, `generate_monthly_charges()` — invoked manually or from future automation.
+**DB helpers called from API routes:** `can_attend_group_session(participant_id, session_label)` on attendance upsert (optional entitlement enforcement). `generate_monthly_charges()` is still manual/future automation only.
 
-### 4.3 API touchpoints for scheduling (read-heavy)
+### 4.3 API touchpoints for scheduling
+
+#### Session + attendance CRUD (Tier 1 — implemented)
+
+| Endpoint | CRUD op | What it does |
+|----------|---------|--------------|
+| `GET /api/admin/scheduling/sessions` | **Read** | List/filter sessions (date range, label, include cancelled) |
+| `GET /api/admin/scheduling/sessions/:sessionId` | **Read** | Session detail + attendance rows |
+| `POST /api/admin/scheduling/sessions` | **Create** | New session (label, start, end, optional template) |
+| `PATCH /api/admin/scheduling/sessions/:sessionId` | **Update** | Reschedule, edit notes, soft-cancel (`cancel: true` → `cancelled_at`) |
+| `POST /api/admin/scheduling/sessions/:sessionId/attendance` | **Create/Update** | Upsert attendance for participant list (entitlement check optional) |
+
+Full request/response contracts: [admin-api.md](./admin-api.md) § Scheduling.
+
+#### Reporting + billing (read-heavy / downstream)
 
 | Endpoint | What it does |
-|----------|----------------|
-| `GET /api/admin/reporting/views/today-sessions` | `view_ops_today_sessions` — day-of board |
+|----------|--------------|
+| `GET /api/admin/reporting/views/today-sessions` | `view_ops_today_sessions` — day-of board (excludes cancelled) |
 | `GET /api/admin/reporting/views/upcoming-access-issues` | Entitlement/access problems |
 | `GET /api/admin/reporting/views/attendance-utilization-weekly` | Weekly utilization analytics |
 | `GET /api/admin/reporting/views/entitlement-status` | Per-participant entitlement snapshot |
 | `POST /api/admin/billing/per-class/charge-from-attendance` | Creates charge **given** `attendance_record_id` |
 
-**Missing API (writes):**
+**Still missing (future):**
 
-- Create/update `schedule_templates`
-- Create/update/cancel `sessions`
-- Check in / mark attendance (`attendance_records`)
-- Assign participants to a session roster
-- Generate sessions from templates (batch)
+- Create/update/delete `schedule_templates`
+- Batch generate sessions from templates for a date range
+- Hard-delete sessions (by design, cancel is soft-only)
 
 ### 4.4 Apps today
 
 | App | Scheduling behavior |
 |-----|---------------------|
-| `apps/marketing` | **Static** schedule in `site.ts` — not DB-backed |
-| `apps/dashboard` | **Read-only** `sessions` list via Supabase client (`SessionsPage.tsx`) — no create/edit |
+| `marketing/TU-web` | **Static** schedule in `site.ts` — not DB-backed |
+| `admin/apps/dashboard` | **Read-only** `sessions` list via Supabase client (`SessionsPage.tsx`) — could migrate to scheduling API |
 | `apps/waiver-v2` | Creates **participants** only (via API submit) |
-| `apps/receipts` | Billing only; can charge **from** attendance if `attendance_record_id` exists |
+| `admin/apps/receipts` | Billing only; can charge **from** attendance if `attendance_record_id` exists |
 
-**Conclusion:** Scheduling infrastructure is **schema-first**. Building a scheduling app requires new admin API routes (or a deliberate choice to use Supabase Auth + RLS from dashboard only — inconsistent with waiver/receipts pattern).
+**Conclusion:** Scheduling is **schema-first with Tier 1 write APIs in place**. Remaining work is operator UI wiring and template/batch generation — not core session CRUD.
 
 ---
 
@@ -226,9 +247,9 @@ From `0001_foundation_schema.sql` and later views:
 | GET | `/api/waivers/:id/pdf` | PDF generation (admin key) |
 | GET | `/api/viewer/waiver-documents` | Cloudflare Access waiver review |
 
-### Admin — billing, participants, reporting, notifications
+### Admin — billing, participants, reporting, scheduling, notifications
 
-See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slugs via `GET /api/admin/reporting/views/:slug`.
+See §3.2, §4.3, and [admin-api.md](./admin-api.md). Reporting exposes **19** view slugs via `GET /api/admin/reporting/views/:slug`. Scheduling exposes session + attendance CRUD via `/api/admin/scheduling/*`.
 
 ---
 
@@ -244,7 +265,7 @@ See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slug
 | Charge discounts | High (0019 applied) | High | Smoke-test formal billing discounts |
 | Operating expenses | On live (0016) | High | — |
 | Notifications | Views only | Low–medium (webhooks, manual POST) | Schedulers; personal invoice reminders |
-| Scheduling | High | **Low** (reads + one RPC) | CRUD routes + session generation |
+| Scheduling | High | **Medium** (session + attendance CRUD; no templates/batch yet) | Template CRUD + session generation |
 | Entitlements | High | Read via views only | Write/policy API deferred to entitlement “service” |
 | Payment processor | None | None | V2 |
 
@@ -252,10 +273,11 @@ See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slug
 
 ## 7. Iterative roadmap
 
-### Phase 0 — Verify finance on live (ops)
+### Phase 0 — Verify finance + Tier 1 on live (ops)
 
-- [x] Apply `0017`, `0018`, `0019` to production (confirmed in Supabase Dashboard).
+- [x] Apply `0017`, `0018`, `0019`, `0020` to production (confirmed 2026-06-01).
 - [ ] Smoke-test: personal-finance-entries (3 routes), charge-discounts (2 routes), waiver submit + event ledger.
+- [ ] Smoke-test: scheduling CRUD (5 routes), subscription enrollment, cron auth on Discord routes.
 - [ ] Document smoke-test results in [api-schema-audit.md](./api-schema-audit.md) checklist.
 
 ### Phase 1 — Notifications automation (small API surface)
@@ -270,22 +292,19 @@ See §3.2 and [admin-api.md](./admin-api.md). Reporting exposes **19** view slug
 - [ ] Operator docs: when to use personal log vs formal path ([receipts-app.md](./receipts-app.md) already split).
 - [ ] Optional: `POST` route to promote personal invoice → `charges` row (design in [finance-subsystem-design.md](./finance-subsystem-design.md) Phase 2).
 
-### Phase 2 — Scheduling API (larger)
+### Phase 2 — Scheduling API extensions (medium)
 
-Suggested minimal write contract (names illustrative — implement to match [admin-api.md](./admin-api.md) style):
+Core session + attendance CRUD is **done** (Tier 1). Remaining suggested routes:
 
 | Route | Purpose |
 |-------|---------|
-| `POST /api/admin/scheduling/sessions` | Create session (label, start, end, template optional) |
-| `PATCH /api/admin/scheduling/sessions/:id` | Reschedule / cancel |
-| `POST /api/admin/scheduling/sessions/:id/attendance` | Upsert attendance for participant list |
-| `GET /api/admin/scheduling/sessions` | List/filter (or rely on `today-sessions` view for day scope) |
-| `POST /api/admin/scheduling/templates` | Manage recurring templates |
+| `POST /api/admin/scheduling/templates` | **Create** recurring schedule templates |
+| `PATCH /api/admin/scheduling/templates/:id` | **Update** templates |
 | `POST /api/admin/scheduling/generate-sessions` | RPC wrapper: expand templates → `sessions` for date range |
 
 **Prerequisite data:** Participants (waiver path + merges), subscriptions/plans for entitlement checks, then sessions + attendance.
 
-**UI:** Extend dashboard or new `apps/scheduling` — prefer API writes over raw Supabase for consistency.
+**UI:** Extend `admin/apps/dashboard` or add a scheduling app in `admin` — prefer API writes over raw Supabase for consistency.
 
 ### Phase 3 — V2 integrations
 
@@ -304,19 +323,21 @@ Suggested minimal write contract (names illustrative — implement to match [adm
 | **receipts** | **Critical** — all writes | RPC billing, personal log, receipts, discounts |
 | **dashboard** | **High** for admin actions & reporting views | Whitelisted analytics, billing RPCs; some reads still direct Supabase |
 | **marketing** | **Medium** — `/api/lead` | Persisted leads vs mailto-only |
-| **Future scheduling app** | **Will be critical** once built | Validated attendance + entitlement side effects |
+| **Future scheduling app** | **High** — session + attendance CRUD exists | Validated attendance + entitlement side effects; templates/batch still TBD |
 
 ---
 
 ## 9. Related verification commands
 
 ```bash
-# Local API
+# Local API (this repo)
 npm run dev:api
-npm run dev:receipts
 
-# API tests
+# API tests (this repo)
 npm --workspace services/api run test
+
+# Operator UIs (admin repo)
+npm run dev:receipts
 npm run test:receipts
 
 # After linking Supabase project

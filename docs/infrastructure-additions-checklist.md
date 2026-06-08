@@ -17,7 +17,7 @@
 | **Schema** | Migration / RPC / view in `supabase/migrations/` |
 | **API** | Route in `services/api` (`x-admin-key`) |
 | **Jobs** | Cron / worker / external scheduler (e.g. Render cron) |
-| **UI** | Operator app (`apps/dashboard`, `apps/receipts`, or new app) |
+| **UI** | Operator app (`admin/apps/dashboard`, `admin/apps/receipts`, or new app) |
 | **Verify** | Smoke test or automated test |
 
 ---
@@ -118,7 +118,7 @@ Apply these steps for **each** feature below, not only once at the end.
 | Step | Schema | API | Jobs | UI | Verify |
 |------|--------|-----|------|-----|--------|
 | Read bundle | views exist | `GET` reporting: `today-sessions`, `upcoming-access-issues`, `waiver-compliance-gaps` (optional) | — | — | [ ] One page loads all slugs |
-| Write actions | — | Scheduling + attendance routes (1.1) | — | `apps/dashboard` route `/today` | [ ] Check-in from UI hits API |
+| Write actions | — | Scheduling + attendance routes (1.1) | — | `admin/apps/dashboard` route `/today` | [ ] Check-in from UI hits API |
 | Remove direct Supabase writes for scheduling | — | — | — | [ ] SessionsPage migrated or deprecated | [ ] |
 | KPI strip | `view_primary_kpi_summary` | Existing finance summary optional | — | [ ] Active monthly count, AR hint | [ ] |
 
@@ -244,6 +244,7 @@ flowchart TD
 npm install
 npm run dev:api
 npm --workspace services/api run test
+# from admin repo
 npm run dev:dashboard
 npm run dev:receipts
 ```

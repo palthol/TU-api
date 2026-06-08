@@ -4,26 +4,30 @@ This document is the high-level map of **all deployable applications**, who owns
 
 ## 1) Application inventory
 
-From monorepo workspaces (`apps/`*, `services/`*):
+**This repo** (`temple underground signup`):
 
-- `apps/marketing` — public marketing and lead capture UI.
 - `apps/waiver-v2` — participant waiver flow UI.
-- `apps/dashboard` — internal operations and analysis UI.
-- `apps/receipts` — internal finance/bookkeeping UI.
+- `apps/waiver-viewer` — Cloudflare-Access waiver review UI.
 - `services/api` — operational API and integration boundary.
 - `supabase` (Postgres, Storage, RLS, RPC, views) — system of record.
+
+**Sibling repos:**
+
+- `marketing/TU-web` — public marketing and lead capture UI.
+- `admin/apps/dashboard` — internal operations and analysis UI.
+- `admin/apps/receipts` — internal finance/bookkeeping UI.
 
 ## 2) Ownership map (authoritative responsibilities)
 
 
-| Layer            | Owns                                                                               | Must not own                                              |
-| ---------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| `apps/marketing` | Lead form UX and public content rendering                                          | Core billing tables, participant identity, receipts truth |
-| `apps/waiver-v2` | Waiver collection UX                                                               | Direct privileged DB writes from browser                  |
-| `apps/dashboard` | Admin workflows + read-model visualization                                         | Becoming a second backend or source of truth              |
-| `apps/receipts`  | Finance operator workflows and finance orchestration UX                            | Participant master identity, entitlement policy engine    |
-| `services/api`   | Validated write orchestration, policy checks, integration workflows, notifications | Persisting app-only state that bypasses DB truth          |
-| Supabase         | Canonical data storage, constraints, RLS, views, RPC contracts                     | UI decisions and presentation behavior                    |
+| Layer                     | Owns                                                                               | Must not own                                              |
+| ------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `marketing/TU-web`        | Lead form UX and public content rendering                                          | Core billing tables, participant identity, receipts truth |
+| `apps/waiver-v2`          | Waiver collection UX                                                               | Direct privileged DB writes from browser                  |
+| `admin/apps/dashboard`    | Admin workflows + read-model visualization                                         | Becoming a second backend or source of truth              |
+| `admin/apps/receipts`     | Finance operator workflows and finance orchestration UX                            | Participant master identity, entitlement policy engine    |
+| `services/api`            | Validated write orchestration, policy checks, integration workflows, notifications | Persisting app-only state that bypasses DB truth          |
+| Supabase                  | Canonical data storage, constraints, RLS, views, RPC contracts                     | UI decisions and presentation behavior                    |
 
 
 ## 3) End-to-end system diagram
@@ -105,9 +109,9 @@ flowchart TD
 
 ## 6) Read-path contract (who reads what)
 
-- `apps/dashboard` reads KPIs and reporting views via API (and may perform limited direct authenticated DB reads where already implemented).
-- `apps/receipts` reads payment board/reporting views via API to locate `account_id` / `charge_id`.
-- `apps/marketing` and `apps/waiver-v2` should treat API responses as their data access boundary.
+- `admin/apps/dashboard` reads KPIs and reporting views via API (and may perform limited direct authenticated DB reads where already implemented).
+- `admin/apps/receipts` reads payment board/reporting views via API to locate `account_id` / `charge_id`.
+- `marketing/TU-web` and `apps/waiver-v2` should treat API responses as their data access boundary.
 
 ## 7) Guardrails for ownership and responsibility
 
@@ -120,7 +124,7 @@ flowchart TD
 ## 8) Practical implementation notes
 
 - Use `services/api` as the mandatory write gateway for privileged actions.
-- Keep public apps (`marketing`, `waiver-v2`) free from privileged database credentials.
+- Keep public apps (`marketing/TU-web`, `waiver-v2`) free from privileged database credentials.
 - Keep reporting views as read models; avoid embedding accounting logic in frontend clients.
 - Keep entitlement policy in its own domain; finance emits payment facts/events for downstream handling.
 

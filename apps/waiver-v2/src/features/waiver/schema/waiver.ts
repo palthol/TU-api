@@ -44,7 +44,8 @@ export const getStepSchema = (t: Translate, stepId: WaiverStepId) => {
 
 export const stepFieldPaths: Record<WaiverStepId, FieldPath<WaiverFormData>[]> = {
   personalInfo: [
-    'personalInfo.fullName',
+    'personalInfo.firstName',
+    'personalInfo.lastName',
     'personalInfo.dateOfBirth',
     'personalInfo.addressLine1',
     'personalInfo.addressLine2',

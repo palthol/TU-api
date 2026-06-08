@@ -33,7 +33,8 @@ export const ReviewStep: React.FC = () => {
     <div className="space-y-6">
       <SectionCard title={t('review.sections.personalInformation')}>
         <div className="grid gap-4 md:grid-cols-2">
-          <ReviewRow label={t('review.fields.fullName')} emptyText={notProvided} value={personalInfo.fullName} />
+          <ReviewRow label={t('review.fields.firstName')} emptyText={notProvided} value={personalInfo.firstName} />
+          <ReviewRow label={t('review.fields.lastName')} emptyText={notProvided} value={personalInfo.lastName} />
           <ReviewRow label={t('review.fields.dateOfBirth')} emptyText={notProvided} value={personalInfo.dateOfBirth} />
           <ReviewRow label={t('review.fields.addressLine1')} emptyText={notProvided} value={personalInfo.addressLine1} />
           <ReviewRow label={t('review.fields.addressLine2')} emptyText={notProvided} value={personalInfo.addressLine2} />

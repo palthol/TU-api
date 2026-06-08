@@ -32,7 +32,7 @@ strings are normalized to `null` on the server before persistence.
 ```jsonc
 {
   "participant": {
-    "full_name": "string",            // required
+    "full_name": "string",            // required; composed from first + last name (each ≥ 2 chars)
     "date_of_birth": "YYYY-MM-DD",    // required
     "email": "string",                // required, RFC 5322 compliant
     "phone": "string",                // required, any format accepted
@@ -122,12 +122,15 @@ strings are normalized to `null` on the server before persistence.
 
 Frontend validation (zod schemas) should ensure:
 
+- Participant first and last name (each at least 2 characters); the submit mapper
+  composes `participant.full_name` as `"<firstName> <lastName>"` before POST.
 - Required participant fields and signature presence.
 - Optional contact/email fields either empty or valid format.
 - Medical conditional requirements (injury details, other injury notes, etc.).
 - Legal initials length and checkbox acceptance.
 
 Backend performs minimum validation (presence of key participant fields,
+`full_name` split into first/last parts with at least 2 characters each,
 signature, legal initials acceptance). Any tightening should be coordinated with
 schema updates to avoid conflicting error handling.
 
