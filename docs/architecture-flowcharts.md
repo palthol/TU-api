@@ -5,14 +5,14 @@
 | Layer | Location | Role |
 |--------|----------|------|
 | Marketing site | `marketing/TU-web` (sibling repo) | Vite + React Router: public pages, schedule/pricing, lead capture → `POST /api/lead`. |
-| Waiver / signup | [`apps/waiver-v2`](../apps/waiver-v2) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API ([`apps/waiver-v2/src/main.tsx`](../apps/waiver-v2/src/main.tsx)). |
-| Waiver review | [`apps/waiver-viewer`](../apps/waiver-viewer) | Mobile-first waiver review UI (Cloudflare Access); also in `admin` repo. |
+| Waiver / signup | `TU-Signup` (sibling repo) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API. |
+| Waiver review | `admin/apps/waiver-viewer` (sibling repo) | Mobile-first waiver review UI (Cloudflare Access). |
 | Operations admin | `admin/apps/dashboard` (sibling repo) | API base URL + `x-admin-key` — reporting views and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). |
 | Finance operator | `admin/apps/receipts` (sibling repo) | Cash log, invoices, formal billing, share text. |
 | Backend API | [`services/api`](../services/api) | Express (`services/api/src/index.js`): waiver submit, admin routes, PDF generation mounted under `/api/waivers`. |
 | Data | [`supabase/migrations`](../supabase/migrations) | Postgres schema + RLS patterns; Storage buckets for signatures and signed PDFs (referenced in API code). |
 
-Root scripts ([`package.json`](../package.json)): `dev` runs waiver apps and API in parallel; `start` runs the API only. Dashboard, receipts, and marketing run from sibling repos.
+Root scripts ([`package.json`](../package.json)): `dev` and `start` run the API. Dashboard, receipts, marketing, and waiver signup run from sibling repos.
 
 ---
 

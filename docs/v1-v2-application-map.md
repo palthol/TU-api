@@ -18,23 +18,23 @@ This document defines how the monorepo is structured, what “done” means at a
 
 ## 1. Deployable applications (inventory)
 
-**This repo** (`temple underground signup`):
+**This repo** (`TU-API`):
 
 | # | Workspace | Package name | Role |
 |---|-----------|--------------|------|
-| 1 | `apps/waiver-v2` | `waiver-v2` | Participant-facing digital waiver wizard → API. |
-| 2 | `apps/waiver-viewer` | `waiver-viewer` | Cloudflare-Access waiver review UI. |
-| 3 | `services/api` | `waiver-api` | Express: waiver submit, PDF routes, **admin API** (billing RPCs, reporting, service role). |
+| 1 | `services/api` | `waiver-api` | Express: waiver submit, PDF routes, **admin API** (billing RPCs, reporting, service role). |
 
 **Sibling repos:**
 
 | Repo | Workspace | Role |
 |------|-----------|------|
+| `TU-Signup` | — | Participant-facing digital waiver wizard → API. |
 | `marketing` | `TU-web` | Public marketing site (schedule, pricing, contact/trial, SEO). |
 | `admin` | `apps/dashboard` | Staff console: auth + read views + admin actions via `x-admin-key`. |
 | `admin` | `apps/receipts` | Operator finance tool: cash log, invoices, formal billing. |
+| `admin` | `apps/waiver-viewer` | Cloudflare-Access waiver review UI. |
 
-Root scripts (this repo): `dev:waiver`, `dev:waiver-viewer`, `dev:api`; `start` runs the API only.
+Root scripts (this repo): `dev`, `dev:api`, `start`.
 
 ---
 
@@ -48,7 +48,7 @@ Root scripts (this repo): `dev:waiver`, `dev:waiver-viewer`, `dev:api`; `start` 
 | **V1 done** | Deployed; accurate copy; **backend lead capture** (form → API → persisted leads) so you can see leads in the system; mailto acceptable only as interim while wiring. |
 | **V2 done** | Real lead pipeline (CRM/email/backend), analytics, sitemap/production hardening as needed. |
 
-### 2.2 Waiver (`apps/waiver-v2`)
+### 2.2 Waiver (`TU-Signup`)
 
 | | |
 |--|--|
@@ -80,7 +80,7 @@ Root scripts (this repo): `dev:waiver`, `dev:waiver-viewer`, `dev:api`; `start` 
 flowchart LR
   subgraph public [Public]
     Marketing[marketing]
-    Waiver[waiver-v2]
+    Waiver[TU-Signup]
   end
   subgraph staff [Staff]
     Dashboard[dashboard]

@@ -1,4 +1,4 @@
-# Temple Underground — signup / API monorepo (agent guide)
+# Temple Underground — API repo (agent guide)
 
 This is the **API repository** and the home of the deployed backend. It is the single
 source of truth for `services/api` (Express, JavaScript) and the Supabase schema
@@ -10,25 +10,25 @@ npm-workspaces monorepo. Node >= 22, npm >= 10.
 ```
 services/api/        Express + JS backend (admin + viewer + public waiver/lead routes). DEPLOYED.
 supabase/migrations/ Ordered SQL migrations — the schema source of truth.
-apps/waiver-v2/      Public waiver signing app.
 docs/                Architecture, admin-api reference, finance subsystem, audits.
 ```
 
 **Sibling repos (front-ends live elsewhere):**
 
+- **`TU-Signup`** — participant waiver signing app (Vite + React).
 - **`admin`** — `apps/dashboard`, `apps/receipts`, `apps/waiver-viewer` (no backend).
 - **`marketing`** — `TU-web` (public site), `TU-marketing` (campaign minisite).
 
-> Never add a second API or duplicate operator/marketing apps here. All backend work
-> happens in this repo; UI work happens in `admin` or `marketing`.
+> Never add a second API or duplicate operator/marketing/waiver apps here. All backend work
+> happens in this repo; UI work happens in sibling repos.
 
 ## Commands
 
 ```bash
 npm install              # installs all workspaces
-npm run dev:api          # API on :3001 (node --watch)
+npm run dev              # API on :3001 (node --watch)
+npm run dev:api          # same as dev
 npm run start            # production start (node src/index.js)
-npm run dev:waiver       # public waiver signing app
 npm run supabase:push    # apply pending migrations to the linked project
 npm run supabase:pull    # pull schema from the linked project
 ```
@@ -37,9 +37,12 @@ There is **no build step** for the API and **no typecheck** (plain JS). Tests: t
 own `vitest` suite (`npm --workspace services/api run test`), plus waiver guard/smoke
 scripts at the repo root.
 
-Operator and marketing UIs run from sibling repos:
+Operator, marketing, and waiver UIs run from sibling repos:
 
 ```bash
+# TU-Signup (waiver)
+cd ../TU-Signup && npm run dev
+
 # admin repo (dashboard, receipts, waiver-viewer)
 npm run dev:dashboard
 npm run dev:receipts

@@ -1,7 +1,7 @@
 # Waiver Submission Payload Contract
 
 This document captures the structure exchanged between the waiver frontend
-(`apps/waiver-v2`) and the API (`services/api`). It is the source of truth for
+(`TU-Signup` repo) and the API (`services/api`). It is the source of truth for
 request fields, types, and optionality. Updates to either side must keep this
 contract in sync.
 
@@ -144,7 +144,7 @@ assets.
 ### Change Process
 
 1. Update this document when introducing new fields or changing semantics.
-2. Adjust frontend schema (`apps/waiver-v2/src/features/waiver/schema`) and
+2. Adjust frontend schema (`TU-Signup/src/features/waiver/schema`) and
    payload mapper(s).
 3. Update backend handler (`services/api/src/index.js`) and migrations if
    storage/table changes are required.
