@@ -1,7 +1,7 @@
 # API capability audit — notifications, finance, scheduling
 
 **Date:** 2026-06-01 (updated; original audit 2026-05-29)  
-**Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs front-ends (`admin/apps/receipts`, `admin/apps/dashboard`, `marketing/TU-web`, `apps/waiver-v2`).  
+**Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs front-ends (`admin/apps/receipts`, `admin/apps/dashboard`, `marketing/TU-web`, `TU-Signup`).  
 **Companion docs:** [admin-api.md](./admin-api.md) (route contracts), [api-schema-audit.md](./api-schema-audit.md) (live DB alignment), [finance-subsystem-design.md](./finance-subsystem-design.md), [receipts-app.md](./receipts-app.md), [v1-v2-application-map.md](./v1-v2-application-map.md).
 
 ---
@@ -35,7 +35,7 @@
 flowchart TB
   subgraph public [Public]
     Marketing[marketing/TU-web]
-    Waiver[apps/waiver-v2]
+    Waiver[TU-Signup]
   end
   subgraph staff [Staff tools - admin repo]
     Dashboard[admin/apps/dashboard]
@@ -227,7 +227,7 @@ Full request/response contracts: [admin-api.md](./admin-api.md) § Scheduling.
 |-----|---------------------|
 | `marketing/TU-web` | **Static** schedule in `site.ts` — not DB-backed |
 | `admin/apps/dashboard` | **Read-only** `sessions` list via Supabase client (`SessionsPage.tsx`) — could migrate to scheduling API |
-| `apps/waiver-v2` | Creates **participants** only (via API submit) |
+| `TU-Signup` | Creates **participants** only (via API submit) |
 | `admin/apps/receipts` | Billing only; can charge **from** attendance if `attendance_record_id` exists |
 
 **Conclusion:** Scheduling is **schema-first with Tier 1 write APIs in place**. Remaining work is operator UI wiring and template/batch generation — not core session CRUD.
@@ -319,7 +319,7 @@ Core session + attendance CRUD is **done** (Tier 1). Remaining suggested routes:
 
 | Application | API value today | Without API you lose |
 |-------------|-----------------|----------------------|
-| **waiver-v2** | **Critical** — only write path | Secure participant/waiver creation, storage, ledger events |
+| **TU-Signup** | **Critical** — only write path | Secure participant/waiver creation, storage, ledger events |
 | **receipts** | **Critical** — all writes | RPC billing, personal log, receipts, discounts |
 | **dashboard** | **High** for admin actions & reporting views | Whitelisted analytics, billing RPCs; some reads still direct Supabase |
 | **marketing** | **Medium** — `/api/lead` | Persisted leads vs mailto-only |

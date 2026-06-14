@@ -14,12 +14,12 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 
 | Path | Purpose |
 |------|--------|
-| `apps/waiver-v2` | Waiver signup UI (Vite + React) — **this repo** |
-| `apps/waiver-viewer` | Standalone mobile-first waiver review UI for trusted operators — **this repo** (also in `admin`) |
+| `TU-Signup` (sibling repo) | Waiver signup UI (Vite + React) |
 | `services/api` | Express API: waiver PDF generation, admin routes, lead capture — **this repo** |
 | `supabase/migrations` | Database schema, RLS, view/function security, indexes — **this repo** |
 | `admin/apps/dashboard` | Admin dashboard: waivers, participants, billing, sessions, reporting — **`admin` repo** |
 | `admin/apps/receipts` | Operator finance tool: cash log, invoices, formal billing — **`admin` repo** |
+| `admin/apps/waiver-viewer` | Standalone mobile-first waiver review UI — **`admin` repo** |
 | `marketing/TU-web` | Public marketing site and lead form — **`marketing` repo** |
 
 ---
@@ -106,14 +106,19 @@ After that, you can use the dashboard (and waiver app) again with a clean DB.
 
 ## 3. Building and running
 
-### 3.1 Waiver app
+### 3.1 Waiver app (TU-Signup repo)
+
+Clone and run the sibling signup repo:
 
 ```bash
-npm run dev:waiver
+git clone https://github.com/palthol/TU-Signup.git
+cd TU-Signup
+npm install
+cp .env.example .env.local   # set VITE_API_BASE_URL
+npm run dev
 ```
 
-Or from `apps/waiver-v2`: `npm run dev`.  
-Build: `npm run build:waiver` (from root) or `npm run build` in `apps/waiver-v2`.
+Build: `npm run build` in the TU-Signup repo.
 
 ### 3.2 API (waiver PDF, etc.)
 
@@ -124,13 +129,9 @@ npm run dev:api
 Or from `services/api`: `npm run dev`.  
 Production: `npm run start` from root or from `services/api`.
 
-### 3.3 Both together
+### 3.3 API + waiver together
 
-```bash
-npm run dev
-```
-
-Runs waiver app and API in parallel.
+Run the API from this repo (`npm run dev:api`) and the waiver app from TU-Signup (`npm run dev`) in separate terminals.
 
 ---
 
@@ -230,14 +231,12 @@ select * from participant_entitlement_status where participant_id = 'PARTICIPANT
 select can_attend_group_session('PARTICIPANT_UUID', null);
 ```
 
-### npm scripts (from repo root)
+### npm scripts (from this repo root)
 
-- `npm run dev` — Waiver apps + API (this repo)
-- `npm run dev:waiver` — Waiver app only
-- `npm run dev:api` — API only
-- `npm run build` / `npm run build:waiver` / `npm run build:waiver-viewer` — Build waiver apps
+- `npm run dev` / `npm run dev:api` — API only
 - `npm run start` — Run API (production)
 - `npm run dev:dashboard` / `npm run dev:receipts` — Run from the **`admin`** repo
+- Waiver signup UI — run from **`TU-Signup`** (`npm run dev`)
 
 ---
 

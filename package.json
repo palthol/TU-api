@@ -1,5 +1,5 @@
 {
-  "name": "temple-underground-signup",
+  "name": "tu-api",
   "private": true,
   "version": "0.1.0",
   "engines": {
@@ -7,15 +7,12 @@
     "npm": ">=10"
   },
   "workspaces": [
-    "apps/*",
     "services/*"
   ],
   "scripts": {
-    "dev": "npm-run-all --parallel dev:*",
-    "dev:waiver": "npm --workspace apps/waiver-v2 run dev",
+    "dev": "npm run dev:api",
     "dev:api": "npm --workspace services/api run dev",
-    "build": "npm-run-all build:*",
-    "build:waiver": "npm --workspace apps/waiver-v2 run build",
+    "build": "echo 'API has no build step'",
     "start": "npm --workspace services/api run start",
     "typecheck": "echo 'no types yet'",
     "lint": "echo 'no linter yet'",
@@ -33,14 +30,6 @@
   "devDependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "dotenv": "^16.4.5",
-    "npm-run-all": "^4.1.5",
     "supabase": "^2.75.5"
-  },
-  "dependencies": {
-    "@uiw/react-signature": "^1.3.2"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "4.52.4",
-    "lightningcss-linux-x64-gnu": "1.30.1"
   }
 }

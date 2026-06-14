@@ -5,7 +5,7 @@
 | Layer | Location | Role |
 |--------|----------|------|
 | Marketing site | `marketing/TU-web` (sibling repo) | Vite + React Router: public pages, schedule/pricing, lead capture → `POST /api/lead`. |
-| Waiver / signup | [`apps/waiver-v2`](../apps/waiver-v2) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API ([`apps/waiver-v2/src/main.tsx`](../apps/waiver-v2/src/main.tsx)). |
+| Waiver / signup | [`TU-Signup`](https://github.com/palthol/TU-Signup) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API.
 | Waiver review | [`apps/waiver-viewer`](../apps/waiver-viewer) | Mobile-first waiver review UI (Cloudflare Access); also in `admin` repo. |
 | Operations admin | `admin/apps/dashboard` (sibling repo) | API base URL + `x-admin-key` — reporting views and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). |
 | Finance operator | `admin/apps/receipts` (sibling repo) | Cash log, invoices, formal billing, share text. |

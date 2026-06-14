@@ -4,15 +4,14 @@ This document is the high-level map of **all deployable applications**, who owns
 
 ## 1) Application inventory
 
-**This repo** (`temple underground signup`):
+**This repo** (`TU-API`):
 
-- `apps/waiver-v2` — participant waiver flow UI.
-- `apps/waiver-viewer` — Cloudflare-Access waiver review UI.
 - `services/api` — operational API and integration boundary.
 - `supabase` (Postgres, Storage, RLS, RPC, views) — system of record.
 
 **Sibling repos:**
 
+- `TU-Signup` — participant waiver flow UI.
 - `marketing/TU-web` — public marketing and lead capture UI.
 - `admin/apps/dashboard` — internal operations and analysis UI.
 - `admin/apps/receipts` — internal finance/bookkeeping UI.
@@ -23,7 +22,7 @@ This document is the high-level map of **all deployable applications**, who owns
 | Layer                     | Owns                                                                               | Must not own                                              |
 | ------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | `marketing/TU-web`        | Lead form UX and public content rendering                                          | Core billing tables, participant identity, receipts truth |
-| `apps/waiver-v2`          | Waiver collection UX                                                               | Direct privileged DB writes from browser                  |
+| `TU-Signup`               | Waiver collection UX                                                               | Direct privileged DB writes from browser                  |
 | `admin/apps/dashboard`    | Admin workflows + read-model visualization                                         | Becoming a second backend or source of truth              |
 | `admin/apps/receipts`     | Finance operator workflows and finance orchestration UX                            | Participant master identity, entitlement policy engine    |
 | `services/api`            | Validated write orchestration, policy checks, integration workflows, notifications | Persisting app-only state that bypasses DB truth          |
@@ -101,7 +100,7 @@ flowchart TD
 ## 5) Write-path contract (how data is manipulated)
 
 - Public lead flow: `marketing -> services/api -> marketing_leads`.
-- Waiver flow: `waiver-v2 -> services/api -> waiver tables + storage artifacts`.
+- Waiver flow: `TU-Signup -> services/api -> waiver tables + storage artifacts`.
 - Finance quick log flow: `receipts -> personal-finance endpoints -> personal_finance_entries`.
 - Formal billing flow: `receipts/dashboard -> record-payment/refund/receipt endpoints -> payments + allocations + payment_refunds + receipts`.
 - Expense flow: `receipts/dashboard -> operating-expenses endpoints -> operating_expenses`.
@@ -111,7 +110,7 @@ flowchart TD
 
 - `admin/apps/dashboard` reads KPIs and reporting views via API (and may perform limited direct authenticated DB reads where already implemented).
 - `admin/apps/receipts` reads payment board/reporting views via API to locate `account_id` / `charge_id`.
-- `marketing/TU-web` and `apps/waiver-v2` should treat API responses as their data access boundary.
+- `marketing/TU-web` and `TU-Signup` should treat API responses as their data access boundary.
 
 ## 7) Guardrails for ownership and responsibility
 
@@ -124,7 +123,7 @@ flowchart TD
 ## 8) Practical implementation notes
 
 - Use `services/api` as the mandatory write gateway for privileged actions.
-- Keep public apps (`marketing/TU-web`, `waiver-v2`) free from privileged database credentials.
+- Keep public apps (`marketing/TU-web`, `TU-Signup`) free from privileged database credentials.
 - Keep reporting views as read models; avoid embedding accounting logic in frontend clients.
 - Keep entitlement policy in its own domain; finance emits payment facts/events for downstream handling.
 
