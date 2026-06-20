@@ -1,26 +1,17 @@
 {
-  "name": "temple-underground-signup",
+  "name": "tu-api",
   "private": true,
   "version": "0.1.0",
   "engines": {
-    "node": "22.x",
-    "npm": "10.x"
+    "node": ">=22",
+    "npm": ">=10"
   },
   "workspaces": [
-    "apps/*",
     "services/*"
   ],
   "scripts": {
-    "dev": "npm-run-all --parallel dev:*",
-    "dev:waiver": "npm --workspace apps/waiver-v2 run dev",
+    "dev": "npm --workspace services/api run dev",
     "dev:api": "npm --workspace services/api run dev",
-    "dev:dashboard": "npm --workspace apps/dashboard run dev",
-    "dev:marketing": "npm --workspace apps/marketing run dev",
-    "build": "npm-run-all build:*",
-    "build:waiver": "npm --workspace apps/waiver-v2 run build",
-    "build:dashboard": "npm --workspace apps/dashboard run build",
-    "build:marketing": "npm --workspace apps/marketing run build",
-    "test:marketing": "npm --workspace apps/marketing run test",
     "start": "npm --workspace services/api run start",
     "typecheck": "echo 'no types yet'",
     "lint": "echo 'no linter yet'",
@@ -31,13 +22,13 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "guard:waiver-schema": "node scripts/guard-waiver-schema.mjs",
-    "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs"
+    "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs",
+    "tu-test:seed": "node scripts/tu-test-seed.mjs",
+    "tu-test:cleanup": "node scripts/tu-test-cleanup.mjs"
   },
   "devDependencies": {
-    "npm-run-all": "^4.1.5",
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
     "supabase": "^2.75.5"
-  },
-  "dependencies": {
-    "@uiw/react-signature": "^1.3.2"
   }
 }

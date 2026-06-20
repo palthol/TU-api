@@ -14,10 +14,13 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 
 | Path | Purpose |
 |------|--------|
-| `apps/waiver-v2` | Waiver signup UI (Vite + React) |
-| `apps/dashboard` | Admin dashboard (Vite + React): waivers, participants, accounts, plans, subscriptions, billing, sessions, entitlement status; uses same Supabase DB |
-| `services/api` | Express API: waiver PDF generation, can be extended for other endpoints |
-| `supabase/migrations` | Database schema, RLS, view/function security, indexes (0001 → 0009). See `docs/database-overview.md` for what to expect. |
+| `TU-Signup` | Waiver signup UI (Vite + React) — **sibling repo** |
+| `admin/apps/waiver-viewer` | Standalone mobile-first waiver review UI for trusted operators — **`admin` repo** |
+| `services/api` | Express API: waiver PDF generation, admin routes, lead capture — **this repo** |
+| `supabase/migrations` | Database schema, RLS, view/function security, indexes — **this repo** |
+| `admin/apps/dashboard` | Admin dashboard: waivers, participants, billing, sessions, reporting — **`admin` repo** |
+| `admin/apps/receipts` | Operator finance tool: cash log, invoices, formal billing — **`admin` repo** |
+| `marketing/TU-web` | Public marketing site and lead form — **`marketing` repo** |
 
 ---
 
@@ -30,11 +33,13 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 
 ### 2.2 Environment
 
-- **Waiver app** — If it talks to Supabase directly, set Supabase URL and anon key (e.g. in Vite env).
-- **Dashboard app** — In `apps/dashboard`, copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same project as waiver). Use the **anon** / **public** (publishable) key from Project Settings → API, not the service_role key. Sign in with the admin user you add to `app_admin`.
+- **Waiver app** — In the **`TU-Signup`** repo, copy `.env.example` to `.env.local` and set `VITE_API_BASE_URL` for production API access. Local dev proxies `/api` to `http://localhost:3001` when unset.
+- **Dashboard app** — In the **`admin`** repo (`admin/apps/dashboard`), copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same project as waiver). Use the **anon** / **public** (publishable) key from Project Settings → API, not the service_role key. Sign in with the admin user you add to `app_admin`.
 - **API** — In `services/api`, add a `.env` with at least:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
+  - Optional notifications: `DISCORD_WEBHOOK_URL` and/or `SLACK_WEBHOOK_URL`
+- **Waiver viewer app** — Set `VITE_API_BASE_URL` if the API is not at `http://localhost:3001`. For convenience on a private/trusted deployment, set `VITE_ADMIN_API_KEY` to the same value as the API service's `ADMIN_API_KEY`; because Vite exposes `VITE_*` values in the browser bundle, only do this when access to the viewer itself is restricted.
 
 Keep `.env` out of git (already in `.gitignore`).
 
@@ -103,12 +108,15 @@ After that, you can use the dashboard (and waiver app) again with a clean DB.
 
 ### 3.1 Waiver app
 
+Run from the **`TU-Signup`** sibling repo:
+
 ```bash
-npm run dev:waiver
+cd ../TU-Signup
+npm install
+npm run dev
 ```
 
-Or from `apps/waiver-v2`: `npm run dev`.  
-Build: `npm run build:waiver` (from root) or `npm run build` in `apps/waiver-v2`.
+Build: `npm run build` in `TU-Signup`.
 
 ### 3.2 API (waiver PDF, etc.)
 
@@ -119,13 +127,9 @@ npm run dev:api
 Or from `services/api`: `npm run dev`.  
 Production: `npm run start` from root or from `services/api`.
 
-### 3.3 Both together
+### 3.3 API + waiver together
 
-```bash
-npm run dev
-```
-
-Runs waiver app and API in parallel.
+Start the API from this repo (`npm run dev`) and the waiver app from `TU-Signup` (`npm run dev`) in separate terminals.
 
 ---
 
@@ -227,12 +231,10 @@ select can_attend_group_session('PARTICIPANT_UUID', null);
 
 ### npm scripts (from repo root)
 
-- `npm run dev` — Waiver app + API
-- `npm run dev:waiver` — Waiver app only
-- `npm run dev:dashboard` — Dashboard app (port 5174)
-- `npm run dev:api` — API only
-- `npm run build` / `npm run build:waiver` / `npm run build:dashboard` — Build
+- `npm run dev` / `npm run dev:api` — API only (this repo)
 - `npm run start` — Run API (production)
+- `npm run dev:dashboard` / `npm run dev:receipts` — Run from the **`admin`** repo
+- `npm run dev` in **`TU-Signup`** — Waiver signup app
 
 ---
 

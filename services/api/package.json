@@ -15,6 +15,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jose": "^6.0.11",
     "mustache": "^4.2.0",
     "node-fetch": "^3.3.2",
     "pdf-lib": "^1.17.1",
@@ -24,9 +25,9 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.3",
     "@types/supertest": "^6.0.3",
-    "@vitest/coverage-v8": "^4.0.16",
-    "@vitest/ui": "^4.0.16",
+    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/ui": "^4.1.0",
     "supertest": "^7.1.4",
-    "vitest": "^4.0.16"
+    "vitest": "^4.1.0"
   }
 }

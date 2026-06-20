@@ -1,0 +1,25 @@
+---
+description: services/api (Express, JS) + Supabase schema conventions for the API repo
+globs: services/api/**,supabase/**
+alwaysApply: false
+---
+
+# API + schema conventions (this is the deployed backend)
+
+- `services/api` is the **deployed** API and `supabase/migrations/` is the schema source of
+  truth. The database is **live production data** — be careful with writes and migrations.
+- **Auth:** every `/api/admin/*` route stays behind the `x-admin-key` check; `/api/viewer/*`
+  uses Cloudflare Access. Never add an admin route that skips the key.
+- **Service-role client:** the Supabase client bypasses RLS, so each route owns its
+  authorization. Never log `ADMIN_API_KEY` / `SUPABASE_SERVICE_ROLE_KEY`; never expose them
+  to any `apps/*` (`VITE_*`) bundle.
+- **Validate input** before using it in a query; return errors as `{ ok:false, error }` with
+  a non-2xx status. Success is `200 { ok:true, ... }`.
+- **Money is integer cents.** Multi-write operations (payment + allocations + receipt) should
+  be atomic — prefer a Postgres function/RPC over sequential inserts.
+- **Schema changes:** add a new numbered migration, keep it idempotent, apply it, then
+  re-verify against the live DB (`list_migrations`, `list_tables`). Confirm the live project
+  is actually at the migration you expect (live through `0019` as of 2026-05-29);
+  see `docs/api-schema-audit.md`.
+- **Don't rename fields or invent endpoints** the front-ends consume; update `docs/admin-api.md`
+  when behavior changes so the `admin` repo design docs stay accurate.

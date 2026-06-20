@@ -4,13 +4,15 @@
 
 | Layer | Location | Role |
 |--------|----------|------|
-| Marketing site | [`apps/marketing`](../apps/marketing) | Vite + React Router: pages (`/`, `/programs`, `/schedule-pricing`, `/coaches`, `/about`, `/contact`) — content and CTAs ([`apps/marketing/src/App.tsx`](../apps/marketing/src/App.tsx)). |
-| Waiver / signup | [`apps/waiver-v2`](../apps/waiver-v2) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API ([`apps/waiver-v2/src/main.tsx`](../apps/waiver-v2/src/main.tsx)). |
-| Operations admin | [`apps/dashboard`](../apps/dashboard) | **Current default [`App.tsx`](../apps/dashboard/src/App.tsx):** API base URL + `x-admin-key` — SQL “analysis” views (payment board, entitlements, etc.) and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). **Note:** The repo also contains [`DashboardLayout.tsx`](../apps/dashboard/src/pages/DashboardLayout.tsx), [`LoginPage.tsx`](../apps/dashboard/src/pages/LoginPage.tsx), and Supabase-backed pages (`HomePage`, `ParticipantsPage`, …) that are **not** wired by the current `main.tsx` → `App` entry; treat them as alternate/in-progress unless you connect a router. |
+| Marketing site | `marketing/TU-web` (sibling repo) | Vite + React Router: public pages, schedule/pricing, lead capture → `POST /api/lead`. |
+| Waiver / signup | `TU-Signup` (sibling repo) | Single-page wizard (`WaiverPage`): personal info, medical, legal, review; optional household modes; posts JSON to the API. |
+| Waiver review | `admin/apps/waiver-viewer` (sibling repo) | Mobile-first waiver review UI (Cloudflare Access). |
+| Operations admin | `admin/apps/dashboard` (sibling repo) | API base URL + `x-admin-key` — reporting views and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). |
+| Finance operator | `admin/apps/receipts` (sibling repo) | Cash log, invoices, formal billing, share text. |
 | Backend API | [`services/api`](../services/api) | Express (`services/api/src/index.js`): waiver submit, admin routes, PDF generation mounted under `/api/waivers`. |
 | Data | [`supabase/migrations`](../supabase/migrations) | Postgres schema + RLS patterns; Storage buckets for signatures and signed PDFs (referenced in API code). |
 
-Root scripts ([`package.json`](../package.json)): `dev` runs waiver, API, dashboard, and marketing in parallel; `start` runs the API only.
+Root scripts ([`package.json`](../package.json)): `dev` and `start` run the API. Dashboard, receipts, marketing, and waiver signup run from sibling repos.
 
 ---
 
@@ -49,7 +51,7 @@ flowchart TB
 
 ---
 
-## Chart 2 — Participant waiver submit flow (core “signup” path)
+## Chart 2 — Participant waiver submit flow (core "signup" path)
 
 This matches the handler in [`services/api/src/index.js`](../services/api/src/index.js) (from validation through response).
 
@@ -74,7 +76,7 @@ flowchart TD
 
 ## Chart 3 — Admin / operations flow
 
-The dashboard’s sidebar ([`apps/dashboard/src/App.tsx`](../apps/dashboard/src/App.tsx)) drives two families of behavior:
+The dashboard sidebar (`admin/apps/dashboard`) drives two families of behavior:
 
 ```mermaid
 flowchart LR
@@ -111,4 +113,4 @@ Registered server routes include [`registerAdminBillingRoutes`](../services/api/
 
 - **Public funnel:** Marketing → (link) → Waiver app.
 - **Core integration:** Waiver app → Express `POST /api/waivers/submit` → Supabase tables + Storage + account binding.
-- **Back office:** Dashboard (API key) → Express admin + reporting endpoints → same Supabase data.
+- **Back office:** `admin/apps/dashboard` and `admin/apps/receipts` (API key) → Express admin + reporting endpoints → same Supabase data.

@@ -1,6 +1,8 @@
 # Admin API — Temple Underground
 
-All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the optional `apps/dashboard` merge UI is for trusted operators only).
+All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the `admin/apps/dashboard` merge UI is for trusted operators only).
+
+The standalone waiver viewer can optionally set `VITE_ADMIN_API_KEY` to that same `ADMIN_API_KEY` so you do not type it on each page load. This is convenient but browser-visible; only use it when the viewer deployment is private/trusted.
 
 **Base URL:** same host as `services/api` (e.g. `http://localhost:3001`).
 
@@ -11,12 +13,13 @@ All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
+| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`) |
 | **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id` |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
-| **Discord** | Set **`DISCORD_WEBHOOK_URL`** on the API service for admin notification routes; messages are plain text (max ~2000 chars) |
+| **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
 
 ---
 
@@ -26,11 +29,12 @@ All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`
 
 Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Rate-limit at the edge in production if needed.
 
-**Body (JSON)** — align with `apps/marketing` (`name`, `goals`, `preferredTime`; at least one of `email` or `phone`):
+**Body (JSON)** — align with marketing lead forms (`firstName`, `lastName`, `goals`, `preferredTime`; at least one of `email` or `phone`):
 
 ```json
 {
-  "name": "Jane Doe",
+  "firstName": "Jane",
+  "lastName": "Doe",
   "email": "jane@example.com",
   "phone": "",
   "goals": "first-class",
@@ -43,7 +47,38 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
 
 **Response:** `{ "ok": true }`
 
-**Errors:** `400` — `invalid_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+
+---
+
+### `POST /api/waivers/submit` (public)
+
+Stores the waiver submission and then records a **`waiver.submitted`** event in `event_ledger`. After persistence, the API sends a notification to each configured webhook provider:
+
+- `DISCORD_WEBHOOK_URL`
+- `SLACK_WEBHOOK_URL`
+
+Notification failures are logged server-side and do **not** fail an otherwise successful waiver submission. If neither webhook is configured, the API logs a warning and returns the normal waiver response.
+
+---
+
+### `GET /api/admin/waivers`
+
+Minimal authenticated list endpoint for future waiver review UI work. Reads `view_waiver_documents`.
+
+**Query:**
+
+- `limit` — optional, default `50`, max `100`
+- `offset` — optional, default `0`
+
+**Response:** `{ "ok": true, "limit": 50, "offset": 0, "rowCount": N, "rows": [...] }`
+
+The standalone waiver viewer app (`admin/apps/waiver-viewer`) uses the richer reporting endpoint for the same underlying Supabase view:
+
+```text
+GET /api/admin/reporting/views/waiver-documents?sort=signed_at_utc&order=desc
+GET /api/admin/reporting/views/waiver-documents?sort=participant_full_name&order=asc
+```
 
 ---
 
@@ -74,6 +109,51 @@ Insert a **write-off** row (`charge_adjustments`). Reduces **net due** via `view
 
 ---
 
+### `GET /api/admin/billing/charge-discounts`
+
+Lists explicit discount line-items applied to a charge.
+
+**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/charge-discounts`
+
+Creates an explicit discount line-item (flat amount or percent) for a charge. Discount math is enforced so
+`affiliate credits + write-offs + discounts <= charge gross`.
+
+**Body (flat):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "flat",
+  "flat_amount_cents": 2500,
+  "label": "Loyalty discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Body (percent):**
+
+```json
+{
+  "charge_id": "uuid",
+  "discount_type": "percent",
+  "percent_basis_points": 1000,
+  "label": "Referral discount",
+  "reason": "Optional",
+  "created_by": "optional"
+}
+```
+
+**Response:** `{ "ok": true, "discount_id": "uuid", "applied_amount_cents": 2500, "net_due_cents": 7500 }`
+
+---
+
 ### `POST /api/admin/billing/payment-refunds`
 
 Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_allocations` FIFO, reopens `charges.status` from `paid` → `open` when allocations no longer cover net due. When cumulative refunds for the payment reach the full payment amount, `payments.status` is set to **`refunded`**.
@@ -93,6 +173,42 @@ Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_a
 **Response:** `{ "ok": true, "refund_id": "<uuid>" }`
 
 **Validation (RPC):** payment must be `succeeded`; refund total ≤ payment amount; refund ≤ sum of allocations for that payment.
+
+---
+
+### `POST /api/admin/billing/subscriptions`
+
+Creates an **active** subscription for a participant on a plan (enrollment). Calls RPC `create_subscription` (migration **0020**).
+
+**Body (JSON):**
+
+```json
+{
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "starts_at": "YYYY-MM-DD optional; defaults to current date in DB",
+  "ends_at": "YYYY-MM-DD optional",
+  "account_id": "uuid optional; defaults to participant's first account_members row",
+  "create_initial_charge": "boolean optional; defaults to false — only for monthly plans",
+  "notes": "optional text",
+  "created_by": "optional; defaults to admin_api"
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "subscription_id": "uuid",
+  "account_id": "uuid",
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "initial_charge_id": "uuid | null"
+}
+```
+
+**Errors:** `400` — participant/plan not found, inactive plan, no account binding, `create_initial_charge` on non-monthly plan, date validation failures (Postgres exception message in `error`).
 
 ---
 
@@ -253,9 +369,134 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ---
 
+### `POST /api/admin/billing/personal-finance-entries`
+
+Operator-owned rows in **`personal_finance_entries`**: quick cash log or lightweight invoice drafts. Does **not** replace `payments` / `receipts`; use formal billing routes when you need allocations against `charges`.
+
+**Body — cash received**
+
+```json
+{
+  "entry_kind": "cash_received",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "method": "cash",
+  "issued_by": "Your name",
+  "notes": "optional",
+  "account_id": "optional uuid",
+  "charge_id": "optional uuid"
+}
+```
+
+**`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other`.
+
+**Body — invoice**
+
+```json
+{
+  "entry_kind": "invoice",
+  "member_display_name": "Jane Doe",
+  "amount_cents": 15000,
+  "issued_by": "Your name",
+  "notes": "optional",
+  "due_at": "2026-04-23",
+  "invoice_status": "draft"
+}
+```
+
+If `due_at` is omitted, the API defaults to **tomorrow (UTC date)**. `invoice_status` defaults to `draft` and must be one of `draft`, `sent`, `paid`, `void`.
+
+**Response:** `{ "ok": true, "id": "<uuid>" }`
+
+---
+
+### `GET /api/admin/billing/personal-finance-entries`
+
+**Query:** `limit` (optional, default `100`, max `500`), `entry_kind` (optional: `cash_received` or `invoice`)
+
+**Response:** `{ "ok": true, "rows": [ ... ] }`
+
+---
+
+### `POST /api/admin/billing/personal-finance-entries/:entryId/invoice-status`
+
+Updates **`invoice_status`** for an **`invoice`** entry only.
+
+**Body:** `{ "status": "sent" }` — one of `draft`, `sent`, `paid`, `void`
+
+**Response:** `{ "ok": true, "id": "<uuid>", "invoice_status": "sent" }`
+
+---
+
+### Scheduling (`/api/admin/scheduling/*`)
+
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`).
+
+#### `GET /api/admin/scheduling/sessions`
+
+List sessions with optional filters.
+
+**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200), `offset` (default 0)
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+#### `GET /api/admin/scheduling/sessions/:sessionId`
+
+Single session plus its `attendance_records`.
+
+**Response:** `{ "ok": true, "session": { ... }, "attendance": [ ... ] }`
+
+#### `POST /api/admin/scheduling/sessions`
+
+**Body (JSON):**
+
+```json
+{
+  "starts_at": "ISO-8601 datetime",
+  "ends_at": "ISO-8601 datetime",
+  "session_label": "optional e.g. Class 1",
+  "schedule_template_id": "uuid optional",
+  "notes": "optional"
+}
+```
+
+**Response:** `{ "ok": true, "session": { ... } }`
+
+#### `PATCH /api/admin/scheduling/sessions/:sessionId`
+
+Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
+
+**Response:** `{ "ok": true, "session": { ... } }`
+
+#### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
+
+Upserts attendance for one or more participants (unique per session + participant).
+
+**Body (JSON):**
+
+```json
+{
+  "records": [
+    { "participant_id": "uuid", "status": "present | no_show | cancelled", "recorded_by": "optional" }
+  ],
+  "enforce_entitlement": true,
+  "recorded_by": "optional default for rows without recorded_by"
+}
+```
+
+When `enforce_entitlement` is true (default), `present` rows call `can_attend_group_session` first; blocked participants appear in `blocked` and are not upserted.
+
+**Response:** `{ "ok": true, "session_id", "upserted": [ ... ], "blocked": [ { "participant_id", "reason" } ] }`
+
+**Errors:** `400` — `session_cancelled`, `all_records_blocked`, validation errors
+
+---
+
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
+
+**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "rowCount": N }`
 
@@ -266,6 +507,8 @@ Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and post
 ### `POST /api/admin/notifications/discord/daily-digest`
 
 Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 hours, counts for payment reminders, plus the same overdue / due-soon list as the payment-reminders route.
+
+**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
 
@@ -285,6 +528,46 @@ Calls RPC `merge_participants`: repoints FKs from duplicate → canonical; sets 
 ```
 
 **Response:** `{ "ok": true }`
+
+---
+
+### `GET /api/admin/participants/search`
+
+Participant-first lookup for finance and admin operator flows. Searches existing participants by name, email, or phone, then returns linked accounts and a preferred `account_id` when available.
+
+**Query:**
+
+- `q` — required string, minimum 2 characters
+- `limit` — optional, default `8`, min `1`, max `25`
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "rows": [
+    {
+      "participant_id": "uuid",
+      "full_name": "Jane Doe",
+      "email": "jane@example.com",
+      "cell_phone": "555-111-2222",
+      "home_phone": null,
+      "account_count": 1,
+      "preferred_account_id": "uuid",
+      "accounts": [
+        {
+          "account_id": "uuid",
+          "role": "payer",
+          "account_status": "active",
+          "account_primary_contact_name": "Jane Doe"
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Errors:** `400` — `query_min_length_2` (or DB/select errors)
 
 ---
 
@@ -371,18 +654,56 @@ Primary KPI summary for a month window used by dashboard cards.
 
 ---
 
+### `GET /api/admin/finance/monthly-summary`
+
+Monthly finance summary contract for dashboard export and bookkeeping sustainability checks.
+
+**Query:**
+- `month` — optional `YYYY-MM`; defaults to current UTC month
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "summary": {
+    "month": "2026-04",
+    "month_start": "2026-04-01",
+    "month_end": "2026-04-30",
+    "revenue_cents": 185000,
+    "expenses_cents": 120000,
+    "operating_delta_cents": 65000,
+    "deficit_to_cover_cents": 0,
+    "owner_subsidy_cents": 0
+  }
+}
+```
+
+**Field definitions:**
+- `revenue_cents` — net member cash for month (from `view_analytics_revenue_waterfall_monthly.net_cash_collected_cents`)
+- `expenses_cents` — sum of `operating_expenses.amount_cents` for `expense_date` in month
+- `operating_delta_cents` — `revenue_cents - expenses_cents`
+- `deficit_to_cover_cents` — `max(0, expenses_cents - revenue_cents)`
+- `owner_subsidy_cents` — currently `0` placeholder until subsidy-specific storage is introduced
+
+---
+
 ## Waiver PDF routes
 
 Mounted under `/api/waivers/*` with the same `requireAdmin` pattern where applicable (see `services/api/src/index.js`).
 
 ---
 
-## Local dashboard (`apps/dashboard`)
+## Local operator UIs (sibling repos)
 
-- **Sidebar layout:** **Analysis** now starts with **Primary KPIs** (expected revenue, actual revenue, visitors, monthly members), then whitelisted reporting views for deeper inspection. **Administration** groups **Merge**, **Write-off**, **Refund**, **Upgrade**, **Pay-per-class**, and **Waiver** URLs.
-- Sticky header: API base + admin key. Changing analysis view (or pasting the key) auto-loads data; **Refresh** re-fetches with the current row limit (max 500).
-- `revenue-waterfall-monthly` includes quick date presets in the UI (`3M`, `6M`, `12M`, `YTD`) plus optional threshold filters for net cash / collected / refunded cents.
-- `npm run dev:dashboard` (from repo root; run `npm install` in the monorepo first)
-- Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`
-- `apps/marketing` dev server proxies `/api/*` to `http://localhost:3001` so `POST /api/lead` works when the API is running locally
-- Paste **x-admin-key** only in trusted sessions; do not commit keys
+Dashboard and receipts live in the **`admin`** repo; marketing lives in **`marketing/TU-web`**.
+
+- **Dashboard** (`admin/apps/dashboard`): Analysis views (KPIs, payment board, entitlements) and admin actions (merge, write-off, refund, upgrade, waiver URL lookup). Run `npm run dev:dashboard` from the `admin` repo.
+- **Receipts** (`admin/apps/receipts`): Cash log, invoices, formal billing. Run `npm run dev:receipts` from the `admin` repo.
+- **Marketing** (`marketing/TU-web`): Public site; dev server proxies `/api/*` to `http://localhost:3001` so `POST /api/lead` works when the API is running locally.
+
+For all operator apps:
+
+- Start the API first: `npm run dev:api` (this repo).
+- Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
+- Paste **x-admin-key** only in trusted sessions; do not commit keys.

@@ -8,27 +8,26 @@ Summary of what the current schema and migrations provide, and optional next ste
 
 ### 1.1 Data model (in short)
 
-| Area | Tables / objects | Purpose |
-|------|------------------|--------|
-| **Waivers** | `participants`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails` | Signup flow, one waiver per participant (with medical + emergency contact), audit per submission. |
-| **View** | `view_waiver_documents` | One row per waiver with participant, medical, emergency contact, and latest audit — used for PDF generation and reporting. |
-| **Accounts & billing** | `accounts`, `account_members`, `plan_definitions`, `plan_entitlements`, `subscriptions`, `charges`, `payments`, `payment_allocations` | One account (payer) can have many participants; plans define price and entitlements; subscriptions link account+participant to a plan; charges and payments are ledgers. |
-| **Schedule & attendance** | `schedule_templates`, `sessions`, `attendance_records`, `private_usage`, `entitlement_credits`, `access_overrides` | Recurring schedule, concrete sessions, who attended; private minutes; bonus credits; time-limited overrides. |
-| **Admin** | `app_admin`, `private.is_admin()`, RLS on all tables | Only users listed in `app_admin` (or the service role) can read/write. |
+
+| Area                      | Tables / objects                                                                                                                      | Purpose                                                                                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Waivers**               | `participants`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails`                                           | Signup flow, one waiver per participant (with medical + emergency contact), audit per submission.                                                                        |
+| **View**                  | `view_waiver_documents`                                                                                                               | One row per waiver with participant, medical, emergency contact, and latest audit — used for PDF generation and reporting.                                               |
+| **Accounts & billing**    | `accounts`, `account_members`, `plan_definitions`, `plan_entitlements`, `subscriptions`, `charges`, `payments`, `payment_allocations` | One account (payer) can have many participants; plans define price and entitlements; subscriptions link account+participant to a plan; charges and payments are ledgers. |
+| **Schedule & attendance** | `schedule_templates`, `sessions`, `attendance_records`, `private_usage`, `entitlement_credits`, `access_overrides`                    | Recurring schedule, concrete sessions, who attended; private minutes; bonus credits; time-limited overrides.                                                             |
+| **Admin**                 | `app_admin`, `private.is_admin()`, RLS on all tables                                                                                  | Only users listed in `app_admin` (or the service role) can read/write.                                                                                                   |
+
 
 ### 1.2 What works out of the box
 
 - **Waiver flow**  
-  Create participant and waiver (and related rows); query `view_waiver_documents` for PDF/reporting. RLS: admin-only.
-
+Create participant and waiver (and related rows); query `view_waiver_documents` for PDF/reporting. RLS: admin-only.
 - **Billing**  
   - Create accounts, plans, subscriptions; create charges and payments manually or via your app.  
   - **Monthly charge generation:** run `generate_monthly_charges()` (manually or via pg_cron). It only creates charges for plans with `billing_cadence = 'monthly'` and only one charge per subscription per coverage period. It does **not** run by itself; you must schedule or call it.
-
 - **Entitlements**  
   - **View:** `participant_entitlement_status` — per participant, per entitlement: usage (sessions or minutes), credits, `has_availability`, `remaining`. Respects `reset_rule` (e.g. calendar week) and active `access_overrides`.  
   - **Helper:** `can_attend_group_session(participant_id, session_label)` — returns true if the participant has an active override or a group-session entitlement with availability (optional session label filter).
-
 - **Security**  
   - RLS on every table; only admins (and service_role) get access.  
   - Views use `security_invoker = on`; functions use `search_path = public`.  
@@ -63,13 +62,15 @@ So you can expect:
 
 Only consider these if you see real slowness or plan for much higher load.
 
-| Option | When to consider | Effort |
-|--------|-------------------|--------|
-| **Materialized view for `participant_entitlement_status`** | Dashboard or API hits this view a lot and near–real-time isn’t required. | Create mat view, refresh on a schedule (e.g. every 5–15 min) or after relevant writes. |
-| **Scheduled refresh job** | You want “good enough” freshness for entitlement display without recalculating on every request. | Use pg_cron (or external cron) to run `REFRESH MATERIALIZED VIEW CONCURRENTLY participant_entitlement_status;`. |
-| **Expression index on sessions** | You often filter “sessions this week” by `date_trunc('week', starts_at)`. | `create index ... on sessions (date_trunc('week', starts_at));` |
-| **Partial index on active plans** | Dashboard almost always filters `plan_definitions` by `is_active = true`. | `create index ... on plan_definitions (...) where is_active = true;` |
-| **ANALYZE after bulk loads** | You import large batches of data (participants, waivers, attendance). | Run `ANALYZE participants;` (etc.) or rely on autovacuum/analyze. |
+
+| Option                                                     | When to consider                                                                                 | Effort                                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| **Materialized view for `participant_entitlement_status`** | Dashboard or API hits this view a lot and near–real-time isn’t required.                         | Create mat view, refresh on a schedule (e.g. every 5–15 min) or after relevant writes.                          |
+| **Scheduled refresh job**                                  | You want “good enough” freshness for entitlement display without recalculating on every request. | Use pg_cron (or external cron) to run `REFRESH MATERIALIZED VIEW CONCURRENTLY participant_entitlement_status;`. |
+| **Expression index on sessions**                           | You often filter “sessions this week” by `date_trunc('week', starts_at)`.                        | `create index ... on sessions (date_trunc('week', starts_at));`                                                 |
+| **Partial index on active plans**                          | Dashboard almost always filters `plan_definitions` by `is_active = true`.                        | `create index ... on plan_definitions (...) where is_active = true;`                                            |
+| **ANALYZE after bulk loads**                               | You import large batches of data (participants, waivers, attendance).                            | Run `ANALYZE participants;` (etc.) or rely on autovacuum/analyze.                                               |
+
 
 No need to add these unless you have a concrete performance or scaling requirement.
 
