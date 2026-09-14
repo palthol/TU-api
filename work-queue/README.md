@@ -50,7 +50,7 @@ Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
 | [API-VAL-002](tasks/API-VAL-002.md) | validation | done | API-GATE-001 | Smoke-test subscriptions, scheduling, and entitlements |
 | [API-HARD-001](tasks/API-HARD-001.md) | backend | ready | API-TEST-001, API-VAL-001 | Make record-payment atomic/idempotent |
 | [API-HARD-002](tasks/API-HARD-002.md) | backend | done | API-GATE-001 | Add waiver-submission idempotency/recovery |
-| [API-SCHED-001](tasks/API-SCHED-001.md) | backend | ready | API-TEST-002, API-VAL-002 | Add template CRUD and recurring session generation |
+| [API-SCHED-001](tasks/API-SCHED-001.md) | backend | done | API-TEST-002, API-VAL-002 | Add template CRUD and recurring session generation |
 | [API-AUTO-001](tasks/API-AUTO-001.md) | automation | ready | API-OPS-001, API-VAL-001 | Add supported monthly-charge cron endpoint |
 | [API-AUTO-002](tasks/API-AUTO-002.md) | automation | ready | API-OPS-001, API-VAL-001 | Deploy controlled Discord schedules |
 | [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |

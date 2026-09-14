@@ -1,5 +1,6 @@
 /**
- * Admin scheduling routes: sessions + attendance (service-role Supabase).
+ * Admin scheduling routes: templates, session generation, sessions, attendance
+ * (service-role Supabase).
  */
 
 import {
@@ -10,11 +11,297 @@ import {
   parseUuid,
 } from '../../lib/adminRequestValidation.js';
 
+const TEMPLATE_COLUMNS =
+  'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
+const MAX_GENERATE_SPAN_DAYS = 366;
+const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+
+/** @param {unknown} value */
+function parseDayOfWeek(value) {
+  let n = null;
+  if (typeof value === 'number' && Number.isInteger(value)) n = value;
+  else if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    n = Number.parseInt(value.trim(), 10);
+  }
+  if (n == null || n < 1 || n > 7) return null;
+  return n;
+}
+
+/** @param {unknown} value */
+function parseDurationMinutes(value) {
+  let n = null;
+  if (typeof value === 'number' && Number.isInteger(value)) n = value;
+  else if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    n = Number.parseInt(value.trim(), 10);
+  }
+  if (n == null || n <= 0) return null;
+  return n;
+}
+
+/** @param {unknown} value */
+function parseStartTime(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(START_TIME_RE);
+  if (!match) return null;
+  return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
+}
+
+/** @param {unknown} value */
+function parseTemplateName(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value.trim();
+}
+
+/** @param {unknown} value */
+function parseOptionalNotes(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** Inclusive YYYY-MM-DD span in whole UTC days. */
+function utcDateSpanDays(startDate, endDate) {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  return Math.round((end - start) / 86400000);
+}
+
 /**
  * @param {import('express').Router} router
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient | null }} ctx
  */
 export function registerAdminSchedulingRoutes(router, { supabase }) {
+  router.get('/scheduling/templates', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+
+      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
+      const offset = Math.max(Number.parseInt(String(req.query.offset || ''), 10) || 0, 0);
+      const includeInactive = req.query.include_inactive === 'true';
+
+      let q = supabase
+        .from('schedule_templates')
+        .select(TEMPLATE_COLUMNS)
+        .order('day_of_week', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (!includeInactive) {
+        q = q.eq('is_active', true);
+      }
+
+      const { data, error } = await q;
+      if (error) return res.status(400).json({ ok: false, error: error.message });
+
+      return res.json({
+        ok: true,
+        limit,
+        offset,
+        rowCount: (data ?? []).length,
+        rows: data ?? [],
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.get('/scheduling/templates/:templateId', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const templateId = parseUuid(req.params.templateId);
+      if (!templateId) return res.status(400).json({ ok: false, error: 'invalid_template_id' });
+
+      const { data, error } = await supabase
+        .from('schedule_templates')
+        .select(TEMPLATE_COLUMNS)
+        .eq('id', templateId)
+        .maybeSingle();
+      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (!data) return res.status(404).json({ ok: false, error: 'template_not_found' });
+
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.post('/scheduling/templates', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+
+      const body = req.body || {};
+      const name = parseTemplateName(body.name);
+      const dayOfWeek = parseDayOfWeek(body.day_of_week);
+      const startTime = parseStartTime(body.start_time);
+      const durationMinutes = parseDurationMinutes(body.duration_minutes);
+      const notes = parseOptionalNotes(body.notes);
+      const isActive = body.is_active === undefined ? true : body.is_active;
+
+      if (!name) return res.status(400).json({ ok: false, error: 'name_required' });
+      if (dayOfWeek == null) return res.status(400).json({ ok: false, error: 'invalid_day_of_week' });
+      if (!startTime) return res.status(400).json({ ok: false, error: 'invalid_start_time' });
+      if (durationMinutes == null) {
+        return res.status(400).json({ ok: false, error: 'invalid_duration_minutes' });
+      }
+      if (typeof isActive !== 'boolean') {
+        return res.status(400).json({ ok: false, error: 'invalid_is_active' });
+      }
+      if (body.notes !== undefined && typeof body.notes !== 'string' && body.notes !== null) {
+        return res.status(400).json({ ok: false, error: 'invalid_notes' });
+      }
+
+      const { data, error } = await supabase
+        .from('schedule_templates')
+        .insert({
+          name,
+          day_of_week: dayOfWeek,
+          start_time: startTime,
+          duration_minutes: durationMinutes,
+          is_active: isActive,
+          notes: notes === undefined ? null : notes,
+        })
+        .select(TEMPLATE_COLUMNS)
+        .single();
+
+      if (error) {
+        console.error('schedule_templates.insert', error);
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.patch('/scheduling/templates/:templateId', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const templateId = parseUuid(req.params.templateId);
+      if (!templateId) return res.status(400).json({ ok: false, error: 'invalid_template_id' });
+
+      const { data: existing, error: findErr } = await supabase
+        .from('schedule_templates')
+        .select('id')
+        .eq('id', templateId)
+        .maybeSingle();
+      if (findErr) return res.status(400).json({ ok: false, error: findErr.message });
+      if (!existing) return res.status(404).json({ ok: false, error: 'template_not_found' });
+
+      const body = req.body || {};
+      const patch = {};
+
+      if (body.name !== undefined) {
+        const name = parseTemplateName(body.name);
+        if (!name) return res.status(400).json({ ok: false, error: 'name_required' });
+        patch.name = name;
+      }
+      if (body.day_of_week !== undefined) {
+        const dayOfWeek = parseDayOfWeek(body.day_of_week);
+        if (dayOfWeek == null) return res.status(400).json({ ok: false, error: 'invalid_day_of_week' });
+        patch.day_of_week = dayOfWeek;
+      }
+      if (body.start_time !== undefined) {
+        const startTime = parseStartTime(body.start_time);
+        if (!startTime) return res.status(400).json({ ok: false, error: 'invalid_start_time' });
+        patch.start_time = startTime;
+      }
+      if (body.duration_minutes !== undefined) {
+        const durationMinutes = parseDurationMinutes(body.duration_minutes);
+        if (durationMinutes == null) {
+          return res.status(400).json({ ok: false, error: 'invalid_duration_minutes' });
+        }
+        patch.duration_minutes = durationMinutes;
+      }
+      if (body.is_active !== undefined) {
+        if (typeof body.is_active !== 'boolean') {
+          return res.status(400).json({ ok: false, error: 'invalid_is_active' });
+        }
+        patch.is_active = body.is_active;
+      }
+      if (body.notes !== undefined) {
+        if (body.notes !== null && typeof body.notes !== 'string') {
+          return res.status(400).json({ ok: false, error: 'invalid_notes' });
+        }
+        patch.notes = parseOptionalNotes(body.notes);
+      }
+
+      if (Object.keys(patch).length === 0) {
+        return res.status(400).json({ ok: false, error: 'no_updates' });
+      }
+
+      const { data, error } = await supabase
+        .from('schedule_templates')
+        .update(patch)
+        .eq('id', templateId)
+        .select(TEMPLATE_COLUMNS)
+        .single();
+
+      if (error) {
+        console.error('schedule_templates.update', error);
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+
+      return res.json({ ok: true, template: data });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  router.post('/scheduling/generate-sessions', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+
+      const body = req.body || {};
+      const startDate = parseIsoDate(body.start);
+      const endDate = parseIsoDate(body.end);
+      if (!startDate) return res.status(400).json({ ok: false, error: 'invalid_start' });
+      if (!endDate) return res.status(400).json({ ok: false, error: 'invalid_end' });
+      if (endDate < startDate) {
+        return res.status(400).json({ ok: false, error: 'end_must_be_on_or_after_start' });
+      }
+      if (utcDateSpanDays(startDate, endDate) > MAX_GENERATE_SPAN_DAYS) {
+        return res.status(400).json({ ok: false, error: 'range_too_long' });
+      }
+
+      let templateId = null;
+      if (body.template_id != null && body.template_id !== '') {
+        templateId = parseUuid(body.template_id);
+        if (!templateId) return res.status(400).json({ ok: false, error: 'invalid_template_id' });
+      }
+
+      const { data, error } = await supabase.rpc('generate_sessions', {
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_template_id: templateId,
+      });
+
+      if (error) {
+        const key = error.message || 'generate_sessions_failed';
+        const status = key === 'template_not_found' ? 404 : 400;
+        return res.status(status).json({ ok: false, error: key });
+      }
+
+      const created = Array.isArray(data?.created) ? data.created : [];
+      return res.json({
+        ok: true,
+        start: startDate,
+        end: endDate,
+        created_count: Number.isInteger(data?.created_count) ? data.created_count : created.length,
+        skipped_count: Number.isInteger(data?.skipped_count) ? data.skipped_count : 0,
+        created,
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
   router.get('/scheduling/sessions', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });

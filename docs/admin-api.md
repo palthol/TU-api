@@ -535,7 +535,76 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`).
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **0024** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
+
+#### `GET /api/admin/scheduling/templates`
+
+List schedule templates.
+
+**Query:** `include_inactive=true`, `limit` (default 50, max 200), `offset` (default 0)
+
+Inactive templates are omitted unless `include_inactive=true`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+#### `GET /api/admin/scheduling/templates/:templateId`
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `invalid_template_id`; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/templates`
+
+**Body (JSON):**
+
+```json
+{
+  "name": "Class 1",
+  "day_of_week": 1,
+  "start_time": "19:00",
+  "duration_minutes": 60,
+  "is_active": true,
+  "notes": "optional"
+}
+```
+
+`is_active` defaults to `true`. `start_time` is `HH:MM` or `HH:MM:SS`.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `name_required`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_is_active`
+
+#### `PATCH /api/admin/scheduling/templates/:templateId`
+
+Partial update. Deactivate with `"is_active": false`. Existing sessions are not rewritten when a template changes.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `no_updates`, validation errors; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/generate-sessions`
+
+Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **0024**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
+
+**Body (JSON):**
+
+```json
+{
+  "start": "2026-06-01",
+  "end": "2026-06-07",
+  "template_id": "uuid optional"
+}
+```
+
+Max span is 366 days (`end - start`).
+
+**Response:** `{ "ok": true, "start", "end", "created_count", "skipped_count", "created": [ ... sessions ... ] }`
+
+**Errors:** `400` — `invalid_start`, `invalid_end`, `end_must_be_on_or_after_start`, `range_too_long`, `invalid_template_id`, `template_inactive`; `404` — `template_not_found`
 
 #### `GET /api/admin/scheduling/sessions`
 
