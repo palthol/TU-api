@@ -15,8 +15,31 @@ const TEMPLATE_ID = '44444444-4444-4444-8444-444444444444';
  * Isolated in-memory Supabase stand-in for sessions + attendance.
  * Never talks to a network or production database.
  */
+function isoDowUtc(dateStr) {
+  const jsDay = new Date(`${dateStr}T00:00:00.000Z`).getUTCDay();
+  return jsDay === 0 ? 7 : jsDay;
+}
+
+function eachUtcDateInclusive(start, end) {
+  const dates = [];
+  let current = start;
+  while (current <= end) {
+    dates.push(current);
+    const next = new Date(`${current}T00:00:00.000Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    current = next.toISOString().slice(0, 10);
+  }
+  return dates;
+}
+
+function normalizeStartTime(value) {
+  if (typeof value !== 'string') return value;
+  return value.length === 5 ? `${value}:00` : value;
+}
+
 function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
   const sessions = new Map();
+  const templates = new Map();
   const attendance = [];
 
   function createQuery(table) {
@@ -32,6 +55,7 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     const run = () => {
       if (table === 'sessions') return runSessions(state);
       if (table === 'attendance_records') return runAttendance(state);
+      if (table === 'schedule_templates') return runTemplates(state);
       return { data: null, error: { message: `unknown_table:${table}` } };
     };
 
@@ -182,6 +206,125 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     return { data: rows.map((r) => ({ ...r })), error: null };
   }
 
+  function applyTemplateFilters(rows, filters) {
+    let next = rows;
+    for (const f of filters) {
+      if (f.op === 'eq') next = next.filter((r) => r[f.col] === f.val);
+    }
+    return next;
+  }
+
+  function runTemplates(state) {
+    if (state.op === 'insert') {
+      const now = new Date().toISOString();
+      const row = {
+        id: randomUUID(),
+        is_active: true,
+        notes: null,
+        created_at: now,
+        updated_at: now,
+        ...state.payload,
+        start_time: normalizeStartTime(state.payload?.start_time),
+      };
+      templates.set(row.id, row);
+      return { data: { ...row }, error: null };
+    }
+
+    if (state.op === 'update') {
+      const idFilter = state.filters.find((f) => f.op === 'eq' && f.col === 'id');
+      const existing = idFilter ? templates.get(idFilter.val) : null;
+      if (!existing) return { data: null, error: { message: 'template not found' } };
+      const updated = {
+        ...existing,
+        ...state.payload,
+        start_time: state.payload?.start_time
+          ? normalizeStartTime(state.payload.start_time)
+          : existing.start_time,
+        updated_at: new Date().toISOString(),
+      };
+      templates.set(updated.id, updated);
+      return { data: { ...updated }, error: null };
+    }
+
+    let rows = applyTemplateFilters([...templates.values()], state.filters);
+    if (state.orderBy?.col === 'day_of_week') {
+      rows.sort((a, b) => a.day_of_week - b.day_of_week || String(a.start_time).localeCompare(String(b.start_time)));
+    }
+    if (state.range) {
+      rows = rows.slice(state.range.from, state.range.to + 1);
+    }
+    if (state.terminal === 'maybeSingle') {
+      return { data: rows[0] ?? null, error: null };
+    }
+    if (state.terminal === 'single') {
+      if (!rows[0]) return { data: null, error: { message: 'template not found' } };
+      return { data: rows[0], error: null };
+    }
+    return { data: rows.map((r) => ({ ...r })), error: null };
+  }
+
+  function runGenerateSessions({ p_start_date, p_end_date, p_template_id } = {}) {
+    if (p_template_id) {
+      const requested = templates.get(p_template_id);
+      if (!requested) return { data: null, error: { message: 'template_not_found' } };
+      if (!requested.is_active) return { data: null, error: { message: 'template_inactive' } };
+    }
+
+    const candidates = [];
+    for (const date of eachUtcDateInclusive(p_start_date, p_end_date)) {
+      for (const template of templates.values()) {
+        if (!template.is_active) continue;
+        if (p_template_id && template.id !== p_template_id) continue;
+        if (template.day_of_week !== isoDowUtc(date)) continue;
+        const startTime = normalizeStartTime(template.start_time);
+        const startsAt = `${date}T${startTime}.000Z`;
+        const endsAt = new Date(
+          new Date(startsAt).getTime() + template.duration_minutes * 60 * 1000,
+        ).toISOString();
+        candidates.push({
+          starts_at: startsAt,
+          ends_at: endsAt,
+          schedule_template_id: template.id,
+          session_label: template.name,
+          notes: template.notes,
+        });
+      }
+    }
+
+    const created = [];
+    for (const candidate of candidates) {
+      const exists = [...sessions.values()].some(
+        (row) =>
+          row.schedule_template_id === candidate.schedule_template_id &&
+          row.starts_at === candidate.starts_at,
+      );
+      if (exists) continue;
+      const now = new Date().toISOString();
+      const row = {
+        id: randomUUID(),
+        cancelled_at: null,
+        created_at: now,
+        updated_at: now,
+        ...candidate,
+      };
+      sessions.set(row.id, row);
+      created.push({ ...row });
+    }
+
+    created.sort(
+      (a, b) => String(a.starts_at).localeCompare(String(b.starts_at)) || String(a.id).localeCompare(String(b.id)),
+    );
+
+    return {
+      data: {
+        created_count: created.length,
+        skipped_count: candidates.length - created.length,
+        created,
+      },
+      error: null,
+    };
+  }
+
   function seedSession(overrides = {}) {
     const row = {
       id: SESSION_ID,
@@ -199,11 +342,32 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     return row;
   }
 
+  function seedTemplate(overrides = {}) {
+    const row = {
+      id: TEMPLATE_ID,
+      name: 'Class 1',
+      day_of_week: 1,
+      start_time: '19:00:00',
+      duration_minutes: 60,
+      is_active: true,
+      notes: 'monday class',
+      created_at: '2026-06-01T00:00:00.000Z',
+      updated_at: '2026-06-01T00:00:00.000Z',
+      ...overrides,
+      start_time: normalizeStartTime(overrides.start_time ?? '19:00:00'),
+    };
+    templates.set(row.id, row);
+    return row;
+  }
+
   const supabase = {
     from(table) {
       return createQuery(table);
     },
     async rpc(name, args) {
+      if (name === 'generate_sessions') {
+        return runGenerateSessions(args);
+      }
       if (name !== 'can_attend_group_session') {
         return { data: null, error: { message: `unknown_rpc:${name}` } };
       }
@@ -213,7 +377,7 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     },
   };
 
-  return { supabase, sessions, attendance, seedSession };
+  return { supabase, sessions, templates, attendance, seedSession, seedTemplate };
 }
 
 function createApp(supabase) {
@@ -590,6 +754,297 @@ describe('admin scheduling routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.upserted).toHaveLength(1);
       expect(res.body.blocked).toEqual([]);
+    });
+  });
+
+  describe('schedule templates', () => {
+    const validTemplate = {
+      name: 'Class 1',
+      day_of_week: 1,
+      start_time: '19:00',
+      duration_minutes: 60,
+      notes: 'monday class',
+    };
+
+    it('creates and lists a template, then updates it', async () => {
+      const fixture = createSchedulingFixture();
+      const app = createApp(fixture.supabase);
+
+      const created = await auth(request(app).post('/api/admin/scheduling/templates').send(validTemplate));
+      expect(created.status).toBe(200);
+      expect(created.body.ok).toBe(true);
+      expect(created.body.template.name).toBe('Class 1');
+      expect(created.body.template.day_of_week).toBe(1);
+      expect(created.body.template.start_time).toBe('19:00:00');
+      expect(created.body.template.duration_minutes).toBe(60);
+      expect(created.body.template.is_active).toBe(true);
+      expect(created.body.template.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+
+      const listed = await auth(request(app).get('/api/admin/scheduling/templates'));
+      expect(listed.status).toBe(200);
+      expect(listed.body.ok).toBe(true);
+      expect(listed.body.rowCount).toBe(1);
+      expect(listed.body.rows[0].id).toBe(created.body.template.id);
+
+      const updated = await auth(
+        request(app)
+          .patch(`/api/admin/scheduling/templates/${created.body.template.id}`)
+          .send({ name: 'Class 1 Evening', duration_minutes: 90, is_active: true }),
+      );
+      expect(updated.status).toBe(200);
+      expect(updated.body.ok).toBe(true);
+      expect(updated.body.template.name).toBe('Class 1 Evening');
+      expect(updated.body.template.duration_minutes).toBe(90);
+
+      const detail = await auth(
+        request(app).get(`/api/admin/scheduling/templates/${created.body.template.id}`),
+      );
+      expect(detail.status).toBe(200);
+      expect(detail.body.template.name).toBe('Class 1 Evening');
+    });
+
+    it('hides inactive templates unless include_inactive=true', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      fixture.seedTemplate({
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'Retired',
+        is_active: false,
+      });
+      const app = createApp(fixture.supabase);
+
+      const activeOnly = await auth(request(app).get('/api/admin/scheduling/templates'));
+      expect(activeOnly.status).toBe(200);
+      expect(activeOnly.body.rowCount).toBe(1);
+      expect(activeOnly.body.rows[0].id).toBe(TEMPLATE_ID);
+
+      const all = await auth(
+        request(app).get('/api/admin/scheduling/templates').query({ include_inactive: 'true' }),
+      );
+      expect(all.status).toBe(200);
+      expect(all.body.rowCount).toBe(2);
+    });
+
+    it('rejects validation errors on create and update', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      const app = createApp(fixture.supabase);
+
+      const missingName = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, name: '  ' }),
+      );
+      expect(missingName.status).toBe(400);
+      expect(missingName.body).toEqual({ ok: false, error: 'name_required' });
+
+      const badDay = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, day_of_week: 0 }),
+      );
+      expect(badDay.status).toBe(400);
+      expect(badDay.body).toEqual({ ok: false, error: 'invalid_day_of_week' });
+
+      const badTime = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, start_time: '25:00' }),
+      );
+      expect(badTime.status).toBe(400);
+      expect(badTime.body).toEqual({ ok: false, error: 'invalid_start_time' });
+
+      const badDuration = await auth(
+        request(app)
+          .post('/api/admin/scheduling/templates')
+          .send({ ...validTemplate, duration_minutes: 0 }),
+      );
+      expect(badDuration.status).toBe(400);
+      expect(badDuration.body).toEqual({ ok: false, error: 'invalid_duration_minutes' });
+
+      const emptyPatch = await auth(
+        request(app).patch(`/api/admin/scheduling/templates/${TEMPLATE_ID}`).send({}),
+      );
+      expect(emptyPatch.status).toBe(400);
+      expect(emptyPatch.body).toEqual({ ok: false, error: 'no_updates' });
+
+      const missing = await auth(
+        request(app)
+          .patch('/api/admin/scheduling/templates/88888888-8888-4888-8888-888888888888')
+          .send({ name: 'Nope' }),
+      );
+      expect(missing.status).toBe(404);
+      expect(missing.body).toEqual({ ok: false, error: 'template_not_found' });
+
+      const badId = await auth(
+        request(app).get('/api/admin/scheduling/templates/not-a-uuid'),
+      );
+      expect(badId.status).toBe(400);
+      expect(badId.body).toEqual({ ok: false, error: 'invalid_template_id' });
+    });
+
+    it('requires an admin key for template writes', async () => {
+      const { supabase } = createSchedulingFixture();
+      const res = await request(createApp(supabase))
+        .post('/api/admin/scheduling/templates')
+        .send(validTemplate);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ ok: false, error: 'unauthorized' });
+    });
+  });
+
+  describe('generate sessions', () => {
+    it('expands active templates across a date range', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      fixture.seedTemplate({
+        id: '55555555-5555-4555-8555-555555555555',
+        name: 'Friday Open Mat',
+        day_of_week: 5,
+        start_time: '18:00:00',
+        duration_minutes: 90,
+        notes: null,
+      });
+      const app = createApp(fixture.supabase);
+
+      // 2026-06-01 Monday through 2026-06-07 Sunday: one Monday + one Friday.
+      const generated = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-01', end: '2026-06-07' }),
+      );
+      expect(generated.status).toBe(200);
+      expect(generated.body.ok).toBe(true);
+      expect(generated.body.created_count).toBe(2);
+      expect(generated.body.skipped_count).toBe(0);
+      expect(generated.body.created).toHaveLength(2);
+      expect(generated.body.created.map((row) => row.session_label).sort()).toEqual([
+        'Class 1',
+        'Friday Open Mat',
+      ]);
+      const monday = generated.body.created.find((row) => row.schedule_template_id === TEMPLATE_ID);
+      expect(monday.starts_at).toBe('2026-06-01T19:00:00.000Z');
+      expect(monday.ends_at).toBe('2026-06-01T20:00:00.000Z');
+      expect(monday.cancelled_at).toBeNull();
+
+      const listed = await auth(
+        request(app).get('/api/admin/scheduling/sessions').query({ start: '2026-06-01', end: '2026-06-07' }),
+      );
+      expect(listed.status).toBe(200);
+      expect(listed.body.rowCount).toBe(2);
+    });
+
+    it('does not duplicate sessions when the same range is generated twice', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      const app = createApp(fixture.supabase);
+      const body = { start: '2026-06-01', end: '2026-06-07', template_id: TEMPLATE_ID };
+
+      const first = await auth(request(app).post('/api/admin/scheduling/generate-sessions').send(body));
+      expect(first.status).toBe(200);
+      expect(first.body.created_count).toBe(1);
+      expect(first.body.skipped_count).toBe(0);
+      const firstId = first.body.created[0].id;
+
+      const second = await auth(request(app).post('/api/admin/scheduling/generate-sessions').send(body));
+      expect(second.status).toBe(200);
+      expect(second.body.ok).toBe(true);
+      expect(second.body.created_count).toBe(0);
+      expect(second.body.skipped_count).toBe(1);
+      expect(second.body.created).toEqual([]);
+
+      const listed = await auth(request(app).get('/api/admin/scheduling/sessions'));
+      expect(listed.body.rowCount).toBe(1);
+      expect(listed.body.rows[0].id).toBe(firstId);
+    });
+
+    it('skips a cancelled occurrence instead of inserting a second session', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      fixture.seedSession({
+        schedule_template_id: TEMPLATE_ID,
+        starts_at: '2026-06-01T19:00:00.000Z',
+        ends_at: '2026-06-01T20:00:00.000Z',
+        cancelled_at: '2026-06-01T12:00:00.000Z',
+      });
+      const app = createApp(fixture.supabase);
+
+      const generated = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-01', end: '2026-06-01', template_id: TEMPLATE_ID }),
+      );
+      expect(generated.status).toBe(200);
+      expect(generated.body.created_count).toBe(0);
+      expect(generated.body.skipped_count).toBe(1);
+      expect(fixture.sessions.size).toBe(1);
+    });
+
+    it('rejects invalid generate payloads', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      const app = createApp(fixture.supabase);
+
+      const missingStart = await auth(
+        request(app).post('/api/admin/scheduling/generate-sessions').send({ end: '2026-06-07' }),
+      );
+      expect(missingStart.status).toBe(400);
+      expect(missingStart.body).toEqual({ ok: false, error: 'invalid_start' });
+
+      const inverted = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-07', end: '2026-06-01' }),
+      );
+      expect(inverted.status).toBe(400);
+      expect(inverted.body).toEqual({ ok: false, error: 'end_must_be_on_or_after_start' });
+
+      const tooLong = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-01-01', end: '2027-01-03' }),
+      );
+      expect(tooLong.status).toBe(400);
+      expect(tooLong.body).toEqual({ ok: false, error: 'range_too_long' });
+
+      const badTemplate = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-01', end: '2026-06-07', template_id: 'not-a-uuid' }),
+      );
+      expect(badTemplate.status).toBe(400);
+      expect(badTemplate.body).toEqual({ ok: false, error: 'invalid_template_id' });
+
+      const missingTemplate = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({
+            start: '2026-06-01',
+            end: '2026-06-07',
+            template_id: '88888888-8888-4888-8888-888888888888',
+          }),
+      );
+      expect(missingTemplate.status).toBe(404);
+      expect(missingTemplate.body).toEqual({ ok: false, error: 'template_not_found' });
+    });
+
+    it('does not generate from inactive templates unless they are reactivated', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate({ is_active: false });
+      const app = createApp(fixture.supabase);
+
+      const inactive = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-01', end: '2026-06-07', template_id: TEMPLATE_ID }),
+      );
+      expect(inactive.status).toBe(400);
+      expect(inactive.body).toEqual({ ok: false, error: 'template_inactive' });
+
+      const none = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-06-01', end: '2026-06-07' }),
+      );
+      expect(none.status).toBe(200);
+      expect(none.body.created_count).toBe(0);
+      expect(fixture.sessions.size).toBe(0);
     });
   });
 });
