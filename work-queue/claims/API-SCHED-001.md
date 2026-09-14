@@ -16,7 +16,7 @@ Note: the work-queue brief suggests branching as `agent/API-SCHED-001-templates`
 - tests (`services/api/src/routes/admin/scheduling.test.js`)
 - `docs/admin-api.md` (scheduling contract only)
 - `docs/current-state.md` (scheduling templates no longer missing)
-- `supabase/migrations/0023_generate_sessions_rpc.sql` (idempotent SQL; not applied to production)
+- `supabase/migrations/0024_generate_sessions_rpc.sql` (idempotent SQL; not applied to production; numbered `0024` because API-AUTH-001 already took `0023` on `develop`)
 - `work-queue/claims/API-SCHED-001.md`
 - `work-queue/queue.json` (API-SCHED-001 row only)
 - `work-queue/README.md` (API-SCHED-001 row only)
@@ -31,7 +31,8 @@ Commands run:
 | `diff -u work-queue/queue.json <(git show HEAD:work-queue/queue.json)` | 0 | On-disk queue matched `HEAD` before the claim |
 | `npm --workspace services/api run test` | 0 | 11 files / 85 tests. Log: `/opt/cursor/artifacts/api_sched_001_vitest.log` |
 | `npm --workspace services/api run test -- src/routes/admin/scheduling.test.js --reporter=verbose` | 0 | 28/28 including create/update, generate, duplicate generate, cancelled-slot skip, validation. Log: `/opt/cursor/artifacts/api_sched_001_scheduling_vitest.log` |
-| `npm run guard:waiver-schema` | 0 | Log: `/opt/cursor/artifacts/api_sched_001_waiver_guard.log` |
+| `npm --workspace services/api run test` (after merging `origin/develop` / API-AUTH-001) | 0 | 14 files / 109 tests. Log: `/opt/cursor/artifacts/api_sched_001_merge_vitest.log` |
+| `npm run guard:waiver-schema` (post-merge) | 0 | Log: `/opt/cursor/artifacts/api_sched_001_merge_waiver_guard.log` |
 
 What landed:
 
@@ -45,7 +46,7 @@ Did **not** do:
 - No production writes.
 - No `supabase db push` / `apply_migration` to project `jhxzecxkccqlgyazhsnb`.
 - No POST to `https://api.templeunderground.com` or the Render host.
-- Migration `0023` is in-repo only (idempotent unique index + `create or replace` RPC; `service_role` execute only).
+- Migration `0024` is in-repo only (idempotent unique index + `create or replace` RPC; `service_role` execute only). `0023` on `develop` is staff RBAC (API-AUTH-001).
 - Did not invent a hard-delete for sessions.
 - Did not start `API-HARD-001`, `API-AUTO-001`, `API-AUTO-002`, `API-AUTH-001`, or flip `API-PAY-001` to `ready`.
 - Did not rewrite auth, Discord, or billing sections of `docs/admin-api.md`.
@@ -53,4 +54,6 @@ Did **not** do:
 
 ## Handoff or blocker
 
-`done`. Residual risk: generate-sessions against a live database needs migration `0023` applied in a later authorized schema push. Until then the RPC and unique index are absent in production (currently 0 sessions). Vitest uses an in-memory Supabase stand-in; the SQL was not executed against production or a local Supabase. Template edits do not rewrite already-generated sessions.
+`done`. Residual risk: generate-sessions against a live database needs migration `0024` applied in a later authorized schema push. Until then the RPC and unique index are absent in production (currently 0 sessions). Vitest uses an in-memory Supabase stand-in; the SQL was not executed against production or a local Supabase. Template edits do not rewrite already-generated sessions.
+
+Merge note (2026-09-14): `origin/develop` gained API-AUTH-001 (`0023_staff_rbac.sql`). The only Git conflict was `docs/current-state.md` (simple: keep both AUTH RBAC and SCHED template facts). The dual `0023` filenames were resolved by renaming this task's SQL to `0024`.

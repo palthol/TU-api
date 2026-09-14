@@ -124,7 +124,7 @@
     {
       "id": "API-AUTH-001",
       "lane": "security",
-      "status": "ready",
+      "status": "done",
       "depends_on": ["API-OPS-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-AUTH-001.md"

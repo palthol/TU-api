@@ -1,5 +1,6 @@
 -- Recurring session generation from schedule_templates.
 -- Unique (template, starts_at) so retries of the same date range do not duplicate rows.
+-- Numbered 0024 because API-AUTH-001 already landed 0023_staff_rbac.sql on develop.
 -- Do not apply to production from this task (API-SCHED-001 production writes: no).
 
 -- One concrete occurrence per template timestamp (including cancelled sessions).

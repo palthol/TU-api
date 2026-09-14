@@ -12,7 +12,10 @@ import { registerAdminWaiverRoutes } from './routes/admin/waivers.js';
 import { createRequireViewerAccess } from './lib/cloudflareAccess.js';
 import { registerViewerWaiverRoutes } from './routes/viewer/waivers.js';
 import { warnIfSupabaseKeyIsNotServiceRole } from './lib/warnIfSupabaseKeyIsNotServiceRole.js';
+import { createRequireAdminFromSupabase } from './lib/requireAdmin.js';
 import { createRequireAdminOrCron } from './lib/requireAdminOrCron.js';
+import { createSupabaseAuditWriter } from './lib/staffAuth.js';
+import { registerStaffAuthRoutes } from './lib/staffRoutes.js';
 import { registerAdminSchedulingRoutes } from './routes/admin/scheduling.js';
 
 const app = express();
@@ -31,6 +34,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = supabaseUrl && supabaseServiceRole ? createClient(supabaseUrl, supabaseServiceRole) : null;
 if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
+const requireAdmin = createRequireAdminFromSupabase(supabase);
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';
 
@@ -194,6 +198,7 @@ app.use(
 
 const adminBillingRouter = express.Router();
 adminBillingRouter.use(requireAdmin);
+registerStaffAuthRoutes(adminBillingRouter, { supabase });
 registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
@@ -202,7 +207,9 @@ registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
 const adminCronRouter = express.Router();
-adminCronRouter.use(createRequireAdminOrCron(requireAdmin));
+adminCronRouter.use(
+  createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) }),
+);
 registerAdminNotificationRoutes(adminCronRouter, { supabase });
 app.use('/api/admin', adminCronRouter);
 
