@@ -1,6 +1,6 @@
 # API-SCHED-001 — Schedule templates and session generation
 
-- Status: **blocked** until API-TEST-002 and API-VAL-002 are done
+- Status: **ready**
 - Lane: backend
 - Depends on: API-TEST-002, API-VAL-002
 - Production writes: no

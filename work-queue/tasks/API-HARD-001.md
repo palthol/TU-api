@@ -1,6 +1,6 @@
 # API-HARD-001 — Atomic record-payment
 
-- Status: **blocked** until API-TEST-001 and API-VAL-001 are done
+- Status: **ready**
 - Lane: backend
 - Depends on: API-TEST-001, API-VAL-001
 - Production writes: no (migration must be forward-safe; apply to prod only with

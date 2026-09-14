@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "repository": "palthol/TU-api",
-  "updated": "2026-09-11",
+  "updated": "2026-09-14",
   "base_branch": "develop",
   "production_write_default": false,
   "task_dir": "work-queue/tasks",
@@ -84,7 +84,7 @@
     {
       "id": "API-HARD-001",
       "lane": "backend",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-TEST-001", "API-VAL-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-HARD-001.md"
@@ -100,7 +100,7 @@
     {
       "id": "API-SCHED-001",
       "lane": "backend",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-TEST-002", "API-VAL-002"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-SCHED-001.md"
@@ -108,7 +108,7 @@
     {
       "id": "API-AUTO-001",
       "lane": "automation",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-OPS-001", "API-VAL-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-AUTO-001.md"
@@ -116,7 +116,7 @@
     {
       "id": "API-AUTO-002",
       "lane": "automation",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-OPS-001", "API-VAL-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-AUTO-002.md"
@@ -124,7 +124,7 @@
     {
       "id": "API-AUTH-001",
       "lane": "security",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-OPS-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-AUTH-001.md"
