@@ -122,8 +122,8 @@ Notification routes are mounted behind `requireAdminOrCron`
 
 | Header | Env on API web service | When it works |
 | --- | --- | --- |
-| `x-cron-secret` | `CRON_SECRET` | Header value equals `CRON_SECRET` **and** `CRON_SECRET` is set |
-| `x-admin-key` | `ADMIN_API_KEY` | Always accepted (operator/manual). Do **not** put `ADMIN_API_KEY` on the cron job |
+| `x-cron-secret` | `CRON_SECRET` | Header value equals `CRON_SECRET` **and** `CRON_SECRET` is set. Sets staff actor `cron` and skips the RBAC role matrix (API-AUTH-001) |
+| `x-admin-key` | `ADMIN_API_KEY` or an `owner` staff key | Operator/manual. Do **not** put `ADMIN_API_KEY` on the cron job |
 
 If `CRON_SECRET` is unset on the API, `x-cron-secret` is ignored and only
 `x-admin-key` works. Cron jobs must not fall back to the admin key.

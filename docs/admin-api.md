@@ -1,10 +1,18 @@
 # Admin API — Temple Underground
 
-All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the `admin/apps/dashboard` merge UI is for trusted operators only).
+Admin routes require header **`x-admin-key`**. That header accepts either:
 
-The standalone waiver viewer uses Cloudflare Access and does not consume an admin key.
-The active dashboard and receipts app require the operator to enter the admin key at
-runtime; they do not read `VITE_ADMIN_API_KEY`.
+1. The shared env **`ADMIN_API_KEY`** (legacy compatibility — authenticates as
+   actor `legacy_shared_key` with role `owner`), or
+2. A personal staff key from `staff_users` (migration `0023`; SHA-256 hashed).
+   Roles: `owner`, `front_desk`, `finance`.
+
+Use HTTPS in production; never expose admin or staff keys in public frontends or
+any `VITE_*` bundle (the `admin/apps/dashboard` merge UI is for trusted
+operators only). Dashboard and receipts paste `x-admin-key` at runtime.
+
+The standalone waiver viewer uses Cloudflare Access and does not consume an admin
+key.
 
 **Base URL:** same host as `services/api` (e.g. `http://localhost:3001`).
 
@@ -14,14 +22,60 @@ runtime; they do not read `VITE_ADMIN_API_KEY`.
 
 | Topic | Rule |
 |--------|------|
-| **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
+| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. |
 | **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
-| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`) |
+| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. |
 | **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
 | **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
+
+---
+
+## Staff authentication (API-ADR-005)
+
+Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext returned once) or by inserting a SHA-256 `key_hash` with the service role. Dashboard/receipts keep sending `x-admin-key`; they do not read `VITE_ADMIN_API_KEY`.
+
+**Role matrix (mutations).** GET is allowed for every active role except `GET /api/admin/staff` (owner). Discord cron routes also accept `x-cron-secret` and skip the staff role matrix.
+
+| Role | May mutate |
+| --- | --- |
+| `owner` | All `/api/admin/*` routes, including staff directory and participant merge |
+| `finance` | `/billing/*` (payments, refunds, discounts, subscriptions, expenses). Not scheduling writes, staff, merge, or Discord notification POSTs |
+| `front_desk` | `/scheduling/*`, `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
+
+Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
+
+Until migration `0023` is applied, only the shared `ADMIN_API_KEY` authenticates.
+
+### `GET /api/admin/auth/me`
+
+Any authenticated staff (including the legacy shared key).
+
+**Response:** `{ "ok": true, "staff": { "id", "email", "display_name", "role", "auth_method", "actor_label" } }`
+
+`auth_method` is `staff_key` | `legacy_shared_key`. Cron does not use this route.
+
+### `GET /api/admin/staff`
+
+Owner only. Lists directory rows **without** `key_hash`.
+
+**Response:** `{ "ok": true, "rows": [ { "id", "email", "display_name", "role", "key_prefix", "active", "created_at", "updated_at", "last_used_at" } ] }`
+
+### `POST /api/admin/staff`
+
+Owner only. Creates an active staff row and returns the plaintext key once.
+
+**Body:** `{ "email": "desk@example.com", "display_name": "Front Desk", "role": "front_desk" }`
+
+**Response:** `{ "ok": true, "staff": { ...directory fields... }, "api_key": "tu_sk_..." }`
+
+**Errors:** `400` `invalid_email` / `invalid_display_name` / `invalid_role`; `403` `forbidden`; `409` `email_taken`
+
+### `PATCH /api/admin/staff/:id`
+
+Owner only. Optional fields: `display_name`, `role`, `active`, `rotate_key` (boolean). Rotating returns a new `api_key` once. Deactivating or demoting the last active owner returns `409` `last_owner`.
 
 ---
 
@@ -481,7 +535,76 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`).
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **0024** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
+
+#### `GET /api/admin/scheduling/templates`
+
+List schedule templates.
+
+**Query:** `include_inactive=true`, `limit` (default 50, max 200), `offset` (default 0)
+
+Inactive templates are omitted unless `include_inactive=true`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+#### `GET /api/admin/scheduling/templates/:templateId`
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `invalid_template_id`; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/templates`
+
+**Body (JSON):**
+
+```json
+{
+  "name": "Class 1",
+  "day_of_week": 1,
+  "start_time": "19:00",
+  "duration_minutes": 60,
+  "is_active": true,
+  "notes": "optional"
+}
+```
+
+`is_active` defaults to `true`. `start_time` is `HH:MM` or `HH:MM:SS`.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `name_required`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_is_active`
+
+#### `PATCH /api/admin/scheduling/templates/:templateId`
+
+Partial update. Deactivate with `"is_active": false`. Existing sessions are not rewritten when a template changes.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `no_updates`, validation errors; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/generate-sessions`
+
+Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **0024**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
+
+**Body (JSON):**
+
+```json
+{
+  "start": "2026-06-01",
+  "end": "2026-06-07",
+  "template_id": "uuid optional"
+}
+```
+
+Max span is 366 days (`end - start`).
+
+**Response:** `{ "ok": true, "start", "end", "created_count", "skipped_count", "created": [ ... sessions ... ] }`
+
+**Errors:** `400` — `invalid_start`, `invalid_end`, `end_must_be_on_or_after_start`, `range_too_long`, `invalid_template_id`, `template_inactive`; `404` — `template_not_found`
 
 #### `GET /api/admin/scheduling/sessions`
 
@@ -547,7 +670,7 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
 
-**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
+**Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "rowCount": N }`
 
@@ -559,7 +682,7 @@ Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and post
 
 Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 hours, counts for payment reminders, plus the same overdue / due-soon list as the payment-reminders route.
 
-**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
+**Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
 
@@ -743,7 +866,7 @@ Monthly finance summary contract for dashboard export and bookkeeping sustainabi
 
 ### `GET /api/waivers/:id/pdf`
 
-On-demand HTML → PDF render. Requires `x-admin-key`. Does not persist a new PDF; streams a buffer.
+On-demand HTML → PDF render. Requires `x-admin-key` (shared or personal staff key). Does not persist a new PDF; streams a buffer.
 
 **Response:** `200` `application/pdf` with `Content-Disposition: inline; filename="waiver-<id>.pdf"`, plus headers `X-Waiver-Locale` and `X-Waiver-Version`.
 
@@ -765,4 +888,4 @@ For all operator apps:
 
 - Start the API first: `npm run dev:api` (this repo).
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
-- Paste **x-admin-key** only in trusted sessions; do not commit keys.
+- Paste **x-admin-key** (shared owner key or personal staff key) only in trusted sessions; do not commit keys.

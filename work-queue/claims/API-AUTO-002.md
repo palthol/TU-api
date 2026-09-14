@@ -91,6 +91,16 @@ Secret scan of the `origin/develop` diff: no webhook URLs, no `CRON_SECRET=` /
   `ready`
 - Rewrite RBAC or scheduling-template status in `docs/current-state.md`
 
+## Merge with `develop` (2026-09-14)
+
+Merged `origin/develop` (`a7a33fd`, API-SCHED-001 #31 + API-AUTH-001 #32).
+Conflicts were in `docs/current-state.md` and `work-queue/README.md`.
+`work-queue/queue.json` auto-merged.
+
+Resolution: keep Discord cron runbook (this task) **and** develop’s scheduling /
+RBAC rows. Queue: `API-AUTO-002` done, `API-SCHED-001` done, `API-AUTH-001` done.
+Did **not** flip `API-PAY-001` to ready (`API-HARD-001` still open).
+
 ## Handoff or blocker
 
 `done` with leftover risk:
