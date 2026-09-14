@@ -21,6 +21,10 @@ following top-level keys:
 - `review`: required object capturing the final confirmation checkbox.
 - `locale` and `content_version`: required strings identifying translation and
   content revision (defaults applied if frontend omits them).
+- `idempotency_key`: optional string (max 200 chars). Identifies one submit
+  intent so retries replay the original success envelope. If omitted, the API
+  derives a key from participant email + DOB + phone + `content_version` +
+  SHA-256 of the signature PNG bytes.
 
 Optional string properties should be sent as non-empty strings or `null`; empty
 strings are normalized to `null` on the server before persistence.
@@ -90,7 +94,8 @@ strings are normalized to `null` on the server before persistence.
     "confirm_accuracy": "boolean"     // true required to submit
   },
   "locale": "en|es",                  // default "en" in frontend if omitted
-  "content_version": "string"         // current frontend constant "waiver.v1"
+  "content_version": "string",        // current frontend constant "waiver.v1"
+  "idempotency_key": "string"         // optional; UUID per form session recommended
 }
 ```
 
@@ -117,6 +122,14 @@ strings are normalized to `null` on the server before persistence.
   in `WAIVERS_BUCKET`. Object paths are saved in the database.
 - Review confirmation maps to `waivers.review_confirm_accuracy`.
 - `locale` and `content_version` persist in `audit_trails`.
+- Optional `idempotency_key` is stored on `waivers.idempotency_key` (unique when
+  set). Duplicate POSTs for the same intent replay
+  `{ ok, waiverId, participantId, accountId, accountMemberId, sha256 }` and do
+  not insert another waiver or re-notify Discord/Slack. If the field is omitted,
+  the server derives the same-intent key from identity + `content_version` +
+  signature hash. Reusing a client key for a different person returns `409`
+  `idempotency_key_conflict`. TU-Signup may keep omitting the field; identical
+  retries remain safe via the derived key. A new signature is a new waiver.
 
 ### Validation Alignment
 

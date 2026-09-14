@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "repository": "palthol/TU-api",
-  "updated": "2026-09-07",
+  "updated": "2026-09-11",
   "base_branch": "develop",
   "production_write_default": false,
   "task_dir": "work-queue/tasks",
@@ -92,7 +92,7 @@
     {
       "id": "API-HARD-002",
       "lane": "backend",
-      "status": "ready",
+      "status": "done",
       "depends_on": ["API-GATE-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-HARD-002.md"

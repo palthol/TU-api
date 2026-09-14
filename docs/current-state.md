@@ -40,7 +40,12 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 ## Known gaps and risks
 
 - `record-payment` is a multi-step, non-transactional write.
-- Waiver submission spans storage and database operations without end-to-end idempotency.
+- Waiver submit is retry-safe for the same intent via optional client
+  `idempotency_key` or a derived key (identity + `content_version` + signature
+  hash). Duplicate POSTs replay the original success envelope and do not create
+  extra waivers or accounts (API-HARD-002). Storage + DB remain non-atomic:
+  orphan signature/PDF objects and missing related rows are still possible if
+  the first attempt dies mid-flow.
 - `npm ci` fails because the lockfile omits platform packages required by the declared
   Supabase CLI version.
 - Dependency audit reported 3 moderate findings on 2026-09-03.
@@ -58,3 +63,4 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Documentation reconciled against the mounted route list, migrations `0001`–`0021`, and test files (2026-09-03).
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
 - Validation environment (API-GATE-001): seed/cleanup procedure in [validation-environment.md](./validation-environment.md). Production project `jhxzecxkccqlgyazhsnb` and `https://api.templeunderground.com` are out of bounds for VAL writes.
+- Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `0022` is applied. Migration `0022` is in-repo and unapplied to production.

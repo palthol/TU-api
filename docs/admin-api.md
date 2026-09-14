@@ -17,7 +17,7 @@ runtime; they do not read `VITE_ADMIN_API_KEY`.
 | **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
 | **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
 | **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`) |
-| **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id` |
+| **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
@@ -69,6 +69,23 @@ Stores the waiver submission and then records a **`waiver.submitted`** event in 
 - `SLACK_WEBHOOK_URL`
 
 Notification failures are logged server-side and do **not** fail an otherwise successful waiver submission. If neither webhook is configured, the API logs a warning and returns the normal waiver response.
+
+**Success envelope (unchanged fields):** `{ "ok": true, "waiverId": "<uuid>", "participantId": "<uuid>", "accountId": "<uuid>", "accountMemberId": "<uuid>", "sha256": "<hex>" }`
+
+**Failure:** non-2xx `{ "ok": false, "errors": [...] }` and/or `{ "ok": false, "error": "<machine_key>" }` as today.
+
+#### Same intent / idempotency
+
+A retry or double-submit for the **same intent** does not create another waiver, participant, or billing account. The API replays the original success envelope (`waiverId`, `participantId`, `accountId`, `accountMemberId`, and the stored `sha256` when the PDF/audit row exists).
+
+**Same intent** is:
+
+1. **Client `idempotency_key` (preferred).** Optional string, max 200 characters after trim. Empty/omitted means “derive a key”. Mirrors `record_payment_refund`: the key is unique when set (`waivers.idempotency_key`, migration `0022`). A later POST with the same key and the same participant identity (email + date of birth + phone) returns the original envelope and does **not** re-send Discord/Slack notifications.
+2. **Derived fallback** when the client omits the key: `derived:v1:` plus SHA-256 of `waiver.submit.v1|{email lowercase}|{date_of_birth}|{phone}|{content_version}|{sha256(signature PNG bytes)}`. Existing TU-Signup payloads that omit `idempotency_key` are therefore retry-safe for an identical signature + identity + `content_version`.
+
+A client key reused for a **different** participant identity returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. A new signature (or `content_version`) without a client key is a new intent and creates a new waiver.
+
+**Residual risk:** storage uploads and DB writes are still sequential (not one Postgres transaction). Unique `idempotency_key` prevents duplicate waiver rows once migration `0022` is applied. Until that column exists, the handler falls back to the pre-idempotency insert so live submits keep working; retries can still duplicate. A crash after storage upload and before the waiver insert can leave orphan signature/PDF objects. Related rows (`emergency_contacts`, `waiver_medical_histories`, `audit_trails`, `event_ledger`) may be missing if the first attempt died after the waiver insert; a retry replays IDs and does not duplicate the waiver. Concurrent first-time participant inserts are still matched only in application code (no unique constraint on email+DOB+phone).
 
 ---
 
