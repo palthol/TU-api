@@ -4,7 +4,7 @@ Admin routes require header **`x-admin-key`**. That header accepts either:
 
 1. The shared env **`ADMIN_API_KEY`** (legacy compatibility — authenticates as
    actor `legacy_shared_key` with role `owner`), or
-2. A personal staff key from `staff_users` (migration `0023`; SHA-256 hashed).
+2. A personal staff key from `staff_users` (migration `20260914185843_staff_rbac.sql`; SHA-256 hashed).
    Roles: `owner`, `front_desk`, `finance`.
 
 Use HTTPS in production; never expose admin or staff keys in public frontends or
@@ -47,7 +47,7 @@ Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext re
 
 Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
 
-Until migration `0023` is applied, only the shared `ADMIN_API_KEY` authenticates.
+Until migration `20260914185843_staff_rbac.sql` is applied, only the shared `ADMIN_API_KEY` authenticates.
 
 ### `GET /api/admin/auth/me`
 
@@ -134,12 +134,12 @@ A retry or double-submit for the **same intent** does not create another waiver,
 
 **Same intent** is:
 
-1. **Client `idempotency_key` (preferred).** Optional string, max 200 characters after trim. Empty/omitted means “derive a key”. Mirrors `record_payment_refund`: the key is unique when set (`waivers.idempotency_key`, migration `0022`). A later POST with the same key and the same participant identity (email + date of birth + phone) returns the original envelope and does **not** re-send Discord/Slack notifications.
+1. **Client `idempotency_key` (preferred).** Optional string, max 200 characters after trim. Empty/omitted means “derive a key”. Mirrors `record_payment_refund`: the key is unique when set (`waivers.idempotency_key`, migration `20260914150818`). A later POST with the same key and the same participant identity (email + date of birth + phone) returns the original envelope and does **not** re-send Discord/Slack notifications.
 2. **Derived fallback** when the client omits the key: `derived:v1:` plus SHA-256 of `waiver.submit.v1|{email lowercase}|{date_of_birth}|{phone}|{content_version}|{sha256(signature PNG bytes)}`. Existing TU-Signup payloads that omit `idempotency_key` are therefore retry-safe for an identical signature + identity + `content_version`.
 
 A client key reused for a **different** participant identity returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. A new signature (or `content_version`) without a client key is a new intent and creates a new waiver.
 
-**Residual risk:** storage uploads and DB writes are still sequential (not one Postgres transaction). Unique `idempotency_key` prevents duplicate waiver rows once migration `0022` is applied. Until that column exists, the handler falls back to the pre-idempotency insert so live submits keep working; retries can still duplicate. A crash after storage upload and before the waiver insert can leave orphan signature/PDF objects. Related rows (`emergency_contacts`, `waiver_medical_histories`, `audit_trails`, `event_ledger`) may be missing if the first attempt died after the waiver insert; a retry replays IDs and does not duplicate the waiver. Concurrent first-time participant inserts are still matched only in application code (no unique constraint on email+DOB+phone).
+**Residual risk:** storage uploads and DB writes are still sequential (not one Postgres transaction). Unique `idempotency_key` prevents duplicate waiver rows once migration `20260914150818` is applied. Until that column exists, the handler falls back to the pre-idempotency insert so live submits keep working; retries can still duplicate. A crash after storage upload and before the waiver insert can leave orphan signature/PDF objects. Related rows (`emergency_contacts`, `waiver_medical_histories`, `audit_trails`, `event_ledger`) may be missing if the first attempt died after the waiver insert; a retry replays IDs and does not duplicate the waiver. Concurrent first-time participant inserts are still matched only in application code (no unique constraint on email+DOB+phone).
 
 ---
 
@@ -535,7 +535,7 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **0024** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
 
 `day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
 
@@ -586,7 +586,7 @@ Partial update. Deactivate with `"is_active": false`. Existing sessions are not 
 
 #### `POST /api/admin/scheduling/generate-sessions`
 
-Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **0024**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **20260914202053**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
 
 Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
 

@@ -48,7 +48,7 @@ second API.
    authenticates as actor `legacy_shared_key` with role `owner`. Personal staff
    keys use the same header so dashboard/receipts can paste a per-person key
    later with no new client protocol.
-2. **Staff directory in Postgres** (`staff_users`, migration `0023`). Columns:
+2. **Staff directory in Postgres** (`staff_users`, migration `20260914185843`). Columns:
    email, display name, role (`owner` | `front_desk` | `finance`), SHA-256
    `key_hash`, `key_prefix`, `active`. Plaintext keys are shown once at create
    or rotate (`tu_sk_` + 32 random bytes hex). Hashes are never logged or
@@ -58,7 +58,7 @@ second API.
 3. **No half-open gate.** Missing/wrong key → `401 { ok: false, error: "unauthorized" }`.
    Authenticated but role-denied → `403 { ok: false, error: "forbidden" }`. There
    is no optional-key, “dev open admin”, or route that skips the gate. Unset
-   `ADMIN_API_KEY` does not match an empty header. If `0023` is not applied,
+   `ADMIN_API_KEY` does not match an empty header. If `20260914185843` is not applied,
    staff-key lookup fails closed (treat as unknown key); the shared env key
    still works.
 4. **Role matrix (prefix, mutating methods).** GET/HEAD (except `GET /staff`)
@@ -92,7 +92,7 @@ second API.
 - Existing `x-admin-key` clients keep working as owner until they rotate to
   personal keys. The shared-key window is leftover risk: anyone with
   `ADMIN_API_KEY` is still a full owner.
-- Production must not receive `0023` from this task. Until it is applied,
+- Production must not receive `20260914185843` from this task. Until it is applied,
   only the shared key authenticates.
 - `API-PAY-001` stays blocked until this task and `API-HARD-001` are both done.
 - Sibling UIs are not changed in this repository.

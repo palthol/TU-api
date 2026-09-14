@@ -1,6 +1,8 @@
 -- Optional unique idempotency key for POST /api/waivers/submit retries.
 -- Forward-safe: existing waiver rows keep NULL keys (partial unique index ignores them).
--- Do not apply to production from this task (API-HARD-002 production writes: no).
+-- Version 20260914150818 sorts after live 20260608191715.
+-- Former repo filename: 0022_waiver_submit_idempotency_key.sql.
+-- Do not apply to production from this rename (production writes: no).
 
 alter table public.waivers
   add column if not exists idempotency_key text;

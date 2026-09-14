@@ -74,9 +74,15 @@ From the project root (or wherever you run Supabase CLI):
 npx supabase db push
 ```
 
-Or run the SQL files in **numeric order** (`0001` through `0021`) in the Supabase Dashboard → SQL Editor. Prefer `npm run supabase:push` when the CLI project is linked.
+Or run the SQL files in **version order** (`0001` through `0020`, then
+`20260608191715`, then any later timestamped files) in the Supabase Dashboard →
+SQL Editor. Prefer `npm run supabase:push` when the CLI project is linked.
 
-Repo files vs live history: production records `0001`–`0020` plus timestamped `20260608191715` for the same change as repo file `0021_marketing_leads_first_last_name.sql`. Reconcile that identifier before the next push. See [api-schema-audit.md](./api-schema-audit.md).
+Applied live history (last `list_migrations` 2026-09-03): `0001`–`0020` plus
+`20260608191715_marketing_leads_first_last_name`. Repo filenames now use that
+same version id. Pending in-repo only: `20260914150818`, `20260914185843`,
+`20260914202053`. Do not push those until a task authorizes production schema
+writes. See [api-schema-audit.md](./api-schema-audit.md).
 
 What the numbered files do:
 
@@ -90,7 +96,10 @@ What the numbered files do:
 - **0010**–**0013** — Event ledger + Phase 2/3 ops/analytics views + primary KPI summary
 - **0014**–**0019** — Receipts, marketing leads, expenses, personal finance, discounts
 - **0020** — `create_subscription` RPC, `sessions.cancelled_at`
-- **0021** — `marketing_leads` first/last name columns
+- **20260608191715** — `marketing_leads` first/last name columns (formerly `0021`; matches live history)
+- **20260914150818** — `waivers.idempotency_key` (formerly `0022`; in-repo, unapplied)
+- **20260914185843** — `staff_users` / staff audit (formerly `0023`; in-repo, unapplied)
+- **20260914202053** — `generate_sessions` RPC (formerly `0024`; in-repo, unapplied)
 
 ### 2.4 Make yourself admin
 
@@ -106,7 +115,7 @@ select id from auth.users where email = 'your@email.com';
 
 Replace `your@email.com` with the address you use to sign in. From then on, that user has full access to all tables when using the **anon** or **authenticated** key (e.g. from the **dashboard** app or waiver app).
 
-**Order of operations:** You can create the Auth user before or after running migrations. What matters is that before signing into the dashboard, (1) current migrations through **0021** have been applied, and (2) your auth user’s id is in `app_admin`.
+**Order of operations:** You can create the Auth user before or after running migrations. What matters is that before signing into the dashboard, (1) current **applied** migrations through **`20260608191715`** exist on the database, and (2) your auth user’s id is in `app_admin`.
 
 ### 2.5 Wiping the DB and starting fresh
 
@@ -114,7 +123,7 @@ Yes — you can wipe the database and start over for testing.
 
 - **Supabase hosted (Dashboard):**  
   **Project Settings** → **General** → **Reset database**. This deletes all data and all Auth users, and clears applied migrations. After reset:
-  1. Run migrations again (SQL Editor: run `0001` through `0021` in order, or use `npm run supabase:push` if the project is linked).
+  1. Run migrations again (SQL Editor: run files in version order, or use `npm run supabase:push` if the project is linked). A full reset will also apply pending timestamped files (`20260914150818` onward) unless you stop after `20260608191715`.
   2. Create a new user under **Authentication** → **Users** (e.g. Add user → email + password).
   3. In **SQL Editor**, run:  
      `insert into public.app_admin (id) select id from auth.users where email = 'your@email.com';`
@@ -202,7 +211,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 
 ### 5.1 Adding or changing the database
 
-- Add a **new migration** in `supabase/migrations` with the next unused number (currently after `0021`). Do not edit or reorder migrations that have already run.
+- Add a **new migration** with `npx supabase migration new <name>` so the version sorts after `20260914202053`. Do not edit, reorder, or reuse `0001`–`0020` / `20260608191715` / the three pending timestamped files.
 - Apply: `npx supabase db push` or run the new file in SQL Editor.
 
 ### 5.2 Monthly charge generation

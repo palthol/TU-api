@@ -74,14 +74,18 @@ cd TU-web && npm run dev
 
 ## Database workflow (read before changing schema)
 
-- The schema lives in `supabase/migrations/NNNN_*.sql`, applied in numeric order.
-- **Migration sync:** live project includes **`0001`–`0020`** plus the marketing-lead
-  first/last-name migration. The repo names that last file `0021`, while production
-  records version `20260608191715`; reconcile that history before the next push. Before new
-  schema work, confirm in Supabase Dashboard → Database → Migrations or `list_migrations`.
+- The schema lives in `supabase/migrations/`, applied in version order.
+- **Migration sync (reconciled 2026-09-14):** live history is **`0001`–`0020`** plus
+  **`20260608191715`** (`marketing_leads` first/last name; formerly repo file `0021`).
+  Pending in-repo only: `20260914150818` (waiver idempotency), `20260914185843`
+  (staff RBAC), `20260914202053` (`generate_sessions`). Do not `db push` those until
+  a task authorizes production schema writes. Before new schema work, confirm in
+  Supabase Dashboard → Database → Migrations or `list_migrations`.
   See `docs/api-schema-audit.md` and `docs/api-capability-audit.md`.
-- To add schema: write a new numbered migration, apply it (`supabase db push` or the
-  Supabase MCP `apply_migration`), then re-verify with `list_tables` / `execute_sql`.
+- To add schema: create a timestamped file with `supabase migration new <name>`
+  (version must sort after `20260914202053`), keep it idempotent, apply it
+  (`supabase db push` or the Supabase MCP `apply_migration`), then re-verify with
+  `list_tables` / `execute_sql`. Do not reuse sequential `0021`–`0024` filenames.
 - Migrations should be idempotent (`create table if not exists`, `create or replace`,
   `grant`).
 - After schema changes, update the relevant doc in `docs/` (e.g. `admin-api.md`,
