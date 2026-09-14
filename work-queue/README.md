@@ -53,7 +53,7 @@ Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
 | [API-SCHED-001](tasks/API-SCHED-001.md) | backend | ready | API-TEST-002, API-VAL-002 | Add template CRUD and recurring session generation |
 | [API-AUTO-001](tasks/API-AUTO-001.md) | automation | ready | API-OPS-001, API-VAL-001 | Add supported monthly-charge cron endpoint |
 | [API-AUTO-002](tasks/API-AUTO-002.md) | automation | ready | API-OPS-001, API-VAL-001 | Deploy controlled Discord schedules |
-| [API-AUTH-001](tasks/API-AUTH-001.md) | security | ready | API-OPS-001 | Design and implement staff RBAC |
+| [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |
 | [API-PAY-001](tasks/API-PAY-001.md) | integrations | blocked | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
 
 Safe next parallel batch: **API-SCHED-001**, **API-AUTO-002**, and **API-AUTH-001**. Do not pair **API-HARD-001** with **API-AUTO-001** (both own billing routes).
