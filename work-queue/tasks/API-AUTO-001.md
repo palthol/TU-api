@@ -1,6 +1,6 @@
 # API-AUTO-001 — Monthly-charge cron endpoint
 
-- Status: **blocked** until API-OPS-001 and API-VAL-001 are done
+- Status: **ready**
 - Lane: automation
 - Depends on: API-OPS-001, API-VAL-001
 - Production writes: no (endpoint only; enabling prod cron is a later ops step)
