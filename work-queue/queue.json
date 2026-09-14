@@ -116,7 +116,7 @@
     {
       "id": "API-AUTO-002",
       "lane": "automation",
-      "status": "ready",
+      "status": "done",
       "depends_on": ["API-OPS-001", "API-VAL-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-AUTO-002.md"

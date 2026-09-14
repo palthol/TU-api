@@ -39,13 +39,17 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
   - `ADMIN_API_KEY` (required for `/api/admin/*` and the on-demand PDF route)
-  - Optional: `PORT`, `ALLOWED_ORIGIN` (defaults to `*` when unset), `CRON_SECRET`,
-    `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`, Cloudflare viewer vars
+  - Optional: `PORT`, `ALLOWED_ORIGIN` (defaults to `*` when unset), `CRON_SECRET`
+    (required on the API **and** the Render cron job once Discord digest is
+    scheduled; header `x-cron-secret`), `DISCORD_WEBHOOK_URL` (API service only),
+    `SLACK_WEBHOOK_URL`, Cloudflare viewer vars
     (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS`,
     `WAIVER_VIEWER_ALLOWED_EMAILS`), storage (`SIGNATURES_BUCKET`, `WAIVERS_BUCKET`),
     PDF letterhead (`PDF_ORG_NAME`, `PDF_ORG_TAGLINE`, `PDF_ORG_ADDRESS`), and
     `API_EXPOSE_DB_ERRORS`
   - Full name list: `services/api/.env.example` and [deployment.md](./deployment.md)
+  - Discord digest schedule: [deployment.md](./deployment.md) (Render Dashboard
+    cron; this repo has no `render.yaml`)
 - **Production API host** — `https://api.templeunderground.com` (Render;
   also `https://temple-underground-signup.onrender.com`). Set sibling
   `VITE_API_BASE_URL` to that URL (no trailing slash). Details:
@@ -220,6 +224,29 @@ The function only creates charges for subscriptions that don’t already have a 
 
 Use Supabase Dashboard → Project Settings → Backups (or your host’s backup policy). For critical changes, you can export data or take a dump before running migrations.
 
+### 5.5 Discord daily digest (Render cron)
+
+Staff Discord alerts are **outbound webhooks** from the API, not a scheduler
+inside this repo. Full contract: [deployment.md](./deployment.md) (API-AUTO-002).
+
+**Schedule one job only:** `POST /api/admin/notifications/discord/daily-digest`
+daily at `0 13 * * *` UTC, header `x-cron-secret` matching env `CRON_SECRET`.
+That digest already lists overdue and due-soon members. Do **not** also
+schedule `POST /api/admin/notifications/discord/payment-reminders` at the same
+time — it posts the same list and will double-spam the channel. Leave
+payment-reminders for a manual click when you want an extra ping.
+
+Env **names** (never commit values): `CRON_SECRET` and `DISCORD_WEBHOOK_URL` on
+the API web service; `CRON_SECRET` on the Render Cron Job. The cron job curls
+the public API; it does not need the webhook URL.
+
+Create/suspend the Cron Job in the Render Dashboard (MCP cannot list this
+account). Disable with **Suspend**, or rotate `CRON_SECRET` / clear
+`DISCORD_WEBHOOK_URL` on the API.
+
+This is **not** monthly charge generation (section 5.2 / API-AUTO-001). Do not
+point a cron at a generate-monthly-charges HTTP route from this runbook.
+
 ---
 
 ## 6. Troubleshooting
@@ -231,6 +258,10 @@ Use Supabase Dashboard → Project Settings → Backups (or your host’s backup
 | Need to run admin-only SQL from Dashboard | Dashboard SQL uses service_role, so it bypasses RLS. No extra step. |
 | Charge generation creates nothing | Subscriptions must be `status = 'active'`, plan must be `billing_cadence = 'monthly'`, and the next due date must be today or in the past. Check for existing charges for that period. |
 | Waiver PDF fails | Confirm API has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` and that the waiver/participant data exists in the DB. |
+| Discord digest cron fails / `401 unauthorized` | `CRON_SECRET` must be set on **both** the API and the cron job, and the cron must send header `x-cron-secret` (not `x-admin-key`). Check Render Cron Job logs. |
+| Digest returns `500 discord_webhook_not_configured` | Set `DISCORD_WEBHOOK_URL` on the **API** web service (not on the cron job). |
+| Digest returns `502` with `discord_http_…` | Discord rejected the webhook; see API logs `discord.webhook.failed`. |
+| Two similar Discord reminder posts the same day | Digest already includes the overdue / due-soon list. Do not also schedule `payment-reminders`. Suspend the extra cron. |
 
 ---
 

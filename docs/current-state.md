@@ -1,6 +1,6 @@
 # API current state
 
-**Verified:** 2026-09-05 (deploy inventory); production snapshot 2026-09-03  
+**Verified:** 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory); production snapshot 2026-09-03  
 **Repository:** `palthol/TU-api`  
 **Production database:** Supabase `jhxzecxkccqlgyazhsnb`  
 **Deployed API:** Render — `https://api.templeunderground.com` (see [deployment.md](./deployment.md))
@@ -20,7 +20,7 @@ response contracts and `api-schema-audit.md` for detailed schema evidence.
 | Billing/receipts | verified (non-prod) | Local smoke (API-VAL-001): personal finance entries, charge discounts, record-payment, receipt void, refund | Production still has 0 charges, payments, receipts; `record-payment` remains non-atomic |
 | Subscriptions | verified (non-prod) | Local smoke (API-VAL-002): `POST /api/admin/billing/subscriptions` for TU-TEST participant + Basic Group Plan (`create_subscription`, monthly `create_initial_charge`); `400` `participant_id_required`; `400` `create_initial_charge only applies to monthly plans (... cadence contract)` | Production still has 0 subscriptions |
 | Scheduling | verified (non-prod) | Local smoke (API-VAL-002): session create/list/get/reschedule/cancel; attendance upsert; cancelled-session `session_cancelled`; unknown session `session_not_found`; missing `starts_at` → `invalid_starts_at`. Template CRUD + generate-sessions (API-SCHED-001) covered by Vitest | Production still has 0 sessions and attendance rows. Migration `0024` (`generate_sessions`) is in-repo and unapplied. **Entitlement:** default `enforce_entitlement: true` **blocks** — `can_attend_group_session` false → `blocked` / `400` `all_records_blocked` and no upsert; `enforce_entitlement: false` upserts without calling the RPC |
-| Notifications | manually callable | Discord routes exist | No scheduler found in repository |
+| Notifications | schedule documented; live cron not enabled | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md) | Digest once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled (same overdue / due-soon list as digest). Render MCP unauthorized; no live job created |
 | On-demand waiver PDF | implemented, unwired | Renderer/route tests pass | Active admin UI uses stored signed PDF URLs |
 | Non-prod validation env | documented | [validation-environment.md](./validation-environment.md) | Local Supabase + local API only; production `jhxzecxkccqlgyazhsnb` is out of bounds |
 
@@ -51,7 +51,8 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Dependency audit reported 3 moderate findings on 2026-09-03.
 - No route-level suites cover the main billing, subscription, scheduling, or reporting
   workflows.
-- Monthly-charge generation and Discord notifications have no configured scheduler here.
+- Monthly-charge generation has no configured scheduler here (API-AUTO-001).
+- Discord notifications: operator Render cron runbook is in [deployment.md](./deployment.md) (API-AUTO-002). Live cron was **not** enabled (Render MCP unauthorized; avoid silent production Discord posts). Digest is the only recommended scheduled job; `payment-reminders` stays on-demand because it repeats digest’s overdue / due-soon list. Handlers have no last-run marker, so a manual Trigger Run plus the scheduled tick can still double-post.
 - Schedule-template CRUD and recurring-session generation exist in-repo (API-SCHED-001); apply migration `0024` before using `POST /api/admin/scheduling/generate-sessions` against a live database.
 - Staff authorization is per-person hashed `x-admin-key` values with roles
   `owner` / `front_desk` / `finance` (API-AUTH-001 / API-ADR-005). The shared
@@ -66,6 +67,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - `npm run guard:waiver-schema`: passing.
 - Documentation reconciled against the mounted route list, migrations `0001`–`0021`, and test files (2026-09-03).
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
+- Discord cron runbook (API-AUTO-002): auth header `x-cron-secret` / env `CRON_SECRET`; digest `POST /api/admin/notifications/discord/daily-digest` at `0 13 * * *` UTC; `payment-reminders` not scheduled. Failure keys: `401 unauthorized`, `500 discord_webhook_not_configured`, `502 discord_*`. Live Render cron not created.
 - Validation environment (API-GATE-001): seed/cleanup procedure in [validation-environment.md](./validation-environment.md). Production project `jhxzecxkccqlgyazhsnb` and `https://api.templeunderground.com` are out of bounds for VAL writes.
 - Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `0022` is applied. Migration `0022` is in-repo and unapplied to production.
 - Staff RBAC (API-AUTH-001): Vitest covers missing/wrong key (`401 unauthorized`), shared-key owner compatibility, personal staff keys, finance/front_desk `403 forbidden`, cron `x-cron-secret` actor, and owner staff CRUD. Migration `0023` is in-repo and unapplied to production.
