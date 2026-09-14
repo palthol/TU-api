@@ -53,14 +53,19 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
   workflows.
 - Monthly-charge generation and Discord notifications have no configured scheduler here.
 - Schedule-template CRUD and recurring-session generation do not exist.
-- Staff authorization is a shared `x-admin-key`, not individual RBAC.
+- Staff authorization is per-person hashed `x-admin-key` values with roles
+  `owner` / `front_desk` / `finance` (API-AUTH-001 / API-ADR-005). The shared
+  `ADMIN_API_KEY` remains an owner compatibility actor (`legacy_shared_key`)
+  until operators rotate. Migration `0023` is in-repo and **not** applied to
+  production from this task.
 - CORS defaults to `*` when `ALLOWED_ORIGIN` is absent; production currently reflects `*`.
 
 ## Verification baseline
 
-- `npm --workspace services/api test`: 18/18 passing.
+- `npm --workspace services/api test`: 100/100 passing (API-AUTH-001).
 - `npm run guard:waiver-schema`: passing.
 - Documentation reconciled against the mounted route list, migrations `0001`–`0021`, and test files (2026-09-03).
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
 - Validation environment (API-GATE-001): seed/cleanup procedure in [validation-environment.md](./validation-environment.md). Production project `jhxzecxkccqlgyazhsnb` and `https://api.templeunderground.com` are out of bounds for VAL writes.
 - Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `0022` is applied. Migration `0022` is in-repo and unapplied to production.
+- Staff RBAC (API-AUTH-001): Vitest covers missing/wrong key (`401 unauthorized`), shared-key owner compatibility, personal staff keys, finance/front_desk `403 forbidden`, cron `x-cron-secret` actor, and owner staff CRUD. Migration `0023` is in-repo and unapplied to production.
