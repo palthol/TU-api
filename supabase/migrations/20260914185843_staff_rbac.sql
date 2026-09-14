@@ -1,5 +1,6 @@
 -- Staff directory and privileged-write audit for API-AUTH-001 / API-ADR-005.
--- Idempotent. Do not apply to production from this task (production writes: no).
+-- Idempotent. Version 20260914185843 sorts after live 20260608191715.
+-- Former repo filename: 0023_staff_rbac.sql.
 -- Until this migration is applied, only the shared ADMIN_API_KEY authenticates.
 
 create table if not exists public.staff_users (

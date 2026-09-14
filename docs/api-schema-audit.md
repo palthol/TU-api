@@ -1,6 +1,6 @@
 # API ↔ Supabase schema audit (live verification)
 
-**Date:** 2026-09-03 (updated; original audit 2026-05-29)
+**Date:** 2026-09-14 (history filenames reconciled; live `list_migrations` last confirmed 2026-09-03; original audit 2026-05-29)
 
 **Product map:** [api-capability-audit.md](./api-capability-audit.md) (notifications, finance, scheduling).  
 **Project:** Temple Underground — Supabase `jhxzecxkccqlgyazhsnb` (production, live traffic)
@@ -20,10 +20,12 @@ The API code is **structurally aligned** with the database: every RPC it calls, 
 view it reads, and every column it writes exists in the live schema with matching names,
 types, and check-constraint vocabularies.
 
-All expected schema changes are present in production. `list_migrations` returns
-`0001`–`0020` plus `20260608191715_marketing_leads_first_last_name`. The repository holds
-the same last change as `0021_marketing_leads_first_last_name.sql`; reconcile that version
-identifier before the next push rather than assuming migration history is identical.
+All expected schema changes are present in production. `list_migrations` (2026-09-03)
+returns `0001`–`0020` plus `20260608191715_marketing_leads_first_last_name`. The repo
+file is now `20260608191715_marketing_leads_first_last_name.sql` so the version id
+matches live history. A later `db push` will not re-apply that SQL. Pending
+in-repo migrations (`20260914150818`, `20260914185843`, `20260914202053`) sort
+after the live version and remain unapplied.
 
 Remaining work is **operational smoke-testing** (finance, scheduling, subscriptions) and
 **engineering hardening** (non-transactional write paths — see §3).
@@ -32,9 +34,16 @@ Remaining work is **operational smoke-testing** (finance, scheduling, subscripti
 
 ## 1. Migration status
 
-`list_migrations` on the live project returns **`0001`–`0020`** plus timestamped migration
-**`20260608191715`**. The repo's `supabase/migrations/` folder contains **21 migrations**;
-the final file is numbered `0021` locally but represents the timestamped live change.
+`list_migrations` on the live project (2026-09-03) returns **`0001`–`0020`** plus
+timestamped migration **`20260608191715`**. The repo now uses that same version
+prefix for the marketing-lead name split. Later files `20260914150818` (waiver
+idempotency, formerly `0022`), `20260914185843` (staff RBAC, formerly `0023`),
+and `20260914202053` (`generate_sessions`, formerly `0024`) are in-repo only.
+
+This environment could not re-query production on 2026-09-14 (no Supabase MCP,
+service-role key, or CLI access token). Filenames were aligned to the last
+verified live versions. Production `schema_migrations` was not rewritten, and
+pending SQL was not pushed.
 
 | Migration | Creates | API code that depends on it |
 | --- | --- | --- |
@@ -42,6 +51,7 @@ the final file is numbered `0021` locally but represents the timestamped live ch
 | `0018_fix_private_schema_grants_for_event_capture.sql` | `grant usage on schema private` + execute grants to `service_role` for event-capture functions | waiver submission path (`participants` INSERT → event-capture trigger → `private.*`) |
 | `0019_charge_discounts.sql` | table `charge_discounts`, trigger `charge_discounts_set_applied_amount()`, discount-aware rewrite of `view_charge_net`, total-guard triggers, `charges.amount_cents` lock trigger | `billing.js`: `GET/POST /billing/charge-discounts` (and the discount line in the receipts "Formal billing" tab) |
 | `0020_tier1_subscription_and_session_cancel.sql` | `sessions.cancelled_at`, RPC `create_subscription(...)`, updated `view_ops_today_sessions` | `billing.js`: `POST /billing/subscriptions`; `scheduling.js`: session list/get/create/patch + attendance upsert |
+| `20260608191715_marketing_leads_first_last_name.sql` | `marketing_leads.first_name` / `last_name`; drops `name` | `POST /api/lead` |
 
 **Verification (2026-09-03):**
 

@@ -45,7 +45,7 @@ Create participant and waiver (and related rows); query `view_waiver_documents` 
 
 ## 2. Indexes and performance (current + one extra)
 
-Already in place (migrations `0001`–`0021`):
+Already in place (migrations `0001`–`0020` plus `20260608191715`):
 
 - Core FKs and common filters: participants (email, full_name); waivers (participant_id, signed_at_utc); audit_trails (participant_id, waiver_id + created_at); emergency_contacts, waiver_medical_histories; accounts (status); subscriptions, charges, payments, payment_allocations, sessions, attendance_records, private_usage, access_overrides, entitlement_credits; plan_entitlements (plan_definition_id).
 - Billing: partial index on `charges(subscription_id, coverage_start)` where `status != 'void'` for `generate_monthly_charges()`.
