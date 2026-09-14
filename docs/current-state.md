@@ -58,7 +58,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
   `owner` / `front_desk` / `finance` (API-AUTH-001 / API-ADR-005). The shared
   `ADMIN_API_KEY` remains an owner compatibility actor (`legacy_shared_key`)
   until operators rotate. Migration `20260914185843` is in-repo and **not** applied to
-  production from this task.
+  production.
 - CORS defaults to `*` when `ALLOWED_ORIGIN` is absent; production currently reflects `*`.
 
 ## Verification baseline
