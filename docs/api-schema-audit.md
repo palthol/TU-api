@@ -205,7 +205,7 @@ every integrity query from the 2026-06-01 audit. See the workspace
 - [x] Verify `personal_finance_entries`, `charge_discounts`, `sessions.cancelled_at`, and
       `create_subscription` exist on production.
 - [x] Smoke-test finance endpoints (personal-finance, charge-discounts, record-payment). (API-VAL-001, local Supabase + local API)
-- [ ] Smoke-test Tier 1 endpoints (scheduling CRUD, subscription enrollment, cron auth).
+- [x] Smoke-test Tier 1 endpoints (scheduling CRUD, subscription enrollment, cron auth). (API-VAL-002, local Supabase + local API; Discord webhook unset → `discord_webhook_not_configured`)
 - [ ] (Optional hardening) Wrap `record-payment` and waiver submit in atomic RPCs or add
       idempotency keys.
 - [x] Historical schema-alignment note archived at
