@@ -1,6 +1,6 @@
 # API capability audit — notifications, finance, scheduling
 
-**Date:** 2026-09-03 (updated; original audit 2026-05-29)
+**Date:** 2026-09-14 (migration filenames reconciled; live `list_migrations` last confirmed 2026-09-03; original audit 2026-05-29)
 
 **Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs front-ends (`admin/apps/receipts`, `admin/apps/dashboard`, `marketing/TU-web`, `TU-Signup`).  
 **Companion docs:** [admin-api.md](./admin-api.md) (route contracts), [api-schema-audit.md](./api-schema-audit.md) (live DB alignment), [finance-subsystem-design.md](./finance-subsystem-design.md), [receipts-app.md](./receipts-app.md), [v1-v2-application-map.md](./v1-v2-application-map.md).
@@ -16,11 +16,10 @@
 | **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11) | Reporting views + entitlement check on attendance; billing RPC from attendance | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** |
 
 **Schema sync:** Production includes migrations **0017–0020** and the marketing-lead name
-change (confirmed 2026-09-03 via `list_migrations`). That last change is versioned
-`20260608191715` live and `0021` in the repo; reconcile the identifier before another
-push. Next work is
-**smoke-testing** finance, scheduling, and subscription endpoints. See
-[api-schema-audit.md](./api-schema-audit.md).
+change (confirmed 2026-09-03 via `list_migrations`, version `20260608191715`). Repo
+filename `20260608191715_marketing_leads_first_last_name.sql` now matches that id
+(formerly `0021`). Pending in-repo: `20260914150818`, `20260914185843`,
+`20260914202053`. See [api-schema-audit.md](./api-schema-audit.md).
 
 **Recommended iteration order:**
 

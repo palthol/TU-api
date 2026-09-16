@@ -59,7 +59,7 @@ export function createRequireAdmin(options = {}) {
 
 /**
  * Env-key gate used by route tests. Production wiring uses createRequireAdmin
- * with a staff-table lookup so personal keys work after migration 0023.
+ * with a staff-table lookup so personal keys work after migration 20260914185843.
  */
 export const requireAdmin = createRequireAdmin();
 
