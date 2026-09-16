@@ -8,7 +8,6 @@ import { registerAdminBillingRoutes } from './billing.js';
 const ADMIN_KEY = 'test-admin-key-billing';
 const ACCOUNT_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const CHARGE_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-const CHARGE_ID_2 = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
 /**
  * In-memory Supabase stand-in for billing route tests.
@@ -77,6 +76,168 @@ function createIsolatedSupabase({ seed = {}, fail = {} } = {}) {
     });
   }
 
+  const rpcCalls = [];
+
+  function runRecordPayment(args = {}) {
+    const failErr = takeFail('record_payment', 'rpc');
+    if (failErr) {
+      return { data: null, error: failErr };
+    }
+
+    const accountId = args.p_account_id;
+    const amountCents = args.p_amount_cents;
+    const method = args.p_method;
+    const issuedBy = typeof args.p_issued_by === 'string' ? args.p_issued_by.trim() : '';
+    const allocations = Array.isArray(args.p_allocations) ? args.p_allocations : [];
+    const issueReceipt = args.p_issue_receipt !== false;
+    const key =
+      typeof args.p_idempotency_key === 'string' && args.p_idempotency_key.trim()
+        ? args.p_idempotency_key.trim()
+        : null;
+
+    if (!accountId || typeof amountCents !== 'number' || !Number.isInteger(amountCents) || amountCents <= 0) {
+      return { data: null, error: { message: 'account_and_positive_amount_required' } };
+    }
+    if (!issuedBy) {
+      return { data: null, error: { message: 'issued_by_required' } };
+    }
+    if (allocations.length === 0) {
+      return { data: null, error: { message: 'allocations_required' } };
+    }
+
+    if (!tables.payments) tables.payments = [];
+    if (!tables.payment_allocations) tables.payment_allocations = [];
+    if (!tables.receipts) tables.receipts = [];
+    if (!tables.charges) tables.charges = [];
+    if (!tables.view_charge_net) tables.view_charge_net = [];
+
+    if (key) {
+      const existing = tables.payments.find((row) => row.idempotency_key === key);
+      if (existing) {
+        if (existing.account_id !== accountId || existing.amount_cents !== amountCents || existing.method !== method) {
+          return { data: null, error: { message: 'idempotency_key_conflict' } };
+        }
+        const receipt = tables.receipts.find(
+          (row) => row.payment_id === existing.id && row.receipt_kind === 'money_in',
+        );
+        return {
+          data: { payment_id: existing.id, receipt_id: receipt?.id ?? null },
+          error: null,
+        };
+      }
+    }
+
+    let sum = 0;
+    for (const row of allocations) {
+      if (!row?.charge_id || typeof row.amount_cents !== 'number' || !Number.isInteger(row.amount_cents) || row.amount_cents <= 0) {
+        return { data: null, error: { message: 'invalid_allocation_row' } };
+      }
+      sum += row.amount_cents;
+    }
+    if (sum !== amountCents) {
+      return { data: null, error: { message: 'allocation_sum_must_equal_payment_amount' } };
+    }
+
+    for (const row of allocations) {
+      const ch = tables.charges.find((c) => c.id === row.charge_id);
+      if (!ch) {
+        return {
+          data: null,
+          error: { message: 'charge_not_found', details: JSON.stringify({ charge_id: row.charge_id }) },
+        };
+      }
+      if (ch.account_id !== accountId) {
+        return {
+          data: null,
+          error: { message: 'charge_account_mismatch', details: JSON.stringify({ charge_id: row.charge_id }) },
+        };
+      }
+      if (ch.status === 'void') {
+        return {
+          data: null,
+          error: { message: 'charge_is_void', details: JSON.stringify({ charge_id: row.charge_id }) },
+        };
+      }
+      const netDue =
+        tables.view_charge_net.find((n) => n.charge_id === row.charge_id)?.net_due_cents ?? ch.amount_cents ?? 0;
+      const allocated = tables.payment_allocations
+        .filter((a) => a.charge_id === row.charge_id)
+        .reduce((s, a) => s + a.amount_cents, 0);
+      const headroom = Math.max(0, netDue - allocated);
+      if (row.amount_cents > headroom) {
+        return {
+          data: null,
+          error: {
+            message: 'allocation_exceeds_net_due',
+            details: JSON.stringify({ charge_id: row.charge_id, allocatable_cents: headroom }),
+          },
+        };
+      }
+    }
+
+    const payment = {
+      id: randomUUID(),
+      account_id: accountId,
+      amount_cents: amountCents,
+      currency: 'USD',
+      paid_at: args.p_paid_at || new Date().toISOString(),
+      method,
+      source: 'manual',
+      status: 'succeeded',
+      reference: args.p_reference || null,
+      notes: args.p_notes || null,
+      idempotency_key: key,
+    };
+    const newAllocations = allocations.map((row) => ({
+      id: randomUUID(),
+      payment_id: payment.id,
+      charge_id: row.charge_id,
+      amount_cents: row.amount_cents,
+    }));
+    const chargeUpdates = [];
+    const distinctChargeIds = [...new Set(allocations.map((a) => a.charge_id))];
+    for (const cid of distinctChargeIds) {
+      const ch = tables.charges.find((c) => c.id === cid);
+      const netDue =
+        tables.view_charge_net.find((n) => n.charge_id === cid)?.net_due_cents ?? ch?.amount_cents ?? 0;
+      const prior = tables.payment_allocations
+        .filter((a) => a.charge_id === cid)
+        .reduce((s, a) => s + a.amount_cents, 0);
+      const added = newAllocations.filter((a) => a.charge_id === cid).reduce((s, a) => s + a.amount_cents, 0);
+      if (prior + added >= netDue && netDue > 0) {
+        chargeUpdates.push(cid);
+      }
+    }
+    const receipt = issueReceipt
+      ? {
+          id: randomUUID(),
+          receipt_kind: 'money_in',
+          payment_id: payment.id,
+          account_id: accountId,
+          amount_cents: amountCents,
+          currency: 'USD',
+          issued_by: issuedBy,
+          source: 'staff_triggered',
+        }
+      : null;
+
+    tables.payments.push(payment);
+    tables.payment_allocations.push(...newAllocations);
+    for (const cid of chargeUpdates) {
+      const ch = tables.charges.find((c) => c.id === cid);
+      if (ch) {
+        ch.status = 'paid';
+        ch.updated_at = new Date().toISOString();
+      }
+    }
+    if (receipt) tables.receipts.push(receipt);
+
+    return {
+      data: { payment_id: payment.id, receipt_id: receipt?.id ?? null },
+      error: null,
+    };
+  }
+
   const supabase = {
     from(table) {
       const state = { table, action: 'select', payload: null, filters: [] };
@@ -120,12 +281,29 @@ function createIsolatedSupabase({ seed = {}, fail = {} } = {}) {
       };
       return builder;
     },
-    rpc() {
-      return Promise.resolve({ data: null, error: { message: 'rpc_not_stubbed' } });
+    rpc(name, args) {
+      rpcCalls.push({ name, args });
+      if (name !== 'record_payment') {
+        return Promise.resolve({ data: null, error: { message: 'rpc_not_stubbed' } });
+      }
+      const missing = takeFail('record_payment', 'missing');
+      if (missing) {
+        return Promise.resolve({
+          data: null,
+          error:
+            typeof missing === 'object' && missing.code
+              ? missing
+              : {
+                  code: 'PGRST202',
+                  message: 'Could not find the function public.record_payment in the schema cache',
+                },
+        });
+      }
+      return Promise.resolve(runRecordPayment(args));
     },
   };
 
-  return { supabase, tables };
+  return { supabase, tables, rpcCalls };
 }
 
 function seedOpenCharge({
@@ -332,7 +510,7 @@ describe('admin billing/receipt routes', () => {
 
   describe('success', () => {
     it('records a payment, allocates it, marks the charge paid, and issues a receipt', async () => {
-      const { supabase, tables } = createIsolatedSupabase({ seed: seedOpenCharge() });
+      const { supabase, tables, rpcCalls } = createIsolatedSupabase({ seed: seedOpenCharge() });
       const app = createBillingApp(supabase);
       const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(validPaymentBody());
 
@@ -340,6 +518,20 @@ describe('admin billing/receipt routes', () => {
       expect(res.body.ok).toBe(true);
       expect(res.body.payment_id).toEqual(expect.any(String));
       expect(res.body.receipt_id).toEqual(expect.any(String));
+      expect(rpcCalls).toEqual([
+        expect.objectContaining({
+          name: 'record_payment',
+          args: expect.objectContaining({
+            p_account_id: ACCOUNT_ID,
+            p_amount_cents: 15000,
+            p_method: 'card',
+            p_issued_by: 'front_desk',
+            p_issue_receipt: true,
+            p_idempotency_key: null,
+            p_allocations: [{ charge_id: CHARGE_ID, amount_cents: 15000 }],
+          }),
+        }),
+      ]);
 
       expect(tables.payments).toHaveLength(1);
       expect(tables.payments[0]).toMatchObject({
@@ -406,17 +598,78 @@ describe('admin billing/receipt routes', () => {
     });
   });
 
-  describe('non-transactional record-payment failure (current behavior)', () => {
+  describe('atomic record-payment RPC', () => {
+    it('does not persist payment, allocations, or receipt when the RPC fails', async () => {
+      const { supabase, tables } = createIsolatedSupabase({
+        seed: seedOpenCharge(),
+        fail: { 'record_payment.rpc': { message: 'simulated_rpc_failure' } },
+      });
+      const app = createBillingApp(supabase);
+      const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(validPaymentBody());
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ ok: false, error: 'simulated_rpc_failure' });
+      expect(tables.payments).toHaveLength(0);
+      expect(tables.payment_allocations).toHaveLength(0);
+      expect(tables.receipts).toHaveLength(0);
+      expect(tables.charges[0].status).toBe('open');
+    });
+
+    it('replays the original payment and receipt for the same idempotency key', async () => {
+      const { supabase, tables } = createIsolatedSupabase({ seed: seedOpenCharge() });
+      const app = createBillingApp(supabase);
+      const body = validPaymentBody({ idempotency_key: 'pay-intent-1' });
+      const first = await authed(request(app).post('/api/admin/billing/record-payment')).send(body);
+      const second = await authed(request(app).post('/api/admin/billing/record-payment')).send(body);
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(second.body).toEqual(first.body);
+      expect(tables.payments).toHaveLength(1);
+      expect(tables.payment_allocations).toHaveLength(1);
+      expect(tables.receipts).toHaveLength(1);
+    });
+
+    it('rejects a reused idempotency key with a different amount', async () => {
+      const { supabase, tables } = createIsolatedSupabase({
+        seed: seedOpenCharge({ amountCents: 20000 }),
+      });
+      const app = createBillingApp(supabase);
+      const first = await authed(request(app).post('/api/admin/billing/record-payment')).send(
+        validPaymentBody({
+          amount_cents: 15000,
+          idempotency_key: 'pay-intent-conflict',
+          allocations: [{ charge_id: CHARGE_ID, amount_cents: 15000 }],
+        }),
+      );
+      const second = await authed(request(app).post('/api/admin/billing/record-payment')).send(
+        validPaymentBody({
+          amount_cents: 20000,
+          idempotency_key: 'pay-intent-conflict',
+          allocations: [{ charge_id: CHARGE_ID, amount_cents: 20000 }],
+        }),
+      );
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(409);
+      expect(second.body).toEqual({ ok: false, error: 'idempotency_key_conflict' });
+      expect(tables.payments).toHaveLength(1);
+      expect(tables.payments[0].amount_cents).toBe(15000);
+    });
+  });
+
+  describe('record-payment fallback when RPC is missing', () => {
     /**
-     * record-payment writes payment → allocations → receipt as sequential inserts
-     * with no wrapping transaction. API-HARD-001 is the follow-up to make this atomic.
-     * These tests lock the current partial-failure behavior so a later RPC change is
-     * forced to update this suite.
+     * Until migration 20260916174649 is applied, the handler falls back to sequential
+     * inserts. That path can still leave a payment without allocations/receipt.
      */
     it('leaves a payment with no allocations when the first allocation insert fails', async () => {
       const { supabase, tables } = createIsolatedSupabase({
         seed: seedOpenCharge(),
-        fail: { 'payment_allocations.insert': { message: 'simulated_allocation_failure' } },
+        fail: {
+          'record_payment.missing': true,
+          'payment_allocations.insert': { message: 'simulated_allocation_failure' },
+        },
       });
       const app = createBillingApp(supabase);
       const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(validPaymentBody());
@@ -428,78 +681,6 @@ describe('admin billing/receipt routes', () => {
       expect(tables.payment_allocations).toHaveLength(0);
       expect(tables.receipts).toHaveLength(0);
       expect(tables.charges[0].status).toBe('open');
-    });
-
-    it('leaves a payment plus one allocation when a later allocation insert fails', async () => {
-      const seed = seedOpenCharge();
-      seed.charges.push({
-        id: CHARGE_ID_2,
-        account_id: ACCOUNT_ID,
-        status: 'open',
-        amount_cents: 5000,
-      });
-      seed.view_charge_net.push({ charge_id: CHARGE_ID_2, net_due_cents: 5000 });
-
-      let allocationInserts = 0;
-      const { supabase, tables } = createIsolatedSupabase({ seed });
-      const originalFrom = supabase.from.bind(supabase);
-      supabase.from = (table) => {
-        const builder = originalFrom(table);
-        if (table !== 'payment_allocations') return builder;
-        const originalInsert = builder.insert.bind(builder);
-        builder.insert = (row) => {
-          allocationInserts += 1;
-          if (allocationInserts === 2) {
-            return {
-              then(onFulfilled, onRejected) {
-                return Promise.resolve({
-                  data: null,
-                  error: { message: 'simulated_second_allocation_failure' },
-                }).then(onFulfilled, onRejected);
-              },
-            };
-          }
-          return originalInsert(row);
-        };
-        return builder;
-      };
-
-      const app = createBillingApp(supabase);
-      const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(
-        validPaymentBody({
-          amount_cents: 20000,
-          allocations: [
-            { charge_id: CHARGE_ID, amount_cents: 15000 },
-            { charge_id: CHARGE_ID_2, amount_cents: 5000 },
-          ],
-        }),
-      );
-
-      expect(res.status).toBe(400);
-      expect(res.body).toEqual({ ok: false, error: 'simulated_second_allocation_failure' });
-      expect(tables.payments).toHaveLength(1);
-      expect(tables.payment_allocations).toHaveLength(1);
-      expect(tables.payment_allocations[0].charge_id).toBe(CHARGE_ID);
-      expect(tables.receipts).toHaveLength(0);
-    });
-
-    it('returns payment_id and keeps payment + allocations when receipt insert fails', async () => {
-      const { supabase, tables } = createIsolatedSupabase({
-        seed: seedOpenCharge(),
-        fail: { 'receipts.insert': { message: 'simulated_receipt_failure' } },
-      });
-      const app = createBillingApp(supabase);
-      const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(validPaymentBody());
-
-      expect(res.status).toBe(400);
-      expect(res.body.ok).toBe(false);
-      expect(res.body.error).toBe('simulated_receipt_failure');
-      expect(res.body.payment_id).toEqual(expect.any(String));
-      expect(tables.payments).toHaveLength(1);
-      expect(tables.payments[0].id).toBe(res.body.payment_id);
-      expect(tables.payment_allocations).toHaveLength(1);
-      expect(tables.receipts).toHaveLength(0);
-      expect(tables.charges[0].status).toBe('paid');
     });
   });
 

@@ -23,9 +23,9 @@ key.
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
 | **Cron jobs** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. Production monthly-charge cron is **not** enabled (endpoint only). |
-| **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
+| **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
@@ -413,7 +413,9 @@ Policy:
 
 ### `POST /api/admin/billing/record-payment`
 
-Creates a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), optionally a **`money_in`** receipt. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`).
+Calls RPC `record_payment`: inserts a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), and optionally a **`money_in`** receipt in **one transaction**. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`). Allocation amounts are integer cents and must not exceed remaining headroom (`net_due_cents` minus existing allocations).
+
+Until migration `20260916174649` is applied, the API falls back to the previous sequential inserts so live record-payment still works. That fallback is **not** atomic and ignores `idempotency_key`.
 
 **Body (JSON):**
 
@@ -427,13 +429,18 @@ Creates a **succeeded** `payments` row, **`payment_allocations`** to one or more
   "paid_at": "ISO-8601 optional",
   "reference": "optional",
   "notes": "optional",
-  "issue_receipt": true
+  "issue_receipt": true,
+  "idempotency_key": "optional-unique-string"
 }
 ```
 
 **`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other` (see `PAYMENT_METHODS` in `billing.js`).
 
+**`idempotency_key`:** optional string, max 200 characters after trim. Unique when set (`payments.idempotency_key`). A later POST with the same key and the same `account_id`, `amount_cents`, and `method` returns the original `{ payment_id, receipt_id }` and does **not** insert another payment, allocation, or receipt. The same key with a different account, amount, or method returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`.
+
 **Response:** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
+
+**Validation (RPC):** charges must exist, belong to `account_id`, and not be `void`; each allocation must be a positive integer cent amount; allocation sum must equal `amount_cents`; each allocation must be ≤ remaining `view_charge_net` headroom.
 
 ---
 

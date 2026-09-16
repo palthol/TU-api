@@ -1,6 +1,6 @@
 # API current state
 
-**Verified:** 2026-09-14 (migration history filenames; Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory); production snapshot 2026-09-03  
+**Verified:** 2026-09-16 (atomic record-payment RPC); 2026-09-14 (migration history filenames; Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory); production snapshot 2026-09-03  
 **Repository:** `palthol/TU-api`  
 **Production database:** Supabase `jhxzecxkccqlgyazhsnb`  
 **Deployed API:** Render — `https://api.templeunderground.com` (see [deployment.md](./deployment.md))
@@ -14,10 +14,10 @@ response contracts and `api-schema-audit.md` for detailed schema evidence.
 | --- | --- | --- | --- |
 | Deployment / health | verified | Live `/health` and `/health/deep` on public host | Render dashboard service ID not readable via MCP |
 | Waiver submission | verified | 32 participants and 36 waivers in production | Only workflow proven by production usage |
-| Schema | verified | Project healthy; applied history is `0001`–`0020` + `20260608191715` | Repo filename now matches live version `20260608191715`. Pending in-repo: `20260914150818`, `20260914185843`, `20260914202053` (formerly `0022`–`0024`); not applied. Production `schema_migrations` was not rewritten from this change. |
+| Schema | verified | Project healthy; applied history is `0001`–`0020` + `20260608191715` | Repo filename now matches live version `20260608191715`. Pending in-repo: `20260914150818`, `20260914185843`, `20260914202053` (formerly `0022`–`0024`), `20260916174649` (`record_payment`); not applied. Production `schema_migrations` was not rewritten from this change. |
 | Public/admin routes | implemented | Routes mounted; API suite passes 18/18 | Most business routes lack integration tests |
 | Reporting | implemented | All 19 referenced views exist | Most operational source tables are empty |
-| Billing/receipts | verified (non-prod) | Local smoke (API-VAL-001): personal finance entries, charge discounts, record-payment, receipt void, refund | Production still has 0 charges, payments, receipts; `record-payment` remains non-atomic |
+| Billing/receipts | verified (non-prod) | Local smoke (API-VAL-001): personal finance entries, charge discounts, record-payment, receipt void, refund. API-HARD-001: Vitest covers atomic `record_payment` RPC, idempotent retry, and missing-RPC fallback | Production still has 0 charges, payments, receipts. Migration `20260916174649` is in-repo and **not** applied; until then the handler falls back to sequential inserts |
 | Subscriptions | verified (non-prod) | Local smoke (API-VAL-002): `POST /api/admin/billing/subscriptions` for TU-TEST participant + Basic Group Plan (`create_subscription`, monthly `create_initial_charge`); `400` `participant_id_required`; `400` `create_initial_charge only applies to monthly plans (... cadence contract)` | Production still has 0 subscriptions |
 | Scheduling | verified (non-prod) | Local smoke (API-VAL-002): session create/list/get/reschedule/cancel; attendance upsert; cancelled-session `session_cancelled`; unknown session `session_not_found`; missing `starts_at` → `invalid_starts_at`. Template CRUD + generate-sessions (API-SCHED-001) covered by Vitest | Production still has 0 sessions and attendance rows. Migration `20260914202053` (`generate_sessions`, formerly `0024`) is in-repo and unapplied. **Entitlement:** default `enforce_entitlement: true` **blocks** — `can_attend_group_session` false → `blocked` / `400` `all_records_blocked` and no upsert; `enforce_entitlement: false` upserts without calling the RPC |
 | Notifications | schedule documented; live cron not enabled | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md) | Digest once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled (same overdue / due-soon list as digest). Render MCP unauthorized; no live job created |
@@ -39,7 +39,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Known gaps and risks
 
-- `record-payment` is a multi-step, non-transactional write.
+- `record-payment` uses service-role RPC `record_payment` (payment + allocations + receipt in one transaction; optional `idempotency_key`). Migration `20260916174649` is in-repo and **not** applied to production; until then the handler falls back to sequential inserts (partial failure can still leave a payment without allocations/receipt, and retries are not idempotent).
 - Waiver submit is retry-safe for the same intent via optional client
   `idempotency_key` or a derived key (identity + `content_version` + signature
   hash). Duplicate POSTs replay the original success envelope and do not create
@@ -63,7 +63,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Verification baseline
 
-- `npm --workspace services/api test`: 109/109 passing (API-AUTH-001 + API-SCHED-001).
+- `npm --workspace services/api test`: 110/110 passing (API-HARD-001 atomic record-payment).
 - `npm run guard:waiver-schema`: passing.
 - Documentation reconciled against the mounted route list, migrations `0001`–`0020` plus `20260608191715`, and test files (2026-09-03). History filenames aligned 2026-09-14.
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
@@ -72,3 +72,4 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `20260914150818` is applied. Migration `20260914150818` (formerly `0022`) is in-repo and unapplied to production.
 - Staff RBAC (API-AUTH-001): Vitest covers missing/wrong key (`401 unauthorized`), shared-key owner compatibility, personal staff keys, finance/front_desk `403 forbidden`, cron `x-cron-secret` actor, and owner staff CRUD. Migration `20260914185843` (formerly `0023`) is in-repo and unapplied to production.
 - Schedule templates (API-SCHED-001): Vitest covers template create/update, generate-sessions, duplicate generate, and validation errors. Migration `20260914202053` (formerly `0024`) is in-repo and unapplied to production.
+- Atomic record-payment (API-HARD-001): Vitest covers RPC success, RPC failure with no leftover rows, idempotent retry, idempotency-key conflict, and missing-function sequential fallback. Migration `20260916174649` is in-repo and unapplied to production.

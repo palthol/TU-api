@@ -6,6 +6,54 @@
  */
 
 const PAYMENT_METHODS = new Set(['cash', 'card', 'cashapp', 'venmo', 'paypal', 'zelle', 'other']);
+const RECORD_PAYMENT_CHARGE_ERRORS = new Set([
+  'charge_not_found',
+  'charge_account_mismatch',
+  'charge_is_void',
+  'allocation_exceeds_net_due',
+]);
+
+function isMissingRecordPaymentFunction(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  if (code === '42883' || code === 'PGRST202') return true;
+  const message = String(error.message || '').toLowerCase();
+  return message.includes('could not find the function') && message.includes('record_payment');
+}
+
+function parseRpcDetail(error) {
+  const raw = error?.details ?? error?.detail ?? '';
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function recordPaymentErrorPayload(error) {
+  const key = String(error?.message || '').trim() || 'record_payment_failed';
+  const extra = parseRpcDetail(error);
+  const body = { ok: false, error: key };
+  if (RECORD_PAYMENT_CHARGE_ERRORS.has(key) && extra.charge_id) {
+    body.charge_id = extra.charge_id;
+  }
+  if (key === 'allocation_exceeds_net_due' && extra.allocatable_cents != null) {
+    body.allocatable_cents = extra.allocatable_cents;
+  }
+  return body;
+}
+
+function recordPaymentResult(data) {
+  const row = Array.isArray(data) ? data[0] : data;
+  const result = row && typeof row === 'object' ? row : {};
+  return {
+    ok: true,
+    payment_id: result.payment_id ?? null,
+    receipt_id: result.receipt_id ?? null,
+  };
+}
 
 /**
  * Remaining allocatable cents on a charge (net due minus existing allocations).
@@ -382,8 +430,10 @@ export function registerAdminBillingRoutes(router, { supabase }) {
 
   /**
    * Record a succeeded payment + allocations + optional money_in receipt.
+   * Prefers RPC `record_payment` (atomic + optional idempotency_key). Falls back to
+   * sequential inserts only when that function is not in the linked schema yet.
    * Body: account_id, amount_cents, method, issued_by, allocations: [{ charge_id, amount_cents }],
-   * paid_at?, reference?, notes?, issue_receipt? (default true)
+   * paid_at?, reference?, notes?, issue_receipt? (default true), idempotency_key?
    */
   router.post('/billing/record-payment', async (req, res) => {
     try {
@@ -398,8 +448,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         reference,
         notes,
         issue_receipt,
+        idempotency_key,
       } = req.body || {};
-      if (!account_id || typeof amount_cents !== 'number' || amount_cents <= 0) {
+      if (!account_id || typeof amount_cents !== 'number' || !Number.isInteger(amount_cents) || amount_cents <= 0) {
         return res.status(400).json({ ok: false, error: 'account_and_positive_amount_required' });
       }
       if (!method || typeof method !== 'string' || !PAYMENT_METHODS.has(method)) {
@@ -412,17 +463,53 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'allocations_required' });
       }
       let sum = 0;
+      const normalizedAllocations = [];
       for (const row of allocations) {
-        if (!row.charge_id || typeof row.amount_cents !== 'number' || row.amount_cents <= 0) {
+        if (!row?.charge_id || typeof row.amount_cents !== 'number' || !Number.isInteger(row.amount_cents) || row.amount_cents <= 0) {
           return res.status(400).json({ ok: false, error: 'invalid_allocation_row' });
         }
         sum += row.amount_cents;
+        normalizedAllocations.push({ charge_id: row.charge_id, amount_cents: row.amount_cents });
       }
       if (sum !== amount_cents) {
         return res.status(400).json({ ok: false, error: 'allocation_sum_must_equal_payment_amount' });
       }
+      if (idempotency_key != null && typeof idempotency_key !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_idempotency_key' });
+      }
+      const idempotencyKey =
+        typeof idempotency_key === 'string' && idempotency_key.trim() ? idempotency_key.trim() : null;
+      if (idempotencyKey && idempotencyKey.length > 200) {
+        return res.status(400).json({ ok: false, error: 'invalid_idempotency_key' });
+      }
+      if (paid_at != null && typeof paid_at !== 'string') {
+        return res.status(400).json({ ok: false, error: 'invalid_paid_at' });
+      }
 
-      for (const row of allocations) {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('record_payment', {
+        p_account_id: account_id,
+        p_amount_cents: amount_cents,
+        p_method: method,
+        p_issued_by: issued_by.trim(),
+        p_allocations: normalizedAllocations,
+        p_paid_at: paid_at || null,
+        p_reference: typeof reference === 'string' ? reference : null,
+        p_notes: typeof notes === 'string' ? notes : null,
+        p_issue_receipt: issue_receipt !== false,
+        p_idempotency_key: idempotencyKey,
+      });
+      if (!rpcErr) {
+        return res.json(recordPaymentResult(rpcData));
+      }
+      if (!isMissingRecordPaymentFunction(rpcErr)) {
+        console.error('record_payment', rpcErr);
+        const status = String(rpcErr.message || '').trim() === 'idempotency_key_conflict' ? 409 : 400;
+        return res.status(status).json(recordPaymentErrorPayload(rpcErr));
+      }
+
+      // Migration 20260916174649 not applied: keep sequential writes so live record-payment
+      // still works. This path is not atomic and ignores idempotency_key.
+      for (const row of normalizedAllocations) {
         const { data: ch, error: chErr } = await supabase
           .from('charges')
           .select('id, account_id, status')
@@ -469,7 +556,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       }
 
       const paymentId = pay.id;
-      for (const row of allocations) {
+      for (const row of normalizedAllocations) {
         const { error: aErr } = await supabase.from('payment_allocations').insert({
           payment_id: paymentId,
           charge_id: row.charge_id,
@@ -481,7 +568,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         }
       }
 
-      const distinctChargeIds = [...new Set(allocations.map((a) => a.charge_id))];
+      const distinctChargeIds = [...new Set(normalizedAllocations.map((a) => a.charge_id))];
       for (const cid of distinctChargeIds) {
         const { data: allocRows } = await supabase.from('payment_allocations').select('amount_cents').eq('charge_id', cid);
         const totalAlloc = (allocRows || []).reduce((s, r) => s + r.amount_cents, 0);
