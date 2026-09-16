@@ -17,6 +17,7 @@ import { createRequireAdminOrCron } from './lib/requireAdminOrCron.js';
 import { createSupabaseAuditWriter } from './lib/staffAuth.js';
 import { registerStaffAuthRoutes } from './lib/staffRoutes.js';
 import { registerAdminSchedulingRoutes } from './routes/admin/scheduling.js';
+import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
 
 const app = express();
 // CORS: allow configured origin or all in dev
@@ -26,7 +27,6 @@ if (allowedOrigin === '*') {
 } else {
   app.use(cors({ origin: allowedOrigin }));
 }
-app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3001;
 
@@ -34,6 +34,11 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = supabaseUrl && supabaseServiceRole ? createClient(supabaseUrl, supabaseServiceRole) : null;
 if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
+
+// Raw body required for Stripe-Signature verify. Must run before express.json().
+registerStripeWebhookRoute(app, { supabase });
+app.use(express.json({ limit: '10mb' }));
+
 const requireAdmin = createRequireAdminFromSupabase(supabase);
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';

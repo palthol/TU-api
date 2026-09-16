@@ -282,7 +282,7 @@ Payload (minimum):
 
 ## 9. Operational rules and controls
 
-- **Operator model:** trusted device, `x-admin-key` only in secure contexts ([receipts-app.md](./receipts-app.md)).
+- **Operator model:** trusted device, `x-admin-key` only in secure contexts ([receipts-app.md](./receipts-app.md)). Stripe webhooks authenticate with `STRIPE_WEBHOOK_SECRET`, not a staff key.
 - **`issued_by`:** display name text for receipts ([v1-v2-application-map.md](./v1-v2-application-map.md)).
 - **Partial payments:** allocation sums ≤ payment amount and ≤ net due per charge ([admin-api.md](./admin-api.md)).
 - **Event ledger:** receipt-related changes participate in configured `event_capture_config` (`0014`).
