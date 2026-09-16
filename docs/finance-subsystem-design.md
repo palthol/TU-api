@@ -162,7 +162,8 @@ This maps existing surfaces to the subsystem vocabulary.
 | Cash log | Log cash received, share/copy SMS-style text | `POST /api/admin/billing/personal-finance-entries` (`entry_kind: cash_received`) |
 | Invoice drafts | Draft / sent / paid / void without formal charge row | `personal_finance_entries` (`entry_kind: invoice`), status route |
 | Recent list | Review and transition invoice status | `GET` personal entries, `POST .../invoice-status` |
-| Formal record payment | Succeeded payment + allocations + optional money-in receipt | `POST /api/admin/billing/record-payment` |
+| Formal record payment | Succeeded payment + allocations + optional money-in receipt | `POST /api/admin/billing/record-payment` (staff) |
+| Card-processor webhook | Stripe `payment_intent.succeeded` → same `record_payment` RPC | Public `POST /api/webhooks/stripe` (API-ADR-006) |
 | Board lookup | Discover `account_id` / `charge_id` | `GET /api/admin/reporting/views/payment-board` |
 | Void / refund receipts | Formal receipt lifecycle | `POST .../receipts/:id/void`, `POST .../receipts/issue-for-refund` |
 | Operating expenses | Shop rent / utilities / other | `POST/GET /api/admin/billing/operating-expenses` |
@@ -180,7 +181,7 @@ UI tabs in `admin/apps/receipts` mirror: Cash log, Invoice, Recent, Formal, Prev
 
 1. **Create monthly charge** (subscription billing period)—via existing generation RPCs / admin processes (see [admin-api.md](./admin-api.md): `generate_monthly_charges`, etc.).
 2. **Optional invoice** — informal: personal `invoice` entry with `due_at`; formal: charge `due_at` + comms.
-3. **Receive payment** — `record-payment` with allocations until `view_charge_net` satisfied; charge → `paid`.
+3. **Receive payment** — `record-payment` with allocations until `view_charge_net` satisfied; charge → `paid`. Card-processor success can arrive on public `POST /api/webhooks/stripe` (API-ADR-006) instead of the staff route; both call `record_payment`.
 4. **Entitlements** — finance emits a **payment-confirmed event** (§7); entitlement service grants plan access (grace, pause, override live there).
 5. **Issue receipt** — money-in receipt (`issue_receipt: true`); deliver copy by **email or SMS** (channel outside DB; content from share templates / future templates).
 6. **Revenue logged** — represented by **`payments` + allocations** (and optional reporting rollups); personal log **not** required when formal path used.
@@ -266,6 +267,7 @@ Payload (minimum):
 ### 8.2 Writes
 
 - **Member money:** `record-payment`, `payment-refunds`, `charge-adjustments`, billing RPCs.
+- **Card-processor money-in / Stripe refunds:** public `POST /api/webhooks/stripe` (signature verify, then `record_payment` / `record_payment_refund` only). Not an admin route. Unmatched PaymentIntents fail closed; see [admin-api.md](./admin-api.md) and API-ADR-006.
 - **Receipts:** issue, void, issue-for-refund.
 - **Personal log:** personal-finance-entries + invoice status.
 - **Shop money out:** operating-expenses.
