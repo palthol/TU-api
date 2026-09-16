@@ -4,7 +4,7 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import { createWaiverPdfRouter } from './routes/waivers/pdf.js';
 import { registerWaiverSubmitRoute } from './services/accounts/submitWaiver.js';
-import { registerAdminBillingRoutes } from './routes/admin/billing.js';
+import { registerAdminBillingCronRoutes, registerAdminBillingRoutes } from './routes/admin/billing.js';
 import { registerAdminParticipantRoutes } from './routes/admin/participants.js';
 import { registerAdminReportingRoutes } from './routes/admin/reporting.js';
 import { registerAdminNotificationRoutes } from './routes/admin/notifications.js';
@@ -210,6 +210,7 @@ const adminCronRouter = express.Router();
 adminCronRouter.use(
   createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) }),
 );
+registerAdminBillingCronRoutes(adminCronRouter, { supabase });
 registerAdminNotificationRoutes(adminCronRouter, { supabase });
 app.use('/api/admin', adminCronRouter);
 

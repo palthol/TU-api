@@ -24,7 +24,7 @@ key.
 |--------|------|
 | **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. |
 | **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
-| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. |
+| **Cron jobs** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. Production monthly-charge cron is **not** enabled (endpoint only). |
 | **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
@@ -37,7 +37,7 @@ key.
 
 Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext returned once) or by inserting a SHA-256 `key_hash` with the service role. Dashboard/receipts keep sending `x-admin-key`; they do not read `VITE_ADMIN_API_KEY`.
 
-**Role matrix (mutations).** GET is allowed for every active role except `GET /api/admin/staff` (owner). Discord cron routes also accept `x-cron-secret` and skip the staff role matrix.
+**Role matrix (mutations).** GET is allowed for every active role except `GET /api/admin/staff` (owner). Discord cron routes and `POST /billing/generate-monthly-charges` also accept `x-cron-secret` and skip the staff role matrix.
 
 | Role | May mutate |
 | --- | --- |
@@ -314,6 +314,22 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
 ```
 
 **Errors:** `400` — participant/plan not found, inactive plan, no account binding, `create_initial_charge` on non-monthly plan, date validation failures (Postgres exception message in `error`).
+
+---
+
+### `POST /api/admin/billing/generate-monthly-charges`
+
+Calls RPC `generate_monthly_charges()` (migration **0002**) to insert **open** monthly `charges` for active subscriptions whose plan has `billing_cadence = 'monthly'` and whose next period is due (`due_at` ≤ today).
+
+No request body. The handler does not insert charges itself.
+
+**Auth:** `x-admin-key` (shared owner key or an `owner` / `finance` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API). Same middleware as Discord notification routes (`requireAdminOrCron`). Cron authenticates as actor `cron` and skips the staff role matrix. `front_desk` staff keys receive `403 forbidden`.
+
+**Response:** `{ "ok": true, "created": N }` where `N` is the number of charge rows the RPC returned. The API logs `generate_monthly_charges.created` with that count.
+
+**Idempotency:** a second call for the same period creates nothing. The function skips a subscription when a non-void charge already exists for that `subscription_id` + `coverage_start`. Re-runs return `{ "ok": true, "created": 0 }`. This endpoint is **not** scheduled in production; enabling a Render (or pg_cron) job is a later ops step.
+
+**Errors:** `401` `unauthorized`; `403` `forbidden`; `400` — RPC/Postgres message in `error`; `500` `supabase_not_configured` / `server_error`.
 
 ---
 
