@@ -1,6 +1,6 @@
 # API-GATE-001 — Non-production validation environment
 
-- Status: **blocked** until API-DEV-001, API-TEST-001, API-TEST-002, and API-OPS-001 are done
+- Status: **done**
 - Lane: validation
 - Depends on: API-DEV-001, API-TEST-001, API-TEST-002, API-OPS-001
 - Production writes: **no**

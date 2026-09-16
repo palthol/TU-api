@@ -1,6 +1,6 @@
 # API-DEV-001 — Repair lockfile so `npm ci` succeeds
 
-- Status: **ready**
+- Status: **done**
 - Lane: tooling
 - Depends on: API-DOC-001 (done)
 - Production writes: **no**

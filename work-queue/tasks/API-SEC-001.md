@@ -1,6 +1,6 @@
 # API-SEC-001 — Triage dependency findings
 
-- Status: **blocked** until API-DEV-001 is done
+- Status: **done**
 - Lane: security
 - Depends on: API-DEV-001
 - Production writes: no

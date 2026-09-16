@@ -1,6 +1,6 @@
 # API-VAL-001 — Smoke-test finance and receipts
 
-- Status: **blocked** until API-GATE-001 is done
+- Status: **done**
 - Lane: validation
 - Depends on: API-GATE-001
 - Production writes: **no** (non-prod only)

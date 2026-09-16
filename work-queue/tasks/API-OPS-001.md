@@ -1,6 +1,6 @@
 # API-OPS-001 — Inventory API deployment
 
-- Status: **ready**
+- Status: **done**
 - Lane: deployment
 - Depends on: API-DOC-001 (done)
 - Production writes: **no** (read-only inspection of host/platform/env **names**)

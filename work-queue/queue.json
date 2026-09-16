@@ -132,10 +132,19 @@
     {
       "id": "API-PAY-001",
       "lane": "integrations",
-      "status": "blocked",
+      "status": "ready",
       "depends_on": ["API-HARD-001", "API-AUTH-001"],
       "production_writes": false,
-      "brief": "work-queue/tasks/API-PAY-001.md"
+      "brief": "work-queue/tasks/API-PAY-001.md",
+      "allowed_paths": [
+        "docs/decision-log.md",
+        "docs/finance-subsystem-design.md",
+        "docs/admin-api.md",
+        "docs/current-state.md",
+        "services/api/.env.example",
+        "services/api/src/",
+        "supabase/migrations/"
+      ]
     }
   ]
 }
