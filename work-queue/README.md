@@ -15,7 +15,7 @@ Doc map: `docs/README.md`. Historical checklists live in `docs/archive/`.
    **Cursor Cloud specific instructions**. Skip if already fast-forwarded.
 2. Read `docs/current-state.md` and this file.
 3. In `queue.json`, pick a task with `"status": "ready"` whose `depends_on` IDs are
-   all `"done"`. The current ready task is `API-PAY-001`.
+   all `"done"`. There is currently no `ready` task; the queue is complete.
 4. Open `work-queue/tasks/<ID>.md`. If you cannot satisfy its constraints, stop.
 5. Copy `claims/TEMPLATE.md` to `claims/<ID>.md`. **If that path already exists,
    do not take the task.**
@@ -54,6 +54,6 @@ match that task's `status` in `queue.json`.
 | [API-AUTO-001](tasks/API-AUTO-001.md) | automation | done | API-OPS-001, API-VAL-001 | Add supported monthly-charge cron endpoint |
 | [API-AUTO-002](tasks/API-AUTO-002.md) | automation | done | API-OPS-001, API-VAL-001 | Deploy controlled Discord schedules |
 | [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |
-| [API-PAY-001](tasks/API-PAY-001.md) | integrations | ready | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
+| [API-PAY-001](tasks/API-PAY-001.md) | integrations | done | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
 
-Next work: **API-PAY-001** (dependencies `API-HARD-001` and `API-AUTH-001` are `done`). Design first in `docs/decision-log.md`; do not implement a provider until that ADR exists. Production writes remain unauthorized.
+Queue complete: no `ready` successor. Production writes remain unauthorized. Live Stripe webhook registration and production `supabase db push` were not part of API-PAY-001.

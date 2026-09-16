@@ -1,6 +1,6 @@
 # API-PAY-001 — Payment-provider integration
 
-- Status: **ready**
+- Status: **done**
 - Lane: integrations
 - Depends on: API-HARD-001 (done), API-AUTH-001 (done)
 - Production writes: no
