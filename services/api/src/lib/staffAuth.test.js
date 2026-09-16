@@ -33,6 +33,7 @@ describe('staffAuth helpers', () => {
   it('allows finance billing writes but not scheduling or staff', () => {
     expect(roleAllowsRequest('finance', 'POST', '/billing/payment-refunds')).toBe(true);
     expect(roleAllowsRequest('finance', 'POST', '/billing/record-payment')).toBe(true);
+    expect(roleAllowsRequest('finance', 'POST', '/billing/generate-monthly-charges')).toBe(true);
     expect(roleAllowsRequest('finance', 'POST', '/scheduling/sessions')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/staff')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/auth/me')).toBe(true);
@@ -42,6 +43,7 @@ describe('staffAuth helpers', () => {
     expect(roleAllowsRequest('front_desk', 'POST', '/scheduling/sessions')).toBe(true);
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/record-payment')).toBe(true);
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/payment-refunds')).toBe(false);
+    expect(roleAllowsRequest('front_desk', 'POST', '/billing/generate-monthly-charges')).toBe(false);
     expect(roleAllowsRequest('front_desk', 'POST', '/participants/merge')).toBe(false);
     expect(rolesAllowedForRequest('POST', '/billing/charge-adjustments')).toEqual(['owner', 'finance']);
   });

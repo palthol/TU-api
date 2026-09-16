@@ -193,7 +193,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 - **Accounts** — One row per payer (family or individual). Optionally set primary_contact_*, notes.
 - **Linking participants to accounts** — Insert into `account_members` (account_id, participant_id, role: member | payer | guardian).
 - **Subscriptions** — Insert into `subscriptions` (account_id, participant_id, plan_definition_id, starts_at, status). Billing cycle is anchored to `starts_at` (day-of-month).
-- **Charges** — Either insert manually or run `select * from generate_monthly_charges();` to create open charges for monthly subscriptions (see section 5).
+- **Charges** — Either insert manually, call `POST /api/admin/billing/generate-monthly-charges`, or run `select * from generate_monthly_charges();` (see section 5.2).
 - **Payments** — Insert into `payments` (account_id, amount_cents, method, etc.). Then insert into `payment_allocations` (payment_id, charge_id, amount_cents). Mark charges as paid when fully covered (update `charges.status` to `'paid'`).
 - **Sessions** — Insert into `sessions` (starts_at, ends_at, optional schedule_template_id, session_label).
 - **Attendance** — Insert into `attendance_records` (session_id, participant_id, status: present | no_show | cancelled). “Present” consumes group session entitlements.
@@ -218,11 +218,14 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 
 For **monthly** subscriptions, charges can be generated in bulk:
 
-- In SQL Editor (as service_role or as admin, depending on how you call it):  
+- **HTTP (supported):** `POST /api/admin/billing/generate-monthly-charges`  
+  Auth matches Discord cron: header `x-admin-key` **or** `x-cron-secret` when `CRON_SECRET` is set. Success is `{ "ok": true, "created": N }`. The API logs the created count. No request body.
+- **SQL Editor** (service_role):  
   `select * from generate_monthly_charges();`
-- To automate later: use Supabase cron (pg_cron) or an external cron that calls the DB with the service_role key and runs that statement.
 
-The function only creates charges for subscriptions that don’t already have a charge for the next period and only for `billing_cadence = 'monthly'`.
+The function only creates charges for `billing_cadence = 'monthly'` subscriptions that do not already have a non-void charge for the next `coverage_start`. A second run for the same period returns `created: 0`.
+
+**Do not enable production cron for this route yet.** The endpoint exists so a later ops step can schedule it. Do not point the Discord digest Render cron (section 5.5) at this URL.
 
 ### 5.3 RLS and roles
 
@@ -283,6 +286,15 @@ insert into public.app_admin (id) select id from auth.users where email = 'YOUR_
 ```
 
 ### Generate monthly charges
+
+```http
+POST /api/admin/billing/generate-monthly-charges
+x-admin-key: <ADMIN_API_KEY>
+```
+
+or `x-cron-secret` when `CRON_SECRET` is set. Response: `{ "ok": true, "created": N }`. Production scheduler is **not** enabled.
+
+SQL fallback:
 
 ```sql
 select * from generate_monthly_charges();
