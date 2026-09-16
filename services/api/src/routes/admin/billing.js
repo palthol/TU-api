@@ -1,6 +1,8 @@
 /**
  * Admin billing routes (service-role Supabase RPCs).
- * All routes assume requireAdmin middleware (x-admin-key).
+ * Most routes assume requireAdmin middleware (x-admin-key).
+ * generate-monthly-charges is registered on the admin-or-cron router so it
+ * matches Discord notification auth (x-admin-key or x-cron-secret).
  */
 
 const PAYMENT_METHODS = new Set(['cash', 'card', 'cashapp', 'venmo', 'paypal', 'zelle', 'other']);
@@ -821,6 +823,41 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .eq('id', entryId);
       if (uErr) return res.status(400).json({ ok: false, error: uErr.message });
       return res.json({ ok: true, id: entryId, invoice_status: status.trim() });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+}
+
+function createdChargeCount(data) {
+  return Array.isArray(data) ? data.length : 0;
+}
+
+/**
+ * Cron-capable billing routes. Mount behind requireAdminOrCron (same as Discord
+ * notification routes). Do not register these on the requireAdmin-only router
+ * or x-cron-secret will be rejected.
+ *
+ * Duplicate charges for the same subscription period are skipped inside
+ * generate_monthly_charges() (EXISTS on subscription_id + coverage_start where
+ * status != 'void'; migration 0002). This handler does not insert charges.
+ *
+ * @param {import('express').Router} router
+ * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient | null }} ctx
+ */
+export function registerAdminBillingCronRoutes(router, { supabase }) {
+  router.post('/billing/generate-monthly-charges', async (_req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const { data, error } = await supabase.rpc('generate_monthly_charges');
+      if (error) {
+        console.error('generate_monthly_charges', error);
+        return res.status(400).json({ ok: false, error: error.message });
+      }
+      const created = createdChargeCount(data);
+      console.log('generate_monthly_charges.created', created);
+      return res.json({ ok: true, created });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ ok: false, error: 'server_error' });
