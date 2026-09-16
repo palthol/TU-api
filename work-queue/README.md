@@ -48,7 +48,7 @@ Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
 | [API-GATE-001](tasks/API-GATE-001.md) | validation | done | API-DEV-001, API-TEST-001, API-TEST-002, API-OPS-001 | Define safe non-production validation environment |
 | [API-VAL-001](tasks/API-VAL-001.md) | validation | done | API-GATE-001 | Smoke-test finance and receipt workflows |
 | [API-VAL-002](tasks/API-VAL-002.md) | validation | done | API-GATE-001 | Smoke-test subscriptions, scheduling, and entitlements |
-| [API-HARD-001](tasks/API-HARD-001.md) | backend | ready | API-TEST-001, API-VAL-001 | Make record-payment atomic/idempotent |
+| [API-HARD-001](tasks/API-HARD-001.md) | backend | done | API-TEST-001, API-VAL-001 | Make record-payment atomic/idempotent |
 | [API-HARD-002](tasks/API-HARD-002.md) | backend | done | API-GATE-001 | Add waiver-submission idempotency/recovery |
 | [API-SCHED-001](tasks/API-SCHED-001.md) | backend | done | API-TEST-002, API-VAL-002 | Add template CRUD and recurring session generation |
 | [API-AUTO-001](tasks/API-AUTO-001.md) | automation | ready | API-OPS-001, API-VAL-001 | Add supported monthly-charge cron endpoint |
@@ -56,4 +56,4 @@ Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
 | [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |
 | [API-PAY-001](tasks/API-PAY-001.md) | integrations | blocked | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
 
-Safe remaining ready tasks: **API-HARD-001** and **API-AUTO-001**. Do not pair them (both own billing routes).
+Safe remaining ready tasks: **API-AUTO-001**. Do not pair it with billing work that shares `services/api/src/routes/admin/billing.js`.
