@@ -1,6 +1,6 @@
 # API-SCHED-001 — Schedule templates and session generation
 
-- Status: **ready**
+- Status: **done**
 - Lane: backend
 - Depends on: API-TEST-002, API-VAL-002
 - Production writes: no

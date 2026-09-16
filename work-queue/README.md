@@ -15,7 +15,7 @@ Doc map: `docs/README.md`. Historical checklists live in `docs/archive/`.
    **Cursor Cloud specific instructions**. Skip if already fast-forwarded.
 2. Read `docs/current-state.md` and this file.
 3. In `queue.json`, pick a task with `"status": "ready"` whose `depends_on` IDs are
-   all `"done"`. Prefer the parallel batch below when starting a new session.
+   all `"done"`. The current ready task is `API-PAY-001`.
 4. Open `work-queue/tasks/<ID>.md`. If you cannot satisfy its constraints, stop.
 5. Copy `claims/TEMPLATE.md` to `claims/<ID>.md`. **If that path already exists,
    do not take the task.**
@@ -32,8 +32,8 @@ Doc map: `docs/README.md`. Historical checklists live in `docs/archive/`.
 - `work-queue/README.md` (your row only)
 - `docs/current-state.md` (only when the brief requires evidence)
 
-Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
-`API-OPS-001` must not share exclusive paths.
+Do not rewrite other tasks' rows. The `Status:` line in `tasks/<ID>.md` must
+match that task's `status` in `queue.json`.
 
 ## Queue
 
@@ -54,6 +54,6 @@ Do not rewrite other tasks' rows. Parallel agents: `API-DEV-001` and
 | [API-AUTO-001](tasks/API-AUTO-001.md) | automation | done | API-OPS-001, API-VAL-001 | Add supported monthly-charge cron endpoint |
 | [API-AUTO-002](tasks/API-AUTO-002.md) | automation | done | API-OPS-001, API-VAL-001 | Deploy controlled Discord schedules |
 | [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |
-| [API-PAY-001](tasks/API-PAY-001.md) | integrations | blocked | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
+| [API-PAY-001](tasks/API-PAY-001.md) | integrations | ready | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
 
-No remaining ready tasks. **API-PAY-001** stays blocked (API-HARD-001 and API-AUTH-001 are done; do not flip it to ready unless asked).
+Next work: **API-PAY-001** (dependencies `API-HARD-001` and `API-AUTH-001` are `done`). Design first in `docs/decision-log.md`; do not implement a provider until that ADR exists. Production writes remain unauthorized.

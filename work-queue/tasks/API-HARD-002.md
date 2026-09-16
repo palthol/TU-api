@@ -1,6 +1,6 @@
 # API-HARD-002 — Waiver submit idempotency
 
-- Status: **blocked** until API-GATE-001 is done
+- Status: **done**
 - Lane: backend
 - Depends on: API-GATE-001
 - Production writes: no

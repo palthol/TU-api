@@ -1,6 +1,6 @@
 # API-TEST-001 — Billing/receipt route tests
 
-- Status: **blocked** until API-DEV-001 is done
+- Status: **done**
 - Lane: tests
 - Depends on: API-DEV-001
 - Production writes: no
