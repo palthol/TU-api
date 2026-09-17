@@ -68,6 +68,31 @@ function refundCreated({
   };
 }
 
+function refundUpdated({
+  eventId = 'evt_re_up_1',
+  refundId = 're_test_1',
+  amount = 15000,
+  paymentIntent = 'pi_test_1',
+  charge = 'ch_test_1',
+  status = 'succeeded',
+} = {}) {
+  return {
+    id: eventId,
+    type: 'refund.updated',
+    data: {
+      object: {
+        id: refundId,
+        object: 'refund',
+        amount,
+        currency: 'usd',
+        payment_intent: paymentIntent,
+        charge,
+        status,
+      },
+    },
+  };
+}
+
 function createIsolatedSupabase({ fail = {} } = {}) {
   const tables = {
     payment_processor_events: [],
@@ -220,13 +245,27 @@ function createIsolatedSupabase({ fail = {} } = {}) {
     if (name === 'record_payment_refund') {
       const failErr = takeFail('record_payment_refund', 'rpc');
       if (failErr) return Promise.resolve({ data: null, error: failErr });
-      tables.payment_refunds.push({
+      const key =
+        typeof args.p_idempotency_key === 'string' && args.p_idempotency_key.trim()
+          ? args.p_idempotency_key.trim()
+          : null;
+      if (key) {
+        const existing = tables.payment_refunds.find((row) => row.idempotency_key === key);
+        if (existing) {
+          if (existing.payment_id !== args.p_payment_id || existing.amount_cents !== args.p_amount_cents) {
+            return Promise.resolve({ data: null, error: { message: 'idempotency_key_conflict' } });
+          }
+          return Promise.resolve({ data: existing.id, error: null });
+        }
+      }
+      const row = {
         id: REFUND_ID,
         payment_id: args.p_payment_id,
         amount_cents: args.p_amount_cents,
-        idempotency_key: args.p_idempotency_key,
-      });
-      return Promise.resolve({ data: REFUND_ID, error: null });
+        idempotency_key: key,
+      };
+      tables.payment_refunds.push(row);
+      return Promise.resolve({ data: row.id, error: null });
     }
 
     return Promise.resolve({ data: null, error: { message: `unexpected_rpc:${name}` } });
@@ -415,8 +454,74 @@ describe('POST /api/webhooks/stripe', () => {
     const { supabase, rpcCalls } = createIsolatedSupabase();
     const app = createWebhookApp(supabase);
     const res = await postWebhook(app, refundCreated());
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(res.body).toEqual({ ok: false, error: 'payment_not_found' });
     expect(rpcCalls).toEqual([]);
+  });
+
+  it('retries refund.created after the payment is booked without caching payment_not_found', async () => {
+    const { supabase, rpcCalls, tables } = createIsolatedSupabase();
+    const app = createWebhookApp(supabase);
+
+    const refundEvent = refundCreated({ eventId: 'evt_re_oop_1', refundId: 're_oop_1' });
+    const first = await postWebhook(app, refundEvent);
+    expect(first.status).toBe(409);
+    expect(first.body).toEqual({ ok: false, error: 'payment_not_found' });
+
+    const payment = await postWebhook(app, paymentIntentSucceeded({ eventId: 'evt_pay_oop_1', piId: 'pi_oop_1' }));
+    expect(payment.status).toBe(200);
+
+    const second = await postWebhook(app, refundEvent);
+    expect(second.status).toBe(200);
+    expect(second.body).toEqual({ ok: true, refund_id: REFUND_ID });
+
+    expect(rpcCalls.filter((c) => c.name === 'record_payment_refund')).toHaveLength(1);
+    expect(tables.payment_refunds).toHaveLength(1);
+  });
+
+  it('records refund.updated when a refund transitions from pending to succeeded', async () => {
+    const { supabase, rpcCalls, tables } = createIsolatedSupabase();
+    const app = createWebhookApp(supabase);
+    await postWebhook(app, paymentIntentSucceeded({ eventId: 'evt_pay_ru_1', piId: 'pi_ru_1' }));
+
+    const pending = await postWebhook(
+      app,
+      refundCreated({ eventId: 'evt_re_pending_1', refundId: 're_pending_1', status: 'pending' }),
+    );
+    expect(pending.status).toBe(200);
+    expect(pending.body).toEqual({ ok: true, ignored: true });
+
+    const succeeded = await postWebhook(
+      app,
+      refundUpdated({ eventId: 'evt_re_succeeded_1', refundId: 're_pending_1', status: 'succeeded' }),
+    );
+    expect(succeeded.status).toBe(200);
+    expect(succeeded.body).toEqual({ ok: true, refund_id: REFUND_ID });
+
+    expect(rpcCalls.filter((c) => c.name === 'record_payment_refund')).toHaveLength(1);
+    expect(tables.payment_refunds).toHaveLength(1);
+  });
+
+  it('does not double-record a refund when both refund.created and refund.updated succeed', async () => {
+    const { supabase, rpcCalls, tables } = createIsolatedSupabase();
+    const app = createWebhookApp(supabase);
+    await postWebhook(app, paymentIntentSucceeded({ eventId: 'evt_pay_rdup_1', piId: 'pi_rdup_1' }));
+
+    const created = await postWebhook(
+      app,
+      refundCreated({ eventId: 'evt_re_created_s_1', refundId: 're_dupe_1', status: 'succeeded' }),
+    );
+    expect(created.status).toBe(200);
+    expect(created.body).toEqual({ ok: true, refund_id: REFUND_ID });
+
+    const updated = await postWebhook(
+      app,
+      refundUpdated({ eventId: 'evt_re_updated_s_1', refundId: 're_dupe_1', status: 'succeeded' }),
+    );
+    expect(updated.status).toBe(200);
+    expect(updated.body).toEqual({ ok: true, refund_id: REFUND_ID });
+
+    expect(rpcCalls.filter((c) => c.name === 'record_payment_refund')).toHaveLength(2);
+    expect(tables.payment_refunds).toHaveLength(1);
   });
 });
