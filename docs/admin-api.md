@@ -22,10 +22,10 @@ key.
 
 | Topic | Rule |
 |--------|------|
-| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. |
+| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
 | **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
 | **Cron jobs** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. Production monthly-charge cron is **not** enabled (endpoint only). |
-| **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. |
+| **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
@@ -140,6 +140,54 @@ A retry or double-submit for the **same intent** does not create another waiver,
 A client key reused for a **different** participant identity returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. A new signature (or `content_version`) without a client key is a new intent and creates a new waiver.
 
 **Residual risk:** storage uploads and DB writes are still sequential (not one Postgres transaction). Unique `idempotency_key` prevents duplicate waiver rows once migration `20260914150818` is applied. Until that column exists, the handler falls back to the pre-idempotency insert so live submits keep working; retries can still duplicate. A crash after storage upload and before the waiver insert can leave orphan signature/PDF objects. Related rows (`emergency_contacts`, `waiver_medical_histories`, `audit_trails`, `event_ledger`) may be missing if the first attempt died after the waiver insert; a retry replays IDs and does not duplicate the waiver. Concurrent first-time participant inserts are still matched only in application code (no unique constraint on email+DOB+phone).
+
+---
+
+### `POST /api/webhooks/stripe` (public)
+
+Stripe card-processor webhook (API-ADR-006). **Not** an `/api/admin/*` route.
+Authenticate with header `Stripe-Signature` (`t=<unix>,v1=<hex>`) against env
+`STRIPE_WEBHOOK_SECRET`. Staff `x-admin-key` does not authenticate this route.
+Raw body is required for signature verify (`Content-Type: application/json`).
+
+Does **not** call Stripe. Does **not** use the sequential record-payment fallback.
+If RPC `record_payment` is missing, the handler returns `503` `record_payment_unavailable`.
+
+**PaymentIntent metadata (required for money-in):**
+
+| Key | Value |
+| --- | --- |
+| `tu_account_id` | Billing `accounts.id` UUID |
+| `tu_charge_id` | Single charge to allocate the full amount, **or** |
+| `tu_allocations` | JSON array `[{ "charge_id": "<uuid>", "amount_cents": 15000 }, ...]` whose cents sum equals the PaymentIntent amount |
+
+Unmatched (missing account/charge metadata) fails closed: `400` `unmatched_payment`.
+
+**Events**
+
+| Stripe type | Behavior |
+| --- | --- |
+| `payment_intent.succeeded` | `record_payment` with `method=card`, `issued_by=stripe_webhook`, `idempotency_key=stripe:pi_<id>`, allocations as above. Amount is integer cents from `amount_received` (fallback `amount`); currency must be `usd`. |
+| `refund.created` (`status=succeeded`) | `record_payment_refund` with `idempotency_key=stripe:re_<id>`, payment looked up via `payment_processor_refs`. |
+| `charge.succeeded`, `payment_intent.payment_failed`, `charge.refunded`, disputes, other | `200` `{ "ok": true, "ignored": true }` after storing the event id |
+
+**Success (money-in):** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
+
+**Success (refund):** `{ "ok": true, "refund_id": "uuid" }`
+
+**Success (duplicate event):** same envelope as the first processed delivery.
+
+**Errors:**
+
+| Status | `error` |
+| --- | --- |
+| 401 | `invalid_signature` |
+| 400 | `unmatched_payment`, `unsupported_currency`, `invalid_event`, `allocation_sum_must_equal_payment_amount`, `invalid_allocation_row`, `payment_not_found`, plus `record_payment` machine keys (`allocation_exceeds_net_due`, …) |
+| 409 | `idempotency_key_conflict` |
+| 500 | `stripe_webhook_not_configured`, `supabase_not_configured` |
+| 503 | `record_payment_unavailable` |
+
+Live Stripe webhook registration and production `supabase db push` are **not** part of API-PAY-001. Migrations `20260916174649` (RPC) and the processor-ref migration must be applied before this route can book production payments.
 
 ---
 
@@ -415,7 +463,7 @@ Policy:
 
 Calls RPC `record_payment`: inserts a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), and optionally a **`money_in`** receipt in **one transaction**. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`). Allocation amounts are integer cents and must not exceed remaining headroom (`net_due_cents` minus existing allocations).
 
-Until migration `20260916174649` is applied, the API falls back to the previous sequential inserts so live record-payment still works. That fallback is **not** atomic and ignores `idempotency_key`.
+Until migration `20260916174649` is applied, the API falls back to the previous sequential inserts so live record-payment still works. That fallback is **not** atomic and ignores `idempotency_key`. Public Stripe webhooks **do not** use this fallback (API-ADR-006).
 
 **Body (JSON):**
 
@@ -436,7 +484,7 @@ Until migration `20260916174649` is applied, the API falls back to the previous 
 
 **`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other` (see `PAYMENT_METHODS` in `billing.js`).
 
-**`idempotency_key`:** optional string, max 200 characters after trim. Unique when set (`payments.idempotency_key`). A later POST with the same key and the same `account_id`, `amount_cents`, and `method` returns the original `{ payment_id, receipt_id }` and does **not** insert another payment, allocation, or receipt. The same key with a different account, amount, or method returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`.
+**`idempotency_key`:** optional string, max 200 characters after trim. Unique when set (`payments.idempotency_key`). A later POST with the same key and the same `account_id`, `amount_cents`, and `method` returns the original `{ payment_id, receipt_id }` and does **not** insert another payment, allocation, or receipt. The same key with a different account, amount, or method returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. Stripe webhooks pass `stripe:pi_<payment_intent_id>` on this RPC (see `POST /api/webhooks/stripe`).
 
 **Response:** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
 

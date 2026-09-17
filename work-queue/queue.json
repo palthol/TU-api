@@ -132,7 +132,7 @@
     {
       "id": "API-PAY-001",
       "lane": "integrations",
-      "status": "ready",
+      "status": "done",
       "depends_on": ["API-HARD-001", "API-AUTH-001"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-PAY-001.md",
