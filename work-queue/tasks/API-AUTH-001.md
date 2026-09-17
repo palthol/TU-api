@@ -1,6 +1,6 @@
 # API-AUTH-001 — Staff RBAC
 
-- Status: **blocked** until API-OPS-001 is done
+- Status: **done**
 - Lane: security
 - Depends on: API-OPS-001
 - Production writes: no

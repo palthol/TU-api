@@ -1,6 +1,6 @@
 # API-AUTO-002 — Deploy Discord schedules
 
-- Status: **blocked** until API-OPS-001 and API-VAL-001 are done
+- Status: **done**
 - Lane: automation
 - Depends on: API-OPS-001, API-VAL-001
 - Production writes: no

@@ -15,6 +15,11 @@ describe('requireAdminOrCron', () => {
 
     expect(next).toHaveBeenCalled();
     expect(requireAdmin).not.toHaveBeenCalled();
+    expect(req.staff).toMatchObject({
+      actorLabel: 'cron',
+      authMethod: 'cron_secret',
+      role: 'system',
+    });
     process.env.CRON_SECRET = original;
   });
 

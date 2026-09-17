@@ -39,10 +39,24 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
   - `ADMIN_API_KEY` (required for `/api/admin/*` and the on-demand PDF route)
-  - Optional: `CRON_SECRET`, `ALLOWED_ORIGIN`, `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`
+  - Optional: `PORT`, `ALLOWED_ORIGIN` (defaults to `*` when unset), `CRON_SECRET`
+    (required on the API **and** the Render cron job once Discord digest is
+    scheduled; header `x-cron-secret`), `DISCORD_WEBHOOK_URL` (API service only),
+    `SLACK_WEBHOOK_URL`, Cloudflare viewer vars
+    (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS`,
+    `WAIVER_VIEWER_ALLOWED_EMAILS`), storage (`SIGNATURES_BUCKET`, `WAIVERS_BUCKET`),
+    PDF letterhead (`PDF_ORG_NAME`, `PDF_ORG_TAGLINE`, `PDF_ORG_ADDRESS`), and
+    `API_EXPOSE_DB_ERRORS`
+  - Full name list: `services/api/.env.example` and [deployment.md](./deployment.md)
+  - Discord digest schedule: [deployment.md](./deployment.md) (Render Dashboard
+    cron; this repo has no `render.yaml`)
+- **Production API host** — `https://api.templeunderground.com` (Render;
+  also `https://temple-underground-signup.onrender.com`). Set sibling
+  `VITE_API_BASE_URL` to that URL (no trailing slash). Details:
+  [deployment.md](./deployment.md).
 - **Waiver viewer app** — Set `VITE_API_BASE_URL` if the API is not at `http://localhost:3001`. The viewer uses Cloudflare Access and must not receive `VITE_ADMIN_API_KEY`.
 
-Keep `.env` out of git (already in `.gitignore`).
+Keep `.env` out of git (already in `.gitignore`). Never commit secret values or webhook URLs.
 
 **Dashboard: Auth redirect URLs (password reset / magic links)**  
 If you use “Send password recovery” or magic links, Supabase redirects the user back to your app after they click the link. That redirect target is configured in the Supabase project, **not** in `.env`. If it’s wrong (e.g. `http://localhost:3000` while the dashboard runs on **5174**), you’ll see `access_denied` or land on the wrong page.
@@ -60,9 +74,15 @@ From the project root (or wherever you run Supabase CLI):
 npx supabase db push
 ```
 
-Or run the SQL files in **numeric order** (`0001` through `0021`) in the Supabase Dashboard → SQL Editor. Prefer `npm run supabase:push` when the CLI project is linked.
+Or run the SQL files in **version order** (`0001` through `0020`, then
+`20260608191715`, then any later timestamped files) in the Supabase Dashboard →
+SQL Editor. Prefer `npm run supabase:push` when the CLI project is linked.
 
-Repo files vs live history: production records `0001`–`0020` plus timestamped `20260608191715` for the same change as repo file `0021_marketing_leads_first_last_name.sql`. Reconcile that identifier before the next push. See [api-schema-audit.md](./api-schema-audit.md).
+Applied live history (last `list_migrations` 2026-09-03): `0001`–`0020` plus
+`20260608191715_marketing_leads_first_last_name`. Repo filenames now use that
+same version id. Pending in-repo only: `20260914150818`, `20260914185843`,
+`20260914202053`. Do not push those until a task authorizes production schema
+writes. See [api-schema-audit.md](./api-schema-audit.md).
 
 What the numbered files do:
 
@@ -76,7 +96,10 @@ What the numbered files do:
 - **0010**–**0013** — Event ledger + Phase 2/3 ops/analytics views + primary KPI summary
 - **0014**–**0019** — Receipts, marketing leads, expenses, personal finance, discounts
 - **0020** — `create_subscription` RPC, `sessions.cancelled_at`
-- **0021** — `marketing_leads` first/last name columns
+- **20260608191715** — `marketing_leads` first/last name columns (formerly `0021`; matches live history)
+- **20260914150818** — `waivers.idempotency_key` (formerly `0022`; in-repo, unapplied)
+- **20260914185843** — `staff_users` / staff audit (formerly `0023`; in-repo, unapplied)
+- **20260914202053** — `generate_sessions` RPC (formerly `0024`; in-repo, unapplied)
 
 ### 2.4 Make yourself admin
 
@@ -92,7 +115,7 @@ select id from auth.users where email = 'your@email.com';
 
 Replace `your@email.com` with the address you use to sign in. From then on, that user has full access to all tables when using the **anon** or **authenticated** key (e.g. from the **dashboard** app or waiver app).
 
-**Order of operations:** You can create the Auth user before or after running migrations. What matters is that before signing into the dashboard, (1) current migrations through **0021** have been applied, and (2) your auth user’s id is in `app_admin`.
+**Order of operations:** You can create the Auth user before or after running migrations. What matters is that before signing into the dashboard, (1) current **applied** migrations through **`20260608191715`** exist on the database, and (2) your auth user’s id is in `app_admin`.
 
 ### 2.5 Wiping the DB and starting fresh
 
@@ -100,7 +123,7 @@ Yes — you can wipe the database and start over for testing.
 
 - **Supabase hosted (Dashboard):**  
   **Project Settings** → **General** → **Reset database**. This deletes all data and all Auth users, and clears applied migrations. After reset:
-  1. Run migrations again (SQL Editor: run `0001` through `0021` in order, or use `npm run supabase:push` if the project is linked).
+  1. Run migrations again (SQL Editor: run files in version order, or use `npm run supabase:push` if the project is linked). A full reset will also apply pending timestamped files (`20260914150818` onward) unless you stop after `20260608191715`.
   2. Create a new user under **Authentication** → **Users** (e.g. Add user → email + password).
   3. In **SQL Editor**, run:  
      `insert into public.app_admin (id) select id from auth.users where email = 'your@email.com';`
@@ -133,7 +156,18 @@ npm run dev:api
 ```
 
 Or from `services/api`: `npm run dev`.  
-Production: `npm run start` from root or from `services/api`.
+Production: `npm run start` from root or from `services/api` (Render runs the same
+workspace start; binds `PORT`).
+
+**Health (local or production):**
+
+- `GET /health` → `{ "ok": true }`
+- `GET /health/deep` → `{ "ok": true, "db": true }` when Supabase is reachable
+
+Production base URL: `https://api.templeunderground.com`. See [deployment.md](./deployment.md).
+
+**CORS:** set `ALLOWED_ORIGIN` to a single origin when locking down browsers; if the
+variable is absent, the API defaults to `*` (allow all).
 
 ### 3.3 API + waiver together
 
@@ -159,7 +193,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 - **Accounts** — One row per payer (family or individual). Optionally set primary_contact_*, notes.
 - **Linking participants to accounts** — Insert into `account_members` (account_id, participant_id, role: member | payer | guardian).
 - **Subscriptions** — Insert into `subscriptions` (account_id, participant_id, plan_definition_id, starts_at, status). Billing cycle is anchored to `starts_at` (day-of-month).
-- **Charges** — Either insert manually or run `select * from generate_monthly_charges();` to create open charges for monthly subscriptions (see section 5).
+- **Charges** — Either insert manually, call `POST /api/admin/billing/generate-monthly-charges`, or run `select * from generate_monthly_charges();` (see section 5.2).
 - **Payments** — Insert into `payments` (account_id, amount_cents, method, etc.). Then insert into `payment_allocations` (payment_id, charge_id, amount_cents). Mark charges as paid when fully covered (update `charges.status` to `'paid'`).
 - **Sessions** — Insert into `sessions` (starts_at, ends_at, optional schedule_template_id, session_label).
 - **Attendance** — Insert into `attendance_records` (session_id, participant_id, status: present | no_show | cancelled). “Present” consumes group session entitlements.
@@ -177,18 +211,21 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 
 ### 5.1 Adding or changing the database
 
-- Add a **new migration** in `supabase/migrations` with the next unused number (currently after `0021`). Do not edit or reorder migrations that have already run.
+- Add a **new migration** with `npx supabase migration new <name>` so the version sorts after `20260914202053`. Do not edit, reorder, or reuse `0001`–`0020` / `20260608191715` / the three pending timestamped files.
 - Apply: `npx supabase db push` or run the new file in SQL Editor.
 
 ### 5.2 Monthly charge generation
 
 For **monthly** subscriptions, charges can be generated in bulk:
 
-- In SQL Editor (as service_role or as admin, depending on how you call it):  
+- **HTTP (supported):** `POST /api/admin/billing/generate-monthly-charges`  
+  Auth matches Discord cron: header `x-admin-key` **or** `x-cron-secret` when `CRON_SECRET` is set. Success is `{ "ok": true, "created": N }`. The API logs the created count. No request body.
+- **SQL Editor** (service_role):  
   `select * from generate_monthly_charges();`
-- To automate later: use Supabase cron (pg_cron) or an external cron that calls the DB with the service_role key and runs that statement.
 
-The function only creates charges for subscriptions that don’t already have a charge for the next period and only for `billing_cadence = 'monthly'`.
+The function only creates charges for `billing_cadence = 'monthly'` subscriptions that do not already have a non-void charge for the next `coverage_start`. A second run for the same period returns `created: 0`.
+
+**Do not enable production cron for this route yet.** The endpoint exists so a later ops step can schedule it. Do not point the Discord digest Render cron (section 5.5) at this URL.
 
 ### 5.3 RLS and roles
 
@@ -198,6 +235,29 @@ The function only creates charges for subscriptions that don’t already have a 
 ### 5.4 Backups
 
 Use Supabase Dashboard → Project Settings → Backups (or your host’s backup policy). For critical changes, you can export data or take a dump before running migrations.
+
+### 5.5 Discord daily digest (Render cron)
+
+Staff Discord alerts are **outbound webhooks** from the API, not a scheduler
+inside this repo. Full contract: [deployment.md](./deployment.md) (API-AUTO-002).
+
+**Schedule one job only:** `POST /api/admin/notifications/discord/daily-digest`
+daily at `0 13 * * *` UTC, header `x-cron-secret` matching env `CRON_SECRET`.
+That digest already lists overdue and due-soon members. Do **not** also
+schedule `POST /api/admin/notifications/discord/payment-reminders` at the same
+time — it posts the same list and will double-spam the channel. Leave
+payment-reminders for a manual click when you want an extra ping.
+
+Env **names** (never commit values): `CRON_SECRET` and `DISCORD_WEBHOOK_URL` on
+the API web service; `CRON_SECRET` on the Render Cron Job. The cron job curls
+the public API; it does not need the webhook URL.
+
+Create/suspend the Cron Job in the Render Dashboard (MCP cannot list this
+account). Disable with **Suspend**, or rotate `CRON_SECRET` / clear
+`DISCORD_WEBHOOK_URL` on the API.
+
+This is **not** monthly charge generation (section 5.2 / API-AUTO-001). Do not
+point a cron at a generate-monthly-charges HTTP route from this runbook.
 
 ---
 
@@ -210,6 +270,10 @@ Use Supabase Dashboard → Project Settings → Backups (or your host’s backup
 | Need to run admin-only SQL from Dashboard | Dashboard SQL uses service_role, so it bypasses RLS. No extra step. |
 | Charge generation creates nothing | Subscriptions must be `status = 'active'`, plan must be `billing_cadence = 'monthly'`, and the next due date must be today or in the past. Check for existing charges for that period. |
 | Waiver PDF fails | Confirm API has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` and that the waiver/participant data exists in the DB. |
+| Discord digest cron fails / `401 unauthorized` | `CRON_SECRET` must be set on **both** the API and the cron job, and the cron must send header `x-cron-secret` (not `x-admin-key`). Check Render Cron Job logs. |
+| Digest returns `500 discord_webhook_not_configured` | Set `DISCORD_WEBHOOK_URL` on the **API** web service (not on the cron job). |
+| Digest returns `502` with `discord_http_…` | Discord rejected the webhook; see API logs `discord.webhook.failed`. |
+| Two similar Discord reminder posts the same day | Digest already includes the overdue / due-soon list. Do not also schedule `payment-reminders`. Suspend the extra cron. |
 
 ---
 
@@ -222,6 +286,15 @@ insert into public.app_admin (id) select id from auth.users where email = 'YOUR_
 ```
 
 ### Generate monthly charges
+
+```http
+POST /api/admin/billing/generate-monthly-charges
+x-admin-key: <ADMIN_API_KEY>
+```
+
+or `x-cron-secret` when `CRON_SECRET` is set. Response: `{ "ok": true, "created": N }`. Production scheduler is **not** enabled.
+
+SQL fallback:
 
 ```sql
 select * from generate_monthly_charges();

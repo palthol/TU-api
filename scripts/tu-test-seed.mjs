@@ -9,11 +9,17 @@
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required for --billing / --schedule
  *   TU_TEST_API_BASE (default http://localhost:3001) — waiver POST target
  *   TU_TEST_API_TIMEOUT_MS (default 20000) — health + submit timeout
+ *   TU_TEST_ALLOW_REMOTE=1 — required for a non-local, non-production target
+ *
+ * Production project jhxzecxkccqlgyazhsnb and https://api.templeunderground.com
+ * are never allowed. See docs/validation-environment.md.
  *
  * Participants use email tu-test-<runId>-<n>@tu-test.invalid (see scripts/lib/tu-test-data.mjs).
  */
 
 import crypto from 'node:crypto';
+import { loadTuTestEnv, resolveApiBase, resolveSupabaseUrl } from './lib/tu-test-env.mjs';
+import { assertNonProductionTargets } from './lib/tu-test-guard.mjs';
 import {
   assertTuTestEmail,
   tuTestDisplayName,
@@ -25,13 +31,28 @@ const tinyPngDataUrl =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2wAAAABJRU5ErkJggg==';
 
 function parseArgs(argv) {
-  const out = { count: 2, billing: false, schedule: false };
+  const out = { count: 2, billing: false, schedule: false, help: false };
   for (const a of argv) {
-    if (a.startsWith('--count=')) out.count = Math.max(1, Math.min(20, Number(a.slice(8)) || 1));
+    if (a === '--help' || a === '-h') out.help = true;
+    else if (a.startsWith('--count=')) out.count = Math.max(1, Math.min(20, Number(a.slice(8)) || 1));
     else if (a === '--billing') out.billing = true;
     else if (a === '--schedule') out.schedule = true;
   }
   return out;
+}
+
+function printHelp() {
+  console.log(`Seed disposable TU-TEST rows against a non-production API/database.
+
+Usage:
+  npm run tu-test:seed -- [--count=2] [--billing] [--schedule]
+  node scripts/tu-test-seed.mjs [--count=2] [--billing] [--schedule]
+
+Default target: TU_TEST_API_BASE or http://localhost:3001
+Never targets production API (api.templeunderground.com) or production
+Supabase project jhxzecxkccqlgyazhsnb.
+
+See docs/validation-environment.md.`);
 }
 
 function plusYearsIsoDate(years) {
@@ -84,17 +105,25 @@ async function assertApiReachable(apiBase) {
 }
 
 async function main() {
-  try {
-    await import('dotenv/config');
-  } catch {
-    /* optional */
+  const { count, billing, schedule, help } = parseArgs(process.argv.slice(2));
+  if (help) {
+    printHelp();
+    return;
   }
 
-  const { count, billing, schedule } = parseArgs(process.argv.slice(2));
+  await loadTuTestEnv();
+
   const runId = crypto.randomUUID().slice(0, 8);
-  const apiBase = (process.env.TU_TEST_API_BASE || process.env.API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+  const apiBase = resolveApiBase();
+  const supabaseUrl = resolveSupabaseUrl();
+
+  assertNonProductionTargets({
+    apiBase,
+    supabaseUrl: billing || schedule ? supabaseUrl : supabaseUrl || undefined,
+  });
 
   console.log(`API base: ${apiBase} (timeout ${requestTimeoutMs()} ms)`);
+  if (supabaseUrl) console.log(`Supabase URL: ${supabaseUrl}`);
   await assertApiReachable(apiBase);
 
   const created = [];
@@ -168,7 +197,6 @@ async function main() {
     console.log(`OK waiver ${i + 1}/${count}: participant=${body.participantId} account=${body.accountId}`);
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if ((billing || schedule) && (!supabaseUrl || !supabaseKey)) {
     console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY (required for --billing / --schedule).');
@@ -298,6 +326,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err.code === 'TU_TEST_PRODUCTION_TARGET' ? err.message : err);
   process.exitCode = 1;
 });

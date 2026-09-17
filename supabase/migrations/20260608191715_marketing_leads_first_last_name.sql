@@ -1,4 +1,6 @@
 -- Split marketing_leads.name into required first_name and last_name.
+-- Production history version: 20260608191715 (already applied).
+-- Former repo filename: 0021_marketing_leads_first_last_name.sql.
 
 alter table public.marketing_leads
   add column if not exists first_name text,

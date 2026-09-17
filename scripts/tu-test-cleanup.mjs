@@ -10,20 +10,18 @@
  * Default: dry-run. Deletions require --execute.
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ *      TU_TEST_ALLOW_REMOTE=1 — required for a non-local, non-production target
+ *
+ * Production project jhxzecxkccqlgyazhsnb is never allowed.
+ * See docs/validation-environment.md.
  *
  * Note: public.event_ledger is append-only; historical rows may still mention deleted UUIDs.
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { loadTuTestEnv, resolveSupabaseUrl } from './lib/tu-test-env.mjs';
+import { assertNonProductionTargets } from './lib/tu-test-guard.mjs';
 import { TU_TEST_EMAIL_DOMAIN, TU_TEST_DISPLAY_PREFIX } from './lib/tu-test-data.mjs';
-
-async function loadDotenv() {
-  try {
-    await import('dotenv/config');
-  } catch {
-    /* optional */
-  }
-}
 
 function chunk(arr, size) {
   const out = [];
@@ -46,16 +44,38 @@ async function deleteIn(supabase, table, column, ids, execute) {
   return n;
 }
 
+function printHelp() {
+  console.log(`Remove disposable TU-TEST rows from a non-production database.
+
+Usage:
+  npm run tu-test:cleanup -- [--execute]
+  node scripts/tu-test-cleanup.mjs [--execute]
+
+Default is dry-run. Pass --execute to delete.
+
+Never targets production Supabase project jhxzecxkccqlgyazhsnb.
+
+See docs/validation-environment.md.`);
+}
+
 async function main() {
-  await loadDotenv();
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    printHelp();
+    return;
+  }
+
+  await loadTuTestEnv();
   const execute = process.argv.includes('--execute');
-  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseUrl = resolveSupabaseUrl();
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseKey) {
-    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (non-production only).');
     process.exitCode = 1;
     return;
   }
+
+  assertNonProductionTargets({ supabaseUrl });
+  console.log(`Supabase URL: ${supabaseUrl}`);
 
   const supabase = createClient(supabaseUrl, supabaseKey);
   const emailPattern = `%@${TU_TEST_EMAIL_DOMAIN}`;
@@ -279,6 +299,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e.code === 'TU_TEST_PRODUCTION_TARGET' ? e.message : e);
   process.exitCode = 1;
 });

@@ -1,6 +1,6 @@
 # API-HARD-001 — Atomic record-payment
 
-- Status: **blocked** until API-TEST-001 and API-VAL-001 are done
+- Status: **done**
 - Lane: backend
 - Depends on: API-TEST-001, API-VAL-001
 - Production writes: no (migration must be forward-safe; apply to prod only with
@@ -21,7 +21,7 @@ retry. Update `docs/admin-api.md`. Add tests.
 
 ## Allowed paths
 
-- `supabase/migrations/` (next number after 0021)
+- `supabase/migrations/` (use `supabase migration new <name>` so the version sorts after `20260914202053`; do not reuse `0021`–`0024`)
 - `services/api/src/routes/admin/billing.js`
 - matching tests
 - `docs/admin-api.md`, `docs/current-state.md`

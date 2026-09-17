@@ -12,6 +12,9 @@
  *
  * Waiver seeding calls the HTTP API, which needs SUPABASE_SERVICE_ROLE_KEY in the API
  * process (service_role bypasses RLS). Using the anon key causes participant insert failures.
+ *
+ * Seed and cleanup refuse production project jhxzecxkccqlgyazhsnb and the
+ * production API hosts. Procedure: docs/validation-environment.md.
  */
 
 export const TU_TEST_EMAIL_DOMAIN = 'tu-test.invalid';

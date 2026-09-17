@@ -1,10 +1,18 @@
 # Admin API — Temple Underground
 
-All admin routes require the **`x-admin-key`** header matching **`ADMIN_API_KEY`** on the API server. Use HTTPS in production; never expose the admin key in public frontends (the `admin/apps/dashboard` merge UI is for trusted operators only).
+Admin routes require header **`x-admin-key`**. That header accepts either:
 
-The standalone waiver viewer uses Cloudflare Access and does not consume an admin key.
-The active dashboard and receipts app require the operator to enter the admin key at
-runtime; they do not read `VITE_ADMIN_API_KEY`.
+1. The shared env **`ADMIN_API_KEY`** (legacy compatibility — authenticates as
+   actor `legacy_shared_key` with role `owner`), or
+2. A personal staff key from `staff_users` (migration `20260914185843_staff_rbac.sql`; SHA-256 hashed).
+   Roles: `owner`, `front_desk`, `finance`.
+
+Use HTTPS in production; never expose admin or staff keys in public frontends or
+any `VITE_*` bundle (the `admin/apps/dashboard` merge UI is for trusted
+operators only). Dashboard and receipts paste `x-admin-key` at runtime.
+
+The standalone waiver viewer uses Cloudflare Access and does not consume an admin
+key.
 
 **Base URL:** same host as `services/api` (e.g. `http://localhost:3001`).
 
@@ -14,14 +22,60 @@ runtime; they do not read `VITE_ADMIN_API_KEY`.
 
 | Topic | Rule |
 |--------|------|
-| **Auth** | Header `x-admin-key: <ADMIN_API_KEY>` |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`) |
-| **Cron jobs** | Discord notification routes also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`) |
-| **Idempotency** | `POST .../payment-refunds` accepts optional `idempotency_key` (unique when set); replays return the same `refund_id` |
+| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
+| **Cron jobs** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Cron authenticates as actor `cron`. Production monthly-charge cron is **not** enabled (endpoint only). |
+| **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
 | **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
+
+---
+
+## Staff authentication (API-ADR-005)
+
+Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext returned once) or by inserting a SHA-256 `key_hash` with the service role. Dashboard/receipts keep sending `x-admin-key`; they do not read `VITE_ADMIN_API_KEY`.
+
+**Role matrix (mutations).** GET is allowed for every active role except `GET /api/admin/staff` (owner). Discord cron routes and `POST /billing/generate-monthly-charges` also accept `x-cron-secret` and skip the staff role matrix.
+
+| Role | May mutate |
+| --- | --- |
+| `owner` | All `/api/admin/*` routes, including staff directory and participant merge |
+| `finance` | `/billing/*` (payments, refunds, discounts, subscriptions, expenses). Not scheduling writes, staff, merge, or Discord notification POSTs |
+| `front_desk` | `/scheduling/*`, `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
+
+Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
+
+Until migration `20260914185843_staff_rbac.sql` is applied, only the shared `ADMIN_API_KEY` authenticates.
+
+### `GET /api/admin/auth/me`
+
+Any authenticated staff (including the legacy shared key).
+
+**Response:** `{ "ok": true, "staff": { "id", "email", "display_name", "role", "auth_method", "actor_label" } }`
+
+`auth_method` is `staff_key` | `legacy_shared_key`. Cron does not use this route.
+
+### `GET /api/admin/staff`
+
+Owner only. Lists directory rows **without** `key_hash`.
+
+**Response:** `{ "ok": true, "rows": [ { "id", "email", "display_name", "role", "key_prefix", "active", "created_at", "updated_at", "last_used_at" } ] }`
+
+### `POST /api/admin/staff`
+
+Owner only. Creates an active staff row and returns the plaintext key once.
+
+**Body:** `{ "email": "desk@example.com", "display_name": "Front Desk", "role": "front_desk" }`
+
+**Response:** `{ "ok": true, "staff": { ...directory fields... }, "api_key": "tu_sk_..." }`
+
+**Errors:** `400` `invalid_email` / `invalid_display_name` / `invalid_role`; `403` `forbidden`; `409` `email_taken`
+
+### `PATCH /api/admin/staff/:id`
+
+Owner only. Optional fields: `display_name`, `role`, `active`, `rotate_key` (boolean). Rotating returns a new `api_key` once. Deactivating or demoting the last active owner returns `409` `last_owner`.
 
 ---
 
@@ -69,6 +123,71 @@ Stores the waiver submission and then records a **`waiver.submitted`** event in 
 - `SLACK_WEBHOOK_URL`
 
 Notification failures are logged server-side and do **not** fail an otherwise successful waiver submission. If neither webhook is configured, the API logs a warning and returns the normal waiver response.
+
+**Success envelope (unchanged fields):** `{ "ok": true, "waiverId": "<uuid>", "participantId": "<uuid>", "accountId": "<uuid>", "accountMemberId": "<uuid>", "sha256": "<hex>" }`
+
+**Failure:** non-2xx `{ "ok": false, "errors": [...] }` and/or `{ "ok": false, "error": "<machine_key>" }` as today.
+
+#### Same intent / idempotency
+
+A retry or double-submit for the **same intent** does not create another waiver, participant, or billing account. The API replays the original success envelope (`waiverId`, `participantId`, `accountId`, `accountMemberId`, and the stored `sha256` when the PDF/audit row exists).
+
+**Same intent** is:
+
+1. **Client `idempotency_key` (preferred).** Optional string, max 200 characters after trim. Empty/omitted means “derive a key”. Mirrors `record_payment_refund`: the key is unique when set (`waivers.idempotency_key`, migration `20260914150818`). A later POST with the same key and the same participant identity (email + date of birth + phone) returns the original envelope and does **not** re-send Discord/Slack notifications.
+2. **Derived fallback** when the client omits the key: `derived:v1:` plus SHA-256 of `waiver.submit.v1|{email lowercase}|{date_of_birth}|{phone}|{content_version}|{sha256(signature PNG bytes)}`. Existing TU-Signup payloads that omit `idempotency_key` are therefore retry-safe for an identical signature + identity + `content_version`.
+
+A client key reused for a **different** participant identity returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. A new signature (or `content_version`) without a client key is a new intent and creates a new waiver.
+
+**Residual risk:** storage uploads and DB writes are still sequential (not one Postgres transaction). Unique `idempotency_key` prevents duplicate waiver rows once migration `20260914150818` is applied. Until that column exists, the handler falls back to the pre-idempotency insert so live submits keep working; retries can still duplicate. A crash after storage upload and before the waiver insert can leave orphan signature/PDF objects. Related rows (`emergency_contacts`, `waiver_medical_histories`, `audit_trails`, `event_ledger`) may be missing if the first attempt died after the waiver insert; a retry replays IDs and does not duplicate the waiver. Concurrent first-time participant inserts are still matched only in application code (no unique constraint on email+DOB+phone).
+
+---
+
+### `POST /api/webhooks/stripe` (public)
+
+Stripe card-processor webhook (API-ADR-006). **Not** an `/api/admin/*` route.
+Authenticate with header `Stripe-Signature` (`t=<unix>,v1=<hex>`) against env
+`STRIPE_WEBHOOK_SECRET`. Staff `x-admin-key` does not authenticate this route.
+Raw body is required for signature verify (`Content-Type: application/json`).
+
+Does **not** call Stripe. Does **not** use the sequential record-payment fallback.
+If RPC `record_payment` is missing, the handler returns `503` `record_payment_unavailable`.
+
+**PaymentIntent metadata (required for money-in):**
+
+| Key | Value |
+| --- | --- |
+| `tu_account_id` | Billing `accounts.id` UUID |
+| `tu_charge_id` | Single charge to allocate the full amount, **or** |
+| `tu_allocations` | JSON array `[{ "charge_id": "<uuid>", "amount_cents": 15000 }, ...]` whose cents sum equals the PaymentIntent amount |
+
+Unmatched (missing account/charge metadata) fails closed: `400` `unmatched_payment`.
+
+**Events**
+
+| Stripe type | Behavior |
+| --- | --- |
+| `payment_intent.succeeded` | `record_payment` with `method=card`, `issued_by=stripe_webhook`, `idempotency_key=stripe:pi_<id>`, allocations as above. Amount is integer cents from `amount_received` (fallback `amount`); currency must be `usd`. |
+| `refund.created` (`status=succeeded`) | `record_payment_refund` with `idempotency_key=stripe:re_<id>`, payment looked up via `payment_processor_refs`. |
+| `charge.succeeded`, `payment_intent.payment_failed`, `charge.refunded`, disputes, other | `200` `{ "ok": true, "ignored": true }` after storing the event id |
+
+**Success (money-in):** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
+
+**Success (refund):** `{ "ok": true, "refund_id": "uuid" }`
+
+**Success (duplicate event):** same envelope as the first processed delivery.
+
+**Errors:**
+
+| Status | `error` |
+| --- | --- |
+| 401 | `invalid_signature` |
+| 400 | `unmatched_payment`, `unsupported_currency`, `invalid_event`, `allocation_sum_must_equal_payment_amount`, `invalid_allocation_row`, `payment_not_found`, plus `record_payment` machine keys (`allocation_exceeds_net_due`, …) |
+| 409 | `idempotency_key_conflict` |
+| 500 | `stripe_webhook_not_configured`, `supabase_not_configured` |
+| 503 | `record_payment_unavailable` |
+
+Live Stripe webhook registration and production `supabase db push` are **not** part of API-PAY-001. Migrations `20260916174649` (RPC) and the processor-ref migration must be applied before this route can book production payments.
 
 ---
 
@@ -246,6 +365,22 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
 
 ---
 
+### `POST /api/admin/billing/generate-monthly-charges`
+
+Calls RPC `generate_monthly_charges()` (migration **0002**) to insert **open** monthly `charges` for active subscriptions whose plan has `billing_cadence = 'monthly'` and whose next period is due (`due_at` ≤ today).
+
+No request body. The handler does not insert charges itself.
+
+**Auth:** `x-admin-key` (shared owner key or an `owner` / `finance` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API). Same middleware as Discord notification routes (`requireAdminOrCron`). Cron authenticates as actor `cron` and skips the staff role matrix. `front_desk` staff keys receive `403 forbidden`.
+
+**Response:** `{ "ok": true, "created": N }` where `N` is the number of charge rows the RPC returned. The API logs `generate_monthly_charges.created` with that count.
+
+**Idempotency:** a second call for the same period creates nothing. The function skips a subscription when a non-void charge already exists for that `subscription_id` + `coverage_start`. Re-runs return `{ "ok": true, "created": 0 }`. This endpoint is **not** scheduled in production; enabling a Render (or pg_cron) job is a later ops step.
+
+**Errors:** `401` `unauthorized`; `403` `forbidden`; `400` — RPC/Postgres message in `error`; `500` `supabase_not_configured` / `server_error`.
+
+---
+
 ### `POST /api/admin/billing/subscription-upgrade`
 
 Calls RPC `upgrade_subscription_prorated`: **upgrade only** (new plan `price_cents` > old). Inserts a **prorated delta** `charges` row for the rest of the current period (from `effective_date` or today through period end) and sets `subscriptions.plan_definition_id`.
@@ -326,7 +461,9 @@ Policy:
 
 ### `POST /api/admin/billing/record-payment`
 
-Creates a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), optionally a **`money_in`** receipt. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`).
+Calls RPC `record_payment`: inserts a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), and optionally a **`money_in`** receipt in **one transaction**. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`). Allocation amounts are integer cents and must not exceed remaining headroom (`net_due_cents` minus existing allocations).
+
+Until migration `20260916174649` is applied, the API falls back to the previous sequential inserts so live record-payment still works. That fallback is **not** atomic and ignores `idempotency_key`. Public Stripe webhooks **do not** use this fallback (API-ADR-006).
 
 **Body (JSON):**
 
@@ -340,13 +477,18 @@ Creates a **succeeded** `payments` row, **`payment_allocations`** to one or more
   "paid_at": "ISO-8601 optional",
   "reference": "optional",
   "notes": "optional",
-  "issue_receipt": true
+  "issue_receipt": true,
+  "idempotency_key": "optional-unique-string"
 }
 ```
 
 **`method`:** one of `cash`, `card`, `cashapp`, `venmo`, `paypal`, `zelle`, `other` (see `PAYMENT_METHODS` in `billing.js`).
 
+**`idempotency_key`:** optional string, max 200 characters after trim. Unique when set (`payments.idempotency_key`). A later POST with the same key and the same `account_id`, `amount_cents`, and `method` returns the original `{ payment_id, receipt_id }` and does **not** insert another payment, allocation, or receipt. The same key with a different account, amount, or method returns `409` `{ "ok": false, "error": "idempotency_key_conflict" }`. Stripe webhooks pass `stripe:pi_<payment_intent_id>` on this RPC (see `POST /api/webhooks/stripe`).
+
 **Response:** `{ "ok": true, "payment_id": "uuid", "receipt_id": "uuid | null" }`
+
+**Validation (RPC):** charges must exist, belong to `account_id`, and not be `void`; each allocation must be a positive integer cent amount; allocation sum must equal `amount_cents`; each allocation must be ≤ remaining `view_charge_net` headroom.
 
 ---
 
@@ -464,7 +606,76 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`).
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
+
+#### `GET /api/admin/scheduling/templates`
+
+List schedule templates.
+
+**Query:** `include_inactive=true`, `limit` (default 50, max 200), `offset` (default 0)
+
+Inactive templates are omitted unless `include_inactive=true`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+#### `GET /api/admin/scheduling/templates/:templateId`
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `invalid_template_id`; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/templates`
+
+**Body (JSON):**
+
+```json
+{
+  "name": "Class 1",
+  "day_of_week": 1,
+  "start_time": "19:00",
+  "duration_minutes": 60,
+  "is_active": true,
+  "notes": "optional"
+}
+```
+
+`is_active` defaults to `true`. `start_time` is `HH:MM` or `HH:MM:SS`.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `name_required`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_is_active`
+
+#### `PATCH /api/admin/scheduling/templates/:templateId`
+
+Partial update. Deactivate with `"is_active": false`. Existing sessions are not rewritten when a template changes.
+
+**Response:** `{ "ok": true, "template": { ... } }`
+
+**Errors:** `400` — `no_updates`, validation errors; `404` — `template_not_found`
+
+#### `POST /api/admin/scheduling/generate-sessions`
+
+Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **20260914202053**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
+
+**Body (JSON):**
+
+```json
+{
+  "start": "2026-06-01",
+  "end": "2026-06-07",
+  "template_id": "uuid optional"
+}
+```
+
+Max span is 366 days (`end - start`).
+
+**Response:** `{ "ok": true, "start", "end", "created_count", "skipped_count", "created": [ ... sessions ... ] }`
+
+**Errors:** `400` — `invalid_start`, `invalid_end`, `end_must_be_on_or_after_start`, `range_too_long`, `invalid_template_id`, `template_inactive`; `404` — `template_not_found`
 
 #### `GET /api/admin/scheduling/sessions`
 
@@ -530,7 +741,7 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
 
-**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
+**Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "rowCount": N }`
 
@@ -542,7 +753,7 @@ Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and post
 
 Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 hours, counts for payment reminders, plus the same overdue / due-soon list as the payment-reminders route.
 
-**Auth:** `x-admin-key` **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
+**Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
 
@@ -726,7 +937,7 @@ Monthly finance summary contract for dashboard export and bookkeeping sustainabi
 
 ### `GET /api/waivers/:id/pdf`
 
-On-demand HTML → PDF render. Requires `x-admin-key`. Does not persist a new PDF; streams a buffer.
+On-demand HTML → PDF render. Requires `x-admin-key` (shared or personal staff key). Does not persist a new PDF; streams a buffer.
 
 **Response:** `200` `application/pdf` with `Content-Disposition: inline; filename="waiver-<id>.pdf"`, plus headers `X-Waiver-Locale` and `X-Waiver-Version`.
 
@@ -748,4 +959,4 @@ For all operator apps:
 
 - Start the API first: `npm run dev:api` (this repo).
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
-- Paste **x-admin-key** only in trusted sessions; do not commit keys.
+- Paste **x-admin-key** (shared owner key or personal staff key) only in trusted sessions; do not commit keys.

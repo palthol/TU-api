@@ -17,10 +17,10 @@ alwaysApply: false
   a non-2xx status. Success is `200 { ok:true, ... }`.
 - **Money is integer cents.** Multi-write operations (payment + allocations + receipt) should
   be atomic — prefer a Postgres function/RPC over sequential inserts.
-- **Schema changes:** add a new numbered migration, keep it idempotent, apply it, then
-  re-verify against the live DB (`list_migrations`, `list_tables`). Confirm the live project
-  is actually at the migration you expect (repo files `0001`–`0021`; live records `0001`–
-  `0020` plus timestamped `20260608191715` for the same `0021` change — see
-  `docs/api-schema-audit.md`).
+- **Schema changes:** add a timestamped migration with `supabase migration new <name>`
+  (version after `20260914202053`), keep it idempotent, apply it, then re-verify
+  against the live DB (`list_migrations`, `list_tables`). Applied live history is
+  `0001`–`0020` plus `20260608191715` (same SQL as former `0021`). Pending in-repo:
+  `20260914150818`, `20260914185843`, `20260914202053`. See `docs/api-schema-audit.md`.
 - **Don't rename fields or invent endpoints** the front-ends consume; update `docs/admin-api.md`
   when behavior changes so the `admin` repo design docs stay accurate.

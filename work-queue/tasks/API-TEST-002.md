@@ -1,6 +1,6 @@
 # API-TEST-002 — Subscription and scheduling route tests
 
-- Status: **blocked** until API-DEV-001 is done
+- Status: **done**
 - Lane: tests
 - Depends on: API-DEV-001
 - Production writes: no
