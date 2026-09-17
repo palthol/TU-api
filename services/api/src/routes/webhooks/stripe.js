@@ -15,6 +15,7 @@ const RECORD_PAYMENT_CHARGE_ERRORS = new Set([
   'charge_is_void',
   'allocation_exceeds_net_due',
 ]);
+const RETRYABLE_WEBHOOK_ERRORS = new Set(['payment_not_found']);
 
 function isUniqueViolation(error) {
   return String(error?.code || '') === '23505';
@@ -299,7 +300,7 @@ async function handleRefundCreated(event, supabase) {
     return { status: 500, body: { ok: false, error: 'db_error' } };
   }
   if (!lookedUp.paymentId) {
-    return { status: 400, body: { ok: false, error: 'payment_not_found' } };
+    return { status: 409, body: { ok: false, error: 'payment_not_found' } };
   }
 
   const { data, error } = await supabase.rpc('record_payment_refund', {
@@ -338,6 +339,11 @@ function handleIgnored() {
 
 async function persistOutcome(supabase, event, objectId, outcome) {
   if (outcome.status >= 500 || outcome.status === 401) return outcome;
+  const errorKey =
+    outcome.body && typeof outcome.body === 'object' && outcome.body.ok === false
+      ? String(outcome.body.error || '').trim()
+      : '';
+  if (errorKey && RETRYABLE_WEBHOOK_ERRORS.has(errorKey)) return outcome;
   const status = outcome.body?.ignored ? 'ignored' : 'processed';
   const inserted = await insertProcessorEvent(supabase, {
     provider: PROVIDER,
@@ -417,7 +423,7 @@ export function registerStripeWebhookRoute(app, { supabase, webhookSecret, nowMs
       const objectId = stripeObjectId(event.data?.object);
       if (event.type === 'payment_intent.succeeded') {
         outcome = await handlePaymentIntentSucceeded(event, supabase);
-      } else if (event.type === 'refund.created') {
+      } else if (event.type === 'refund.created' || event.type === 'refund.updated') {
         outcome = await handleRefundCreated(event, supabase);
       } else {
         outcome = handleIgnored();

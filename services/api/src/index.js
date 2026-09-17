@@ -40,6 +40,7 @@ registerStripeWebhookRoute(app, { supabase });
 app.use(express.json({ limit: '10mb' }));
 
 const requireAdmin = createRequireAdminFromSupabase(supabase);
+const requireAdminOrCron = createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) });
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';
 
@@ -201,6 +202,13 @@ app.use(
   }),
 );
 
+const adminCronRouter = express.Router();
+adminCronRouter.use('/billing/generate-monthly-charges', requireAdminOrCron);
+adminCronRouter.use('/notifications', requireAdminOrCron);
+registerAdminBillingCronRoutes(adminCronRouter, { supabase });
+registerAdminNotificationRoutes(adminCronRouter, { supabase });
+app.use('/api/admin', adminCronRouter);
+
 const adminBillingRouter = express.Router();
 adminBillingRouter.use(requireAdmin);
 registerStaffAuthRoutes(adminBillingRouter, { supabase });
@@ -210,14 +218,6 @@ registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminSchedulingRoutes(adminBillingRouter, { supabase });
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
-
-const adminCronRouter = express.Router();
-adminCronRouter.use(
-  createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) }),
-);
-registerAdminBillingCronRoutes(adminCronRouter, { supabase });
-registerAdminNotificationRoutes(adminCronRouter, { supabase });
-app.use('/api/admin', adminCronRouter);
 
 const viewerRouter = express.Router();
 viewerRouter.use(createRequireViewerAccess());
