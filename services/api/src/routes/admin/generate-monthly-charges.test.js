@@ -16,6 +16,10 @@ const MIGRATION_0002 = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../../supabase/migrations/0002_business_logic_and_affiliations.sql',
 );
+const BILLING_AUTOMATION_MIGRATION = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../supabase/migrations/20260921185003_complete_v1_subscription_charge_generation.sql',
+);
 
 function createApp(supabase) {
   const app = express();
@@ -96,7 +100,13 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
       .set('x-admin-key', ADMIN_KEY);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, created: 2 });
+    expect(res.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 2,
+      charge_ids: [CHARGE_ID, 'ffffffff-ffff-4fff-8fff-ffffffffffff'],
+      charges: rows,
+    });
     expect(supabase.rpc).toHaveBeenCalledTimes(1);
     expect(supabase.rpc).toHaveBeenCalledWith('generate_monthly_charges');
   });
@@ -110,7 +120,13 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
       .set('x-cron-secret', CRON_SECRET);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, created: 1 });
+    expect(res.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 1,
+      charge_ids: [CHARGE_ID],
+      charges: [{ charge_id: CHARGE_ID }],
+    });
     expect(supabase.rpc).toHaveBeenCalledWith('generate_monthly_charges');
   });
 
@@ -127,13 +143,25 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
       .post('/api/admin/billing/generate-monthly-charges')
       .set('x-cron-secret', CRON_SECRET);
     expect(first.status).toBe(200);
-    expect(first.body).toEqual({ ok: true, created: 1 });
+    expect(first.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 1,
+      charge_ids: [CHARGE_ID],
+      charges: [{ charge_id: CHARGE_ID }],
+    });
 
     const second = await request(app)
       .post('/api/admin/billing/generate-monthly-charges')
       .set('x-cron-secret', CRON_SECRET);
     expect(second.status).toBe(200);
-    expect(second.body).toEqual({ ok: true, created: 0 });
+    expect(second.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 0,
+      charge_ids: [],
+      charges: [],
+    });
     expect(supabase.rpc).toHaveBeenCalledTimes(2);
     expect(supabase.rpc).toHaveBeenNthCalledWith(1, 'generate_monthly_charges');
     expect(supabase.rpc).toHaveBeenNthCalledWith(2, 'generate_monthly_charges');
@@ -153,12 +181,12 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
     });
   });
 
-  it('keeps generate_monthly_charges skip-if-exists for the same coverage period', () => {
-    const sql = readFileSync(MIGRATION_0002, 'utf8');
-    expect(sql).toMatch(/create or replace function generate_monthly_charges\(\)/);
-    expect(sql).toMatch(/if not exists \(/);
-    expect(sql).toMatch(/chx\.subscription_id = sub_record\.subscription_id/);
-    expect(sql).toMatch(/chx\.coverage_start = next_coverage_start/);
-    expect(sql).toMatch(/chx\.status != 'void'/);
+  it('keeps generate_monthly_charges database-level idempotency protection', () => {
+    const originalSql = readFileSync(MIGRATION_0002, 'utf8');
+    const currentSql = readFileSync(BILLING_AUTOMATION_MIGRATION, 'utf8');
+    expect(originalSql).toMatch(/create or replace function generate_monthly_charges\(\)/);
+    expect(currentSql).toMatch(/create unique index if not exists uq_charges_subscription_coverage_nonvoid/);
+    expect(currentSql).toMatch(/on conflict \(subscription_id, coverage_start\)/);
+    expect(currentSql).toMatch(/pg_advisory_xact_lock/);
   });
 });

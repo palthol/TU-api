@@ -24,10 +24,20 @@ function auth(req) {
   return req.set('x-admin-key', ADMIN_KEY);
 }
 
-function createSupabase({ rpcResult } = {}) {
+function createSupabase({
+  rpcResult,
+  plan = { billing_cadence: 'monthly', price_cents: 10000 },
+  planError = null,
+} = {}) {
   return {
-    from: vi.fn(() => {
-      throw new Error('subscriptions tests must not query tables');
+    from: vi.fn((table) => {
+      if (table !== 'plan_definitions') throw new Error(`unexpected table query: ${table}`);
+      const builder = {
+        select: vi.fn(() => builder),
+        eq: vi.fn(() => builder),
+        maybeSingle: vi.fn(async () => ({ data: plan, error: planError })),
+      };
+      return builder;
     }),
     rpc: vi.fn(async () => rpcResult ?? { data: null, error: null }),
   };
@@ -122,9 +132,59 @@ describe('POST /api/admin/billing/subscriptions', () => {
       expect.objectContaining({
         p_participant_id: PARTICIPANT_ID,
         p_plan_definition_id: PLAN_ID,
-        p_create_initial_charge: false,
+        p_create_initial_charge: true,
         p_created_by: 'admin_api',
       }),
+    );
+  });
+
+  it('defaults paid monthly enrollment to initial-charge generation', async () => {
+    const supabase = createSupabase({
+      rpcResult: {
+        data: {
+          subscription_id: SUBSCRIPTION_ID,
+          account_id: ACCOUNT_ID,
+          participant_id: PARTICIPANT_ID,
+          plan_definition_id: PLAN_ID,
+          initial_charge_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        },
+        error: null,
+      },
+    });
+
+    const res = await auth(request(createApp(supabase)).post('/api/admin/billing/subscriptions').send(validBody));
+
+    expect(res.status).toBe(200);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'create_subscription',
+      expect.objectContaining({ p_create_initial_charge: true }),
+    );
+  });
+
+  it.each([
+    [{ billing_cadence: 'monthly', price_cents: 0 }, false, 'free monthly'],
+    [{ billing_cadence: 'contract', price_cents: 13500 }, false, 'non-monthly'],
+  ])('does not default %s plans to an initial charge', async (plan, expected, _label) => {
+    const supabase = createSupabase({
+      plan,
+      rpcResult: {
+        data: {
+          subscription_id: SUBSCRIPTION_ID,
+          account_id: ACCOUNT_ID,
+          participant_id: PARTICIPANT_ID,
+          plan_definition_id: PLAN_ID,
+          initial_charge_id: null,
+        },
+        error: null,
+      },
+    });
+
+    const res = await auth(request(createApp(supabase)).post('/api/admin/billing/subscriptions').send(validBody));
+
+    expect(res.status).toBe(200);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'create_subscription',
+      expect.objectContaining({ p_create_initial_charge: expected }),
     );
   });
 
