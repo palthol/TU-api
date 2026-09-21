@@ -1,6 +1,8 @@
 begin;
 
+create schema if not exists extensions;
 create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions;
 select plan(25);
 
 insert into public.participants (id, full_name, date_of_birth, email)

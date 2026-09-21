@@ -63,7 +63,13 @@ describe('admin router mount order (cron vs admin-key)', () => {
       .post('/api/admin/billing/generate-monthly-charges')
       .set('x-cron-secret', CRON_SECRET);
     expect(cronOk.status).toBe(200);
-    expect(cronOk.body).toEqual({ ok: true, created: 0 });
+    expect(cronOk.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 0,
+      charge_ids: [],
+      charges: [],
+    });
     expect(supabase.rpc).toHaveBeenCalledWith('generate_monthly_charges');
 
     const cronDenied = await request(app)
@@ -84,7 +90,13 @@ describe('admin router mount order (cron vs admin-key)', () => {
       .post('/api/admin/billing/generate-monthly-charges')
       .set('x-admin-key', ADMIN_KEY);
     expect(cronViaAdmin.status).toBe(200);
-    expect(cronViaAdmin.body).toEqual({ ok: true, created: 0 });
+    expect(cronViaAdmin.body).toEqual({
+      ok: true,
+      ran_at: expect.any(String),
+      created: 0,
+      charge_ids: [],
+      charges: [],
+    });
     expect(supabase.rpc).toHaveBeenCalledWith('generate_monthly_charges');
   });
 });

@@ -24,6 +24,7 @@ returns table (
 language plpgsql
 set search_path = public, private
 as $$
+#variable_conflict use_column
 declare
   sub_record record;
   charge_record record;
