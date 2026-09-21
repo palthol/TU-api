@@ -21,6 +21,7 @@
     "supabase:pull": "supabase db pull",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
+    "test:billing-db": "supabase test db supabase/tests/database/billing_automation.test.sql --local",
     "guard:waiver-schema": "node scripts/guard-waiver-schema.mjs",
     "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs",
     "tu-test:seed": "node scripts/tu-test-seed.mjs",
