@@ -328,6 +328,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         participant_id: result.participant_id ?? participant_id,
         plan_definition_id: result.plan_definition_id ?? plan_definition_id,
         initial_charge_id: result.initial_charge_id ?? null,
+        automatic_billing_starts_at: result.automatic_billing_starts_at ?? null,
       });
     } catch (e) {
       console.error(e);

@@ -192,7 +192,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 - **Plans** — Insert into `plan_definitions` (name, plan_category, billing_cadence, price_cents, etc.). Then add rows to `plan_entitlements` (e.g. group sessions or private minutes, limit_type, quantity, reset_rule like `calendar_week`).
 - **Accounts** — One row per payer (family or individual). Optionally set primary_contact_*, notes.
 - **Linking participants to accounts** — Insert into `account_members` (account_id, participant_id, role: member | payer | guardian).
-- **Subscriptions** — Prefer `POST /api/admin/billing/subscriptions`. Omit `create_initial_charge` to create the initial charge automatically for a paid monthly plan; free/non-monthly plans do not receive one. Use an explicit `false` when establishing a subscription without its first charge.
+- **Subscriptions** — Prefer `POST /api/admin/billing/subscriptions`. Omit `create_initial_charge` to create the initial charge automatically for a paid monthly plan; free/non-monthly plans do not receive one. An explicit `false` skips the entire current billing period and persists `automatic_billing_starts_at` for the next period, so the daily generator cannot recreate the suppressed charge.
 - **Charges** — Either insert manually, call `POST /api/admin/billing/generate-monthly-charges`, or run `select * from generate_monthly_charges();` (see section 5.2).
 - **Payments** — Insert into `payments` (account_id, amount_cents, method, etc.). Then insert into `payment_allocations` (payment_id, charge_id, amount_cents). Mark charges as paid when fully covered (update `charges.status` to `'paid'`).
 - **Sessions** — Insert into `sessions` (starts_at, ends_at, optional schedule_template_id, session_label).
@@ -229,9 +229,11 @@ at most one non-void charge for a subscription and coverage start. A second run
 for the same period returns `created: 0`.
 
 Historical subscriptions are safe to bootstrap: when there is no prior charge
-or there is a historical gap, automation starts at the current run date and
-does not generate prior months. Establish the intended current subscription
-state, then run generation from that baseline.
+or there is a historical gap, automation starts no earlier than the current run
+date and does not generate prior months. Existing subscriptions have a `NULL`
+`automatic_billing_starts_at` after migration and are excluded until an operator
+reviews each one and explicitly establishes its current baseline. Never bulk
+derive that value from historical `starts_at`.
 
 The repository has no Supabase Cron/`pg_cron` job. Configure the separate daily
 Render Cron Job only after applying the reviewed billing migration and running

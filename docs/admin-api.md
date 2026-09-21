@@ -357,7 +357,8 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
   "account_id": "uuid",
   "participant_id": "uuid",
   "plan_definition_id": "uuid",
-  "initial_charge_id": "uuid | null"
+  "initial_charge_id": "uuid | null",
+  "automatic_billing_starts_at": "YYYY-MM-DD | null"
 }
 ```
 
@@ -366,6 +367,14 @@ monthly plan with `price_cents > 0` creates its first charge transactionally in
 `create_subscription`; a free or non-monthly plan does not. An explicit boolean
 overrides the API default. Even when explicitly enabled, a free monthly plan
 creates no monetary charge row.
+
+For every paid monthly subscription,
+`automatic_billing_starts_at` is persisted as the first day after the current
+billing period. `create_initial_charge: false` therefore suppresses the entire
+current period: daily generation cannot recreate that charge, but recurring
+billing begins in the next period. Existing subscriptions receive `NULL` when
+migration `20260921185003` is applied and remain excluded from automation until
+an operator establishes an approved current baseline.
 
 **Errors:** `400` — participant/plan not found, inactive plan, no account binding, explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure, or date validation failure (Postgres exception message in `error`).
 
@@ -415,9 +424,11 @@ overlapping invocations. `void` rows do not block a deliberate replacement.
 
 **Historical safety:** the generator never creates a charge with
 `coverage_start` before its run date. If a historical subscription has no
-charge—or has a gap after its last real charge—the first automated charge starts
-on the current run date and covers only the remainder of that month. It does not
-reconstruct undocumented past debt.
+charge—or has a gap after its last real charge—the operator must first set
+`automatic_billing_starts_at`; the first automated charge then starts no earlier
+than the current run date and covers only the remainder of that month. It does
+not reconstruct undocumented past debt. A `NULL` automation date is a fail-safe
+disabled state.
 
 The supported daily scheduler is the existing Render Cron architecture; see
 `docs/deployment.md`. No Supabase Cron/`pg_cron` job exists in this repository.

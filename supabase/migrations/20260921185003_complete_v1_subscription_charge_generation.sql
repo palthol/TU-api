@@ -4,6 +4,12 @@
 -- Before applying it, operators must verify that the unique-index preflight
 -- query documented in docs/deployment.md returns no duplicate rows.
 
+alter table public.subscriptions
+  add column if not exists automatic_billing_starts_at date;
+
+comment on column public.subscriptions.automatic_billing_starts_at is
+  'Earliest date recurring charge automation may bill. NULL disables automatic generation until an operator establishes a baseline.';
+
 create unique index if not exists uq_charges_subscription_coverage_nonvoid
   on public.charges (subscription_id, coverage_start)
   where subscription_id is not null and status <> 'void';
@@ -45,6 +51,7 @@ begin
       s.account_id,
       s.starts_at,
       s.ends_at,
+      s.automatic_billing_starts_at,
       pd.price_cents,
       pd.currency,
       pd.name as plan_name,
@@ -59,6 +66,7 @@ begin
     where s.status = 'active'
       and pd.billing_cadence = 'monthly'
       and pd.price_cents > 0
+      and s.automatic_billing_starts_at is not null
       and s.starts_at <= p_as_of
       and (s.ends_at is null or s.ends_at >= p_as_of)
   loop
@@ -66,7 +74,7 @@ begin
     -- there is a gap after the last real charge, establish a current-period
     -- baseline at p_as_of instead of replaying old months.
     next_coverage_start := greatest(
-      sub_record.starts_at,
+      sub_record.automatic_billing_starts_at,
       coalesce(sub_record.last_coverage_end + 1, sub_record.starts_at),
       p_as_of
     );
@@ -195,7 +203,9 @@ declare
   v_subscription_id uuid;
   v_initial_charge_id uuid;
   v_coverage_start date;
+  v_initial_coverage_start date;
   v_coverage_end date;
+  v_automatic_billing_starts_at date;
 begin
   if p_participant_id is null then
     raise exception 'participant id is required';
@@ -233,6 +243,21 @@ begin
     raise exception 'Plan is not active: %', p_plan_definition_id;
   end if;
 
+  if v_plan.billing_cadence = 'monthly' and v_plan.price_cents > 0 then
+    v_initial_coverage_start := greatest(v_coverage_start, current_date);
+    if p_ends_at is null or p_ends_at >= v_initial_coverage_start then
+      v_coverage_end := (
+        date_trunc('month', v_initial_coverage_start::timestamp)
+        + interval '1 month'
+        - interval '1 day'
+      )::date;
+      if p_ends_at is not null and p_ends_at < v_coverage_end then
+        v_coverage_end := p_ends_at;
+      end if;
+      v_automatic_billing_starts_at := v_coverage_end + 1;
+    end if;
+  end if;
+
   v_account_id := p_account_id;
   if v_account_id is null then
     select am.account_id into v_account_id
@@ -265,6 +290,7 @@ begin
     status,
     starts_at,
     ends_at,
+    automatic_billing_starts_at,
     notes
   )
   values (
@@ -274,6 +300,7 @@ begin
     'active',
     v_coverage_start,
     p_ends_at,
+    v_automatic_billing_starts_at,
     nullif(btrim(coalesce(p_notes, '')), '')
   )
   returning id into v_subscription_id;
@@ -281,16 +308,8 @@ begin
   if coalesce(p_create_initial_charge, false)
     and v_plan.billing_cadence = 'monthly'
     and v_plan.price_cents > 0
+    and v_automatic_billing_starts_at is not null
   then
-    v_coverage_end := (
-      date_trunc('month', v_coverage_start::timestamp)
-      + interval '1 month'
-      - interval '1 day'
-    )::date;
-    if p_ends_at is not null and p_ends_at < v_coverage_end then
-      v_coverage_end := p_ends_at;
-    end if;
-
     insert into public.charges (
       account_id,
       subscription_id,
@@ -307,9 +326,9 @@ begin
       v_subscription_id,
       v_plan.price_cents,
       coalesce(v_plan.currency, 'USD'),
-      v_coverage_start,
+      v_initial_coverage_start,
       v_coverage_end,
-      v_coverage_start,
+      v_initial_coverage_start,
       'open',
       concat_ws(
         ' | ',
@@ -339,13 +358,14 @@ begin
     'account_id', v_account_id,
     'participant_id', p_participant_id,
     'plan_definition_id', p_plan_definition_id,
-    'initial_charge_id', v_initial_charge_id
+    'initial_charge_id', v_initial_charge_id,
+    'automatic_billing_starts_at', v_automatic_billing_starts_at
   );
 end;
 $$;
 
 comment on function public.create_subscription(uuid, uuid, date, date, uuid, boolean, text, text) is
-  'Creates an active subscription and optionally one initial charge for a paid monthly plan; free plans never create monetary charge rows.';
+  'Creates an active subscription with a safe recurring-billing baseline and optionally one current-period charge for a paid monthly plan.';
 
 revoke all on function public.create_subscription(uuid, uuid, date, date, uuid, boolean, text, text) from public;
 revoke all on function public.create_subscription(uuid, uuid, date, date, uuid, boolean, text, text) from anon;

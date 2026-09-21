@@ -174,6 +174,7 @@ describe('POST /api/admin/billing/subscriptions', () => {
           participant_id: PARTICIPANT_ID,
           plan_definition_id: PLAN_ID,
           initial_charge_id: null,
+          automatic_billing_starts_at: '2026-10-01',
         },
         error: null,
       },
@@ -224,6 +225,7 @@ describe('POST /api/admin/billing/subscriptions', () => {
       participant_id: PARTICIPANT_ID,
       plan_definition_id: PLAN_ID,
       initial_charge_id: null,
+      automatic_billing_starts_at: '2026-10-01',
     });
     expect(supabase.rpc).toHaveBeenCalledWith('create_subscription', {
       p_participant_id: PARTICIPANT_ID,

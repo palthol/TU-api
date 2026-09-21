@@ -133,6 +133,25 @@ unique invariant only after this condition is true. Apply the migration through
 the normal reviewed Supabase migration process. Do not run an unrestricted
 `supabase db push` if unrelated pending migrations are not also approved.
 
+The migration deliberately leaves
+`subscriptions.automatic_billing_starts_at = NULL` on every pre-existing
+subscription. `NULL` disables recurring automation. Before enabling the cron,
+review each active paid monthly subscription and set an explicit baseline only
+after confirming the intended current billing period. Do not bulk-fill this
+column from historical `starts_at` values. Example for one reviewed subscription:
+
+```sql
+update public.subscriptions
+set automatic_billing_starts_at = current_date
+where id = '<reviewed-subscription-uuid>'
+  and status = 'active'
+  and automatic_billing_starts_at is null;
+```
+
+This is a production financial write and must be performed only through an
+authorized operator process. Verify the subscription, account, plan price, and
+date before committing it.
+
 ### Render Cron Job
 
 | Field | Value |

@@ -3,7 +3,7 @@ begin;
 create schema if not exists extensions;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(25);
+select plan(30);
 
 insert into public.participants (id, full_name, date_of_birth, email)
 select
@@ -11,21 +11,21 @@ select
   format('[BILLING TEST] Participant %s', n),
   date '1990-01-01',
   format('billing-test-%s@tu-test.invalid', n)
-from generate_series(1, 12) n;
+from generate_series(1, 13) n;
 
 insert into public.accounts (id, status, primary_contact_name)
 select
   format('20000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
   'active',
   format('[BILLING TEST] Account %s', n)
-from generate_series(1, 12) n;
+from generate_series(1, 13) n;
 
 insert into public.account_members (account_id, participant_id, role)
 select
   format('20000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
   format('10000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
   'member'
-from generate_series(1, 12) n;
+from generate_series(1, 13) n;
 
 insert into public.plan_definitions (
   id,
@@ -62,7 +62,7 @@ values
     public.create_subscription(
       '10000000-0000-4000-8000-000000000001',
       (select id from public.plan_definitions where name = 'Basic Group Plan'),
-      date '2026-09-15',
+      current_date,
       null,
       '20000000-0000-4000-8000-000000000001',
       true,
@@ -76,7 +76,7 @@ values
     public.create_subscription(
       '10000000-0000-4000-8000-000000000002',
       (select id from public.plan_definitions where name = 'Core Group Plan'),
-      date '2026-09-15',
+      current_date,
       null,
       '20000000-0000-4000-8000-000000000002',
       true,
@@ -90,7 +90,7 @@ values
     public.create_subscription(
       '10000000-0000-4000-8000-000000000003',
       (select id from public.plan_definitions where name = 'Unlimited Group Plan'),
-      date '2026-09-15',
+      current_date,
       null,
       '20000000-0000-4000-8000-000000000003',
       true,
@@ -104,7 +104,7 @@ values
     public.create_subscription(
       '10000000-0000-4000-8000-000000000004',
       (select id from public.plan_definitions where name = 'Basic Group Plan'),
-      date '2026-09-15',
+      current_date,
       null,
       '20000000-0000-4000-8000-000000000004',
       false,
@@ -132,6 +132,11 @@ select is(
   (select result->>'initial_charge_id' from initial_results where plan_name like '%disabled'),
   null,
   'disabled initial-charge generation returns no charge id'
+);
+select is(
+  (select (result->>'automatic_billing_starts_at')::date from initial_results where plan_name like '%disabled'),
+  (date_trunc('month', current_date::timestamp) + interval '1 month')::date,
+  'disabled initial-charge generation persists the next-period automation baseline'
 );
 select is(
   (
@@ -171,7 +176,7 @@ select is(
     select count(*)
     from initial_results r
     join public.charges c on c.subscription_id = (r.result->>'subscription_id')::uuid
-    where r.plan_name not like '%disabled' and c.coverage_start = date '2026-09-15'
+    where r.plan_name not like '%disabled' and c.coverage_start = current_date
   ),
   3::bigint,
   'initial charge coverage starts on the subscription start date'
@@ -181,7 +186,10 @@ select is(
     select count(*)
     from initial_results r
     join public.charges c on c.subscription_id = (r.result->>'subscription_id')::uuid
-    where r.plan_name not like '%disabled' and c.coverage_end = date '2026-09-30'
+    where r.plan_name not like '%disabled'
+      and c.coverage_end = (
+        date_trunc('month', current_date::timestamp) + interval '1 month' - interval '1 day'
+      )::date
   ),
   3::bigint,
   'initial charge coverage ends at month end'
@@ -191,7 +199,7 @@ select is(
     select count(*)
     from initial_results r
     join public.charges c on c.subscription_id = (r.result->>'subscription_id')::uuid
-    where r.plan_name not like '%disabled' and c.due_at = date '2026-09-15'
+    where r.plan_name not like '%disabled' and c.due_at = current_date
   ),
   3::bigint,
   'initial charges are due on the coverage start date'
@@ -211,7 +219,7 @@ create temp table free_result as
 select public.create_subscription(
   '10000000-0000-4000-8000-000000000005',
   '30000000-0000-4000-8000-000000000001',
-  date '2026-09-15',
+  current_date,
   null,
   '20000000-0000-4000-8000-000000000005',
   true,
@@ -233,14 +241,57 @@ select is(
   0::bigint,
   'a free monthly plan creates no charge row'
 );
+select is(
+  (select result->>'automatic_billing_starts_at' from free_result),
+  null,
+  'a free monthly plan leaves automatic monetary billing disabled'
+);
 
--- Keep initial-charge scenarios out of recurring-generator assertions.
+-- Paid plans with an initial charge and the free plan are not part of the
+-- explicit-false regression below. Leave the opted-out subscription active.
 update public.subscriptions
 set status = 'paused'
 where id in (
-  select (result->>'subscription_id')::uuid from initial_results
+  select (result->>'subscription_id')::uuid
+  from initial_results
+  where plan_name not like '%disabled'
   union all
   select (result->>'subscription_id')::uuid from free_result
+);
+
+create temp table opted_out_same_period as
+select * from private.generate_monthly_charges_as_of(current_date);
+select is(
+  (select count(*) from opted_out_same_period),
+  0::bigint,
+  'create_initial_charge false remains uncharged during the current period'
+);
+
+create temp table opted_out_next_period as
+select *
+from private.generate_monthly_charges_as_of(
+  (date_trunc('month', current_date::timestamp) + interval '1 month')::date
+);
+select is(
+  (select count(*) from opted_out_next_period),
+  1::bigint,
+  'create_initial_charge false generates exactly one charge in the next period'
+);
+select is(
+  (
+    select coverage_start
+    from opted_out_next_period
+  ),
+  (date_trunc('month', current_date::timestamp) + interval '1 month')::date,
+  'opted-out subscription first recurring charge starts at its persisted baseline'
+);
+
+update public.subscriptions
+set status = 'paused'
+where id = (
+  select (result->>'subscription_id')::uuid
+  from initial_results
+  where plan_name like '%disabled'
 );
 
 insert into public.subscriptions (
@@ -251,6 +302,7 @@ insert into public.subscriptions (
   status,
   starts_at,
   ends_at,
+  automatic_billing_starts_at,
   notes
 )
 values
@@ -262,6 +314,7 @@ values
     'active',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'historical bootstrap baseline'
   ),
   (
@@ -272,6 +325,7 @@ values
     'cancelled',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'cancelled'
   ),
   (
@@ -282,6 +336,7 @@ values
     'paused',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'paused'
   ),
   (
@@ -292,6 +347,7 @@ values
     'expired',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'expired'
   ),
   (
@@ -302,6 +358,7 @@ values
     'active',
     date '2026-01-15',
     date '2026-06-09',
+    date '2026-01-15',
     'ended before billing date'
   ),
   (
@@ -312,6 +369,7 @@ values
     'active',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'non-monthly'
   ),
   (
@@ -322,7 +380,19 @@ values
     'active',
     date '2026-01-15',
     null,
+    date '2026-01-15',
     'free monthly'
+  ),
+  (
+    '40000000-0000-4000-8000-000000000008',
+    '20000000-0000-4000-8000-000000000013',
+    '10000000-0000-4000-8000-000000000013',
+    (select id from public.plan_definitions where name = 'Basic Group Plan'),
+    'active',
+    date '2026-01-15',
+    null,
+    null,
+    'existing subscription without an operator-approved automation baseline'
   );
 
 create temp table first_run as
@@ -395,11 +465,12 @@ select is(
       '40000000-0000-4000-8000-000000000004',
       '40000000-0000-4000-8000-000000000005',
       '40000000-0000-4000-8000-000000000006',
-      '40000000-0000-4000-8000-000000000007'
+      '40000000-0000-4000-8000-000000000007',
+      '40000000-0000-4000-8000-000000000008'
     )
   ),
   0::bigint,
-  'cancelled, paused, expired, ended, non-monthly, and free subscriptions create no charges'
+  'cancelled, paused, expired, ended, non-monthly, free, and unanchored subscriptions create no charges'
 );
 select throws_ok(
   $$
