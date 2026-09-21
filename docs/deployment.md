@@ -96,12 +96,92 @@ Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 | Production DB | Supabase project `jhxzecxkccqlgyazhsnb` |
 | API runtime host | Render service behind `api.templeunderground.com` |
 | Discord digest cron | Render **Cron Job** (Dashboard; not in this repo). Runbook below. |
+| Monthly-charge cron | Render **Cron Job** (Dashboard; not in this repo). Daily billing runbook below. |
 | Waiver UI | Sibling `TU-Signup` (`VITE_API_BASE_URL` → production API) |
 | Admin / receipts / waiver-viewer UIs | Sibling `admin` repo |
 | Marketing site | Sibling marketing repos |
 
 Front-end apps should point at `https://api.templeunderground.com` (no trailing slash)
 for production API calls.
+
+## Daily monthly-charge cron
+
+The repository has no Supabase Cron or `pg_cron` configuration. V1 therefore
+uses the same controlled Render Cron → protected API pattern as notifications.
+The job runs **daily**; PostgreSQL decides which subscription period is due.
+Production scheduling and migration application remain operator actions and
+were not performed by the implementing agent.
+
+### Database migration preflight
+
+Before applying
+`20260921185003_complete_v1_subscription_charge_generation.sql`, run this
+read-only query against the target database:
+
+```sql
+select subscription_id, coverage_start, count(*) as nonvoid_charge_count
+from public.charges
+where subscription_id is not null
+  and status <> 'void'
+group by subscription_id, coverage_start
+having count(*) > 1;
+```
+
+The result must be empty. If it is not, stop and reconcile those financial rows
+manually; do not delete or merge charges automatically. The migration adds the
+unique invariant only after this condition is true. Apply the migration through
+the normal reviewed Supabase migration process. Do not run an unrestricted
+`supabase db push` if unrelated pending migrations are not also approved.
+
+The migration deliberately leaves
+`subscriptions.automatic_billing_starts_at = NULL` on every pre-existing
+subscription. `NULL` disables recurring automation. Before enabling the cron,
+review each active paid monthly subscription and set an explicit baseline only
+after confirming the intended current billing period. Do not bulk-fill this
+column from historical `starts_at` values. Example for one reviewed subscription:
+
+```sql
+update public.subscriptions
+set automatic_billing_starts_at = current_date
+where id = '<reviewed-subscription-uuid>'
+  and status = 'active'
+  and automatic_billing_starts_at is null;
+```
+
+This is a production financial write and must be performed only through an
+authorized operator process. Verify the subscription, account, plan price, and
+date before committing it.
+
+### Render Cron Job
+
+| Field | Value |
+| --- | --- |
+| Suggested name | `tu-api-daily-charge-generation` |
+| Cron expression (UTC) | `0 12 * * *` |
+| Meaning | Daily at 12:00 UTC; the function, not the schedule, determines what is due |
+| HTTP | `POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges` |
+| Authentication | `x-cron-secret` from `CRON_SECRET` |
+
+Create a separate Render Cron Job using a small curl image, following the same
+Dashboard pattern as the Discord job:
+
+```bash
+curl -fsS -X POST \
+  'https://api.templeunderground.com/api/admin/billing/generate-monthly-charges' \
+  -H "x-cron-secret: ${CRON_SECRET}" \
+  -H 'Content-Type: application/json'
+```
+
+Set only `CRON_SECRET` on this cron service, with the same value configured on
+the API web service. Do not use `ADMIN_API_KEY`. `-fsS` makes a non-2xx response
+fail the cron run.
+
+Successful API logs contain `billing.generate_due_charges.succeeded` with
+`ran_at`, `created`, and `charge_ids`. Failures contain
+`billing.generate_due_charges.failed` with `ran_at` and a message. Render retains
+each run result and stdout/stderr. A zero-charge run is successful and returns
+`created: 0`. Suspend the cron job to disable automatic generation; manual
+admin-key invocation remains available.
 
 ## Discord notification cron (API-AUTO-002)
 
@@ -172,8 +252,7 @@ secret) when you want an extra ping without waiting for tomorrow’s digest.
 If a second scheduled ping is added later, pick a **different UTC hour** (for
 example weekdays `0 20 * * 1-5`) and accept duplicate list content, or change
 the digest handler to omit the member list (application change; out of scope
-here). Do **not** enable `API-AUTO-001` monthly-charge cron from this runbook —
-that endpoint is a different task and does not exist yet.
+here). The monthly-charge job is separate and is documented above.
 
 Handlers have **no** last-run / idempotency key. Render starts at most one
 overlapping run per cron service, but a Dashboard “Trigger Run” plus the

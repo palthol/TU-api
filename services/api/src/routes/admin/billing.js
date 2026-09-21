@@ -5,6 +5,8 @@
  * matches Discord notification auth (x-admin-key or x-cron-secret).
  */
 
+import { BillingService } from '../../services/billing/BillingService.js';
+
 const PAYMENT_METHODS = new Set(['cash', 'card', 'cashapp', 'venmo', 'paypal', 'zelle', 'other']);
 const RECORD_PAYMENT_CHARGE_ERRORS = new Set([
   'charge_not_found',
@@ -72,6 +74,8 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
+  const billingService = supabase ? new BillingService(supabase) : null;
+
   router.post('/billing/external-counterparty-accounts', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
@@ -289,13 +293,24 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'invalid_notes' });
       }
 
+      let shouldCreateInitialCharge;
+      try {
+        shouldCreateInitialCharge = await billingService.resolveInitialChargePreference(
+          plan_definition_id.trim(),
+          create_initial_charge,
+        );
+      } catch (error) {
+        console.error('create_subscription.plan_lookup', { message: error?.message || String(error) });
+        return res.status(400).json({ ok: false, error: error?.message || 'plan_lookup_failed' });
+      }
+
       const { data, error } = await supabase.rpc('create_subscription', {
         p_participant_id: participant_id.trim(),
         p_plan_definition_id: plan_definition_id.trim(),
         p_starts_at: starts_at || null,
         p_ends_at: ends_at || null,
         p_account_id: account_id || null,
-        p_create_initial_charge: create_initial_charge ?? false,
+        p_create_initial_charge: shouldCreateInitialCharge,
         p_notes: notes || null,
         p_created_by: typeof created_by === 'string' && created_by.trim() ? created_by.trim() : 'admin_api',
       });
@@ -313,6 +328,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         participant_id: result.participant_id ?? participant_id,
         plan_definition_id: result.plan_definition_id ?? plan_definition_id,
         initial_charge_id: result.initial_charge_id ?? null,
+        automatic_billing_starts_at: result.automatic_billing_starts_at ?? null,
       });
     } catch (e) {
       console.error(e);
@@ -917,36 +933,47 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   });
 }
 
-function createdChargeCount(data) {
-  return Array.isArray(data) ? data.length : 0;
-}
-
 /**
  * Cron-capable billing routes. Mount behind requireAdminOrCron (same as Discord
  * notification routes). Do not register these on the requireAdmin-only router
  * or x-cron-secret will be rejected.
  *
- * Duplicate charges for the same subscription period are skipped inside
- * generate_monthly_charges() (EXISTS on subscription_id + coverage_start where
- * status != 'void'; migration 0002). This handler does not insert charges.
+ * Duplicate charges for the same subscription period are prevented inside
+ * generate_monthly_charges() and by the unique non-void subscription-period
+ * index in migration 20260921185003. This handler does not insert charges.
  *
  * @param {import('express').Router} router
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient | null }} ctx
  */
 export function registerAdminBillingCronRoutes(router, { supabase }) {
+  const billingService = supabase ? new BillingService(supabase) : null;
+
   router.post('/billing/generate-monthly-charges', async (_req, res) => {
+    const ranAt = new Date().toISOString();
     try {
-      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const { data, error } = await supabase.rpc('generate_monthly_charges');
-      if (error) {
-        console.error('generate_monthly_charges', error);
-        return res.status(400).json({ ok: false, error: error.message });
-      }
-      const created = createdChargeCount(data);
-      console.log('generate_monthly_charges.created', created);
-      return res.json({ ok: true, created });
+      if (!billingService) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const charges = await billingService.generateDueCharges();
+      const chargeIds = charges.map((row) => row?.charge_id).filter(Boolean);
+      console.info('billing.generate_due_charges.succeeded', {
+        ran_at: ranAt,
+        created: charges.length,
+        charge_ids: chargeIds,
+      });
+      return res.json({
+        ok: true,
+        ran_at: ranAt,
+        created: charges.length,
+        charge_ids: chargeIds,
+        charges,
+      });
     } catch (e) {
-      console.error(e);
+      console.error('billing.generate_due_charges.failed', {
+        ran_at: ranAt,
+        message: e?.message || String(e),
+      });
+      if (!(e instanceof Error) && e && typeof e === 'object' && 'message' in e) {
+        return res.status(400).json({ ok: false, error: e.message });
+      }
       return res.status(500).json({ ok: false, error: 'server_error' });
     }
   });
