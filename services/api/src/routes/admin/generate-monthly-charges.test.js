@@ -20,6 +20,10 @@ const BILLING_AUTOMATION_MIGRATION = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../../supabase/migrations/20260921185003_complete_v1_subscription_charge_generation.sql',
 );
+const BILLING_UNIQUENESS_MIGRATION = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../supabase/migrations/20260921221500_scope_monthly_charge_uniqueness.sql',
+);
 
 function createApp(supabase) {
   const app = express();
@@ -188,5 +192,11 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
     expect(currentSql).toMatch(/create unique index if not exists uq_charges_subscription_coverage_nonvoid/);
     expect(currentSql).toMatch(/on conflict \(subscription_id, coverage_start\)/);
     expect(currentSql).toMatch(/pg_advisory_xact_lock/);
+
+    const scopedSql = readFileSync(BILLING_UNIQUENESS_MIGRATION, 'utf8');
+    expect(scopedSql).toMatch(/drop index if exists public\.uq_charges_subscription_coverage_nonvoid/);
+    expect(scopedSql).toMatch(/create unique index if not exists uq_charges_monthly_period_coverage_nonvoid/);
+    expect(scopedSql).toMatch(/charge_kind = 'monthly_period'/);
+    expect(scopedSql).toMatch(/automatic_billing_starts_at/);
   });
 });

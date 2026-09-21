@@ -225,8 +225,14 @@ For **monthly** subscriptions, charges can be generated in bulk:
 
 The function only creates charges for active, paid
 `billing_cadence = 'monthly'` subscriptions. A unique database invariant permits
-at most one non-void charge for a subscription and coverage start. A second run
-for the same period returns `created: 0`.
+at most one non-void `monthly_period` charge for a subscription and coverage
+start. Per-class charges and prorated upgrade deltas are separate charge kinds
+and may share that date. A second generator run for the same period returns
+`created: 0`.
+
+`upgrade_per_class_to_monthly` persists `automatic_billing_starts_at` on a paid
+monthly conversion. The anchor is the first day after the current period, so an
+optional skipped initial charge is not recreated and the next period is billed.
 
 Historical subscriptions are safe to bootstrap: when there is no prior charge
 or there is a historical gap, automation starts no earlier than the current run

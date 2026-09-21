@@ -3,7 +3,7 @@ begin;
 create schema if not exists extensions;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(30);
+select plan(50);
 
 insert into public.participants (id, full_name, date_of_birth, email)
 select
@@ -472,6 +472,16 @@ select is(
   0::bigint,
   'cancelled, paused, expired, ended, non-monthly, free, and unanchored subscriptions create no charges'
 );
+select is(
+  (
+    select charge_kind
+    from public.charges
+    where subscription_id = '40000000-0000-4000-8000-000000000001'
+      and coverage_start = date '2026-07-01'
+  ),
+  'monthly_period',
+  'generated recurring charges are classified as monthly period charges'
+);
 select throws_ok(
   $$
     insert into public.charges (
@@ -481,7 +491,8 @@ select throws_ok(
       coverage_start,
       coverage_end,
       due_at,
-      status
+      status,
+      charge_kind
     )
     values (
       '20000000-0000-4000-8000-000000000006',
@@ -490,12 +501,383 @@ select throws_ok(
       date '2026-07-01',
       date '2026-07-31',
       date '2026-07-01',
-      'open'
+      'open',
+      'monthly_period'
     )
   $$,
   '23505',
   null,
-  'database invariant rejects a duplicate non-void subscription coverage period'
+  'database invariant rejects a duplicate non-void monthly period'
+);
+select lives_ok(
+  $$
+    insert into public.charges (
+      account_id,
+      subscription_id,
+      amount_cents,
+      coverage_start,
+      coverage_end,
+      due_at,
+      status,
+      charge_kind
+    )
+    values (
+      '20000000-0000-4000-8000-000000000006',
+      '40000000-0000-4000-8000-000000000001',
+      2500,
+      date '2026-07-01',
+      date '2026-07-01',
+      date '2026-07-01',
+      'open',
+      'per_class'
+    )
+  $$,
+  'a per-class charge may share a coverage start with a monthly period charge'
+);
+
+insert into public.participants (id, full_name, date_of_birth, email)
+select
+  format('10000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
+  format('[BILLING TEST] Participant %s', n),
+  date '1990-01-01',
+  format('billing-test-%s@tu-test.invalid', n)
+from generate_series(14, 17) n;
+
+insert into public.accounts (id, status, primary_contact_name)
+select
+  format('20000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
+  'active',
+  format('[BILLING TEST] Account %s', n)
+from generate_series(14, 17) n;
+
+insert into public.account_members (account_id, participant_id, role)
+select
+  format('20000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
+  format('10000000-0000-4000-8000-%s', lpad(n::text, 12, '0'))::uuid,
+  'member'
+from generate_series(14, 17) n;
+
+insert into public.plan_definitions (
+  id,
+  name,
+  description,
+  plan_category,
+  billing_cadence,
+  price_cents,
+  currency,
+  is_active
+)
+values (
+  '30000000-0000-4000-8000-000000000002',
+  '[BILLING TEST] Drop-in Class',
+  'Per-session plan used to prove same-day attendance charges are allowed.',
+  'group',
+  'per_session',
+  2500,
+  'USD',
+  true
+);
+
+select public.create_subscription(
+  '10000000-0000-4000-8000-000000000014',
+  '30000000-0000-4000-8000-000000000002',
+  current_date,
+  null,
+  '20000000-0000-4000-8000-000000000014',
+  false,
+  'drop-in enrollment',
+  'pgtap'
+);
+
+insert into public.sessions (id, starts_at, ends_at, session_label)
+values
+  (
+    '50000000-0000-4000-8000-000000000001',
+    current_date + time '09:00',
+    current_date + time '10:00',
+    'morning drop-in'
+  ),
+  (
+    '50000000-0000-4000-8000-000000000002',
+    current_date + time '18:00',
+    current_date + time '19:00',
+    'evening drop-in'
+  );
+
+insert into public.attendance_records (id, session_id, participant_id, status, recorded_by)
+values
+  (
+    '60000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000014',
+    'present',
+    'pgtap'
+  ),
+  (
+    '60000000-0000-4000-8000-000000000002',
+    '50000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000014',
+    'present',
+    'pgtap'
+  );
+
+select public.create_pay_per_class_charge(
+  '60000000-0000-4000-8000-000000000001',
+  null,
+  null,
+  'pgtap'
+);
+select public.create_pay_per_class_charge(
+  '60000000-0000-4000-8000-000000000002',
+  null,
+  null,
+  'pgtap'
+);
+
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (
+      select id
+      from public.subscriptions
+      where participant_id = '10000000-0000-4000-8000-000000000014'
+        and status = 'active'
+    )
+      and charge_kind = 'per_class'
+  ),
+  2::bigint,
+  'two same-day per-class attendance charges are both stored'
+);
+select is(
+  (
+    select count(distinct coverage_start)
+    from public.charges
+    where subscription_id = (
+      select id
+      from public.subscriptions
+      where participant_id = '10000000-0000-4000-8000-000000000014'
+        and status = 'active'
+    )
+      and charge_kind = 'per_class'
+  ),
+  1::bigint,
+  'same-day per-class charges share one coverage start'
+);
+
+update public.subscriptions
+set status = 'paused'
+where status = 'active';
+
+select public.create_subscription(
+  '10000000-0000-4000-8000-000000000015',
+  '30000000-0000-4000-8000-000000000002',
+  current_date,
+  null,
+  '20000000-0000-4000-8000-000000000015',
+  false,
+  'convert with initial charge',
+  'pgtap'
+);
+select public.create_subscription(
+  '10000000-0000-4000-8000-000000000016',
+  '30000000-0000-4000-8000-000000000002',
+  current_date,
+  null,
+  '20000000-0000-4000-8000-000000000016',
+  false,
+  'convert without initial charge',
+  'pgtap'
+);
+
+create temp table conversion_with_charge as
+select *
+from public.upgrade_per_class_to_monthly(
+  '10000000-0000-4000-8000-000000000015',
+  (select id from public.plan_definitions where name = 'Basic Group Plan'),
+  current_date,
+  true,
+  'billing follow-up',
+  'no_credit'
+);
+
+create temp table conversion_without_charge as
+select *
+from public.upgrade_per_class_to_monthly(
+  '10000000-0000-4000-8000-000000000016',
+  (select id from public.plan_definitions where name = 'Basic Group Plan'),
+  current_date,
+  false,
+  'billing follow-up',
+  'no_credit'
+);
+
+select is(
+  (
+    select count(*)
+    from public.subscriptions
+    where id in (
+      (select new_subscription_id from conversion_with_charge),
+      (select new_subscription_id from conversion_without_charge)
+    )
+      and automatic_billing_starts_at = (
+        date_trunc('month', current_date::timestamp) + interval '1 month'
+      )::date
+  ),
+  2::bigint,
+  'paid per-class conversions persist the next-period billing anchor'
+);
+select is(
+  (select initial_charge_id is not null from conversion_with_charge),
+  true,
+  'conversion with an initial charge returns that charge id'
+);
+select is(
+  (select initial_charge_id is null from conversion_without_charge),
+  true,
+  'conversion can skip the current-period charge'
+);
+select is(
+  (
+    select charge_kind
+    from public.charges
+    where id = (select initial_charge_id from conversion_with_charge)
+  ),
+  'monthly_period',
+  'conversion initial charge is a monthly period charge'
+);
+
+create temp table conversion_same_period as
+select *
+from private.generate_monthly_charges_as_of(current_date);
+select is(
+  (select count(*) from conversion_same_period),
+  0::bigint,
+  'converted subscriptions are not charged again during the current period'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select new_subscription_id from conversion_with_charge)
+  ),
+  1::bigint,
+  'conversion initial charge is not duplicated by the same-period generator'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select new_subscription_id from conversion_without_charge)
+  ),
+  0::bigint,
+  'skipped conversion charge stays unbilled during the current period'
+);
+
+create temp table conversion_next_period as
+select *
+from private.generate_monthly_charges_as_of(
+  (date_trunc('month', current_date::timestamp) + interval '1 month')::date
+);
+select is(
+  (select count(*) from conversion_next_period),
+  2::bigint,
+  'each converted subscription receives one charge in the next period'
+);
+select is(
+  (
+    select count(*)
+    from conversion_next_period
+    where coverage_start = (
+      date_trunc('month', current_date::timestamp) + interval '1 month'
+    )::date
+  ),
+  2::bigint,
+  'converted recurring charges start at the persisted anchor'
+);
+
+create temp table conversion_next_period_repeat as
+select *
+from private.generate_monthly_charges_as_of(
+  (date_trunc('month', current_date::timestamp) + interval '1 month')::date
+);
+select is(
+  (select count(*) from conversion_next_period_repeat),
+  0::bigint,
+  'converted subscriptions do not receive a second charge for that period'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select new_subscription_id from conversion_with_charge)
+  ),
+  2::bigint,
+  'converted subscription with an initial charge gains exactly one later recurring charge'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select new_subscription_id from conversion_without_charge)
+  ),
+  1::bigint,
+  'converted subscription without an initial charge gains exactly one recurring charge'
+);
+
+update public.subscriptions
+set status = 'paused'
+where status = 'active';
+
+create temp table proration_subscription as
+select public.create_subscription(
+  '10000000-0000-4000-8000-000000000017',
+  (select id from public.plan_definitions where name = 'Basic Group Plan'),
+  current_date,
+  null,
+  '20000000-0000-4000-8000-000000000017',
+  true,
+  'proration coexistence',
+  'pgtap'
+) as result;
+
+select lives_ok(
+  'select public.upgrade_subscription_prorated('
+    || quote_literal((select result->>'subscription_id' from proration_subscription))
+    || ', '
+    || quote_literal((select id::text from public.plan_definitions where name = 'Core Group Plan'))
+    || ', current_date)',
+  'prorated upgrade on the existing monthly coverage start is allowed'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select (result->>'subscription_id')::uuid from proration_subscription)
+  ),
+  2::bigint,
+  'prorated upgrade adds a second charge on the current coverage start'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select (result->>'subscription_id')::uuid from proration_subscription)
+      and charge_kind = 'monthly_period'
+  ),
+  1::bigint,
+  'the original monthly charge remains beside the proration'
+);
+select is(
+  (
+    select count(*)
+    from public.charges
+    where subscription_id = (select (result->>'subscription_id')::uuid from proration_subscription)
+      and charge_kind = 'proration'
+      and coverage_start = current_date
+  ),
+  1::bigint,
+  'the prorated delta is stored as its own charge kind'
 );
 
 select * from finish();

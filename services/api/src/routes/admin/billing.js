@@ -437,6 +437,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         old_subscription_id: row?.old_subscription_id || null,
         new_subscription_id: row?.new_subscription_id || null,
         initial_charge_id: row?.initial_charge_id || null,
+        automatic_billing_starts_at: row?.automatic_billing_starts_at || null,
       });
     } catch (e) {
       console.error(e);

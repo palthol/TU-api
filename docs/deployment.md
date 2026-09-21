@@ -127,11 +127,19 @@ group by subscription_id, coverage_start
 having count(*) > 1;
 ```
 
-The result must be empty. If it is not, stop and reconcile those financial rows
-manually; do not delete or merge charges automatically. The migration adds the
-unique invariant only after this condition is true. Apply the migration through
-the normal reviewed Supabase migration process. Do not run an unrestricted
-`supabase db push` if unrelated pending migrations are not also approved.
+The result must be empty before `20260921185003` creates its temporary broad
+unique index. If it is not, stop and reconcile those financial rows manually;
+do not delete or merge charges automatically. Apply
+`20260921221500_scope_monthly_charge_uniqueness.sql` in the same reviewed push,
+before enabling the cron and before recording per-class or proration charges.
+That follow-up drops the broad index and enforces uniqueness only for non-void
+`charges.charge_kind = 'monthly_period'`. Same-day per-class charges and a
+prorated upgrade whose effective date matches an existing monthly coverage
+start stay valid. It also persists `automatic_billing_starts_at` when
+`upgrade_per_class_to_monthly` creates a paid monthly subscription. Do not
+enable the daily cron between the two migrations, and do not run an
+unrestricted `supabase db push` if unrelated pending migrations are not also
+approved.
 
 The migration deliberately leaves
 `subscriptions.automatic_billing_starts_at = NULL` on every pre-existing
