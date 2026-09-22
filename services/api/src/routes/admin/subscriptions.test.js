@@ -241,3 +241,69 @@ describe('POST /api/admin/billing/subscriptions', () => {
     expect(supabase.from).not.toHaveBeenCalled();
   });
 });
+
+describe('POST /api/admin/billing/per-class/upgrade-to-monthly', () => {
+  const OLD_SUBSCRIPTION_ID = '11111111-1111-4111-8111-111111111111';
+  const INITIAL_CHARGE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  let previousAdminKey;
+
+  beforeEach(() => {
+    previousAdminKey = process.env.ADMIN_API_KEY;
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
+  });
+
+  afterEach(() => {
+    if (previousAdminKey === undefined) delete process.env.ADMIN_API_KEY;
+    else process.env.ADMIN_API_KEY = previousAdminKey;
+  });
+
+  it('returns the persisted automatic billing anchor from the conversion RPC', async () => {
+    const supabase = {
+      from: vi.fn(() => {
+        throw new Error('upgrade-to-monthly must not query tables');
+      }),
+      rpc: vi.fn(async () => ({
+        data: [
+          {
+            old_subscription_id: OLD_SUBSCRIPTION_ID,
+            new_subscription_id: SUBSCRIPTION_ID,
+            initial_charge_id: INITIAL_CHARGE_ID,
+            automatic_billing_starts_at: '2026-10-01',
+          },
+        ],
+        error: null,
+      })),
+    };
+
+    const res = await auth(
+      request(createApp(supabase))
+        .post('/api/admin/billing/per-class/upgrade-to-monthly')
+        .send({
+          participant_id: PARTICIPANT_ID,
+          new_plan_definition_id: PLAN_ID,
+          effective_date: '2026-09-21',
+          create_initial_charge: true,
+          notes: 'convert',
+          conversion_policy: 'no_credit',
+        }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      ok: true,
+      old_subscription_id: OLD_SUBSCRIPTION_ID,
+      new_subscription_id: SUBSCRIPTION_ID,
+      initial_charge_id: INITIAL_CHARGE_ID,
+      automatic_billing_starts_at: '2026-10-01',
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith('upgrade_per_class_to_monthly', {
+      p_participant_id: PARTICIPANT_ID,
+      p_new_plan_definition_id: PLAN_ID,
+      p_effective_date: '2026-09-21',
+      p_create_initial_charge: true,
+      p_notes: 'convert',
+      p_conversion_policy: 'no_credit',
+    });
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+});

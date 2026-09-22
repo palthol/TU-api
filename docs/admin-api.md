@@ -418,9 +418,15 @@ and charge inserts remain visible in `event_ledger`.
 
 **Idempotency:** migration
 `20260921185003_complete_v1_subscription_charge_generation.sql` serializes
-generator runs and adds a unique partial index for non-void
-`subscription_id + coverage_start`. Re-runs create nothing, including
-overlapping invocations. `void` rows do not block a deliberate replacement.
+generator runs. Migration
+`20260921221500_scope_monthly_charge_uniqueness.sql` replaces that migration's
+broad unique index with one non-void `monthly_period` charge per
+`subscription_id + coverage_start`. Per-class attendance charges
+(`charge_kind = per_class`) and prorated upgrade deltas
+(`charge_kind = proration`) may share a coverage start. Direct inserts default
+to `charge_kind = manual` and are outside that unique index. Re-runs of monthly
+generation create nothing, including overlapping invocations. `void` rows do
+not block a deliberate replacement.
 
 **Historical safety:** the generator never creates a charge with
 `coverage_start` before its run date. If a historical subscription has no
@@ -484,6 +490,13 @@ Rules:
 
 Calls RPC `upgrade_per_class_to_monthly`: ends the active `per_session` subscription as of `effective_date`, creates a monthly subscription, and optionally creates an initial monthly charge.
 
+For a paid monthly target, the new subscription persists
+`automatic_billing_starts_at` as the first day after the current period whether
+or not the initial charge is created. The daily generator therefore does not
+recreate a skipped current period, and it does create the next period's charge.
+A free monthly target leaves the anchor null. The initial charge, when created,
+is `charge_kind = monthly_period`.
+
 Policy:
 - Explicit `conversion_policy` mode:
   - `no_credit` (default)
@@ -509,7 +522,8 @@ Policy:
   "ok": true,
   "old_subscription_id": "uuid",
   "new_subscription_id": "uuid",
-  "initial_charge_id": "uuid | null"
+  "initial_charge_id": "uuid | null",
+  "automatic_billing_starts_at": "YYYY-MM-DD | null"
 }
 ```
 
