@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+  "name": "tu-billing-cron",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-22",
+  "workers_dev": false,
+  "triggers": {
+    "crons": ["0 12 * * *"]
+  },
+  "vars": {
+    "API_BASE_URL": "https://api.templeunderground.com"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
