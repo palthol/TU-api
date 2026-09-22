@@ -24,10 +24,20 @@ function auth(req) {
   return req.set('x-admin-key', ADMIN_KEY);
 }
 
-function createSupabase({ rpcResult } = {}) {
+function createSupabase({
+  rpcResult,
+  plan = { billing_cadence: 'monthly', price_cents: 10000 },
+  planError = null,
+} = {}) {
   return {
-    from: vi.fn(() => {
-      throw new Error('subscriptions tests must not query tables');
+    from: vi.fn((table) => {
+      if (table !== 'plan_definitions') throw new Error(`unexpected table query: ${table}`);
+      const builder = {
+        select: vi.fn(() => builder),
+        eq: vi.fn(() => builder),
+        maybeSingle: vi.fn(async () => ({ data: plan, error: planError })),
+      };
+      return builder;
     }),
     rpc: vi.fn(async () => rpcResult ?? { data: null, error: null }),
   };
@@ -122,9 +132,60 @@ describe('POST /api/admin/billing/subscriptions', () => {
       expect.objectContaining({
         p_participant_id: PARTICIPANT_ID,
         p_plan_definition_id: PLAN_ID,
-        p_create_initial_charge: false,
+        p_create_initial_charge: true,
         p_created_by: 'admin_api',
       }),
+    );
+  });
+
+  it('defaults paid monthly enrollment to initial-charge generation', async () => {
+    const supabase = createSupabase({
+      rpcResult: {
+        data: {
+          subscription_id: SUBSCRIPTION_ID,
+          account_id: ACCOUNT_ID,
+          participant_id: PARTICIPANT_ID,
+          plan_definition_id: PLAN_ID,
+          initial_charge_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        },
+        error: null,
+      },
+    });
+
+    const res = await auth(request(createApp(supabase)).post('/api/admin/billing/subscriptions').send(validBody));
+
+    expect(res.status).toBe(200);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'create_subscription',
+      expect.objectContaining({ p_create_initial_charge: true }),
+    );
+  });
+
+  it.each([
+    [{ billing_cadence: 'monthly', price_cents: 0 }, false, 'free monthly'],
+    [{ billing_cadence: 'contract', price_cents: 13500 }, false, 'non-monthly'],
+  ])('does not default %s plans to an initial charge', async (plan, expected, _label) => {
+    const supabase = createSupabase({
+      plan,
+      rpcResult: {
+        data: {
+          subscription_id: SUBSCRIPTION_ID,
+          account_id: ACCOUNT_ID,
+          participant_id: PARTICIPANT_ID,
+          plan_definition_id: PLAN_ID,
+          initial_charge_id: null,
+          automatic_billing_starts_at: null,
+        },
+        error: null,
+      },
+    });
+
+    const res = await auth(request(createApp(supabase)).post('/api/admin/billing/subscriptions').send(validBody));
+
+    expect(res.status).toBe(200);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'create_subscription',
+      expect.objectContaining({ p_create_initial_charge: expected }),
     );
   });
 
@@ -137,6 +198,7 @@ describe('POST /api/admin/billing/subscriptions', () => {
           participant_id: PARTICIPANT_ID,
           plan_definition_id: PLAN_ID,
           initial_charge_id: null,
+          automatic_billing_starts_at: '2026-11-01',
         },
         error: null,
       },
@@ -147,8 +209,8 @@ describe('POST /api/admin/billing/subscriptions', () => {
         .post('/api/admin/billing/subscriptions')
         .send({
           ...validBody,
-          starts_at: '2026-06-01',
-          ends_at: '2026-09-01',
+          starts_at: '2026-10-01',
+          ends_at: '2026-12-01',
           account_id: ACCOUNT_ID,
           create_initial_charge: false,
           notes: 'trial',
@@ -164,16 +226,83 @@ describe('POST /api/admin/billing/subscriptions', () => {
       participant_id: PARTICIPANT_ID,
       plan_definition_id: PLAN_ID,
       initial_charge_id: null,
+      automatic_billing_starts_at: '2026-11-01',
     });
     expect(supabase.rpc).toHaveBeenCalledWith('create_subscription', {
       p_participant_id: PARTICIPANT_ID,
       p_plan_definition_id: PLAN_ID,
-      p_starts_at: '2026-06-01',
-      p_ends_at: '2026-09-01',
+      p_starts_at: '2026-10-01',
+      p_ends_at: '2026-12-01',
       p_account_id: ACCOUNT_ID,
       p_create_initial_charge: false,
       p_notes: 'trial',
       p_created_by: 'front-desk',
+    });
+    expect(supabase.from).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/admin/billing/per-class/upgrade-to-monthly', () => {
+  const OLD_SUBSCRIPTION_ID = '11111111-1111-4111-8111-111111111111';
+  const INITIAL_CHARGE_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  let previousAdminKey;
+
+  beforeEach(() => {
+    previousAdminKey = process.env.ADMIN_API_KEY;
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
+  });
+
+  afterEach(() => {
+    if (previousAdminKey === undefined) delete process.env.ADMIN_API_KEY;
+    else process.env.ADMIN_API_KEY = previousAdminKey;
+  });
+
+  it('returns the persisted automatic billing anchor from the conversion RPC', async () => {
+    const supabase = {
+      from: vi.fn(() => {
+        throw new Error('upgrade-to-monthly must not query tables');
+      }),
+      rpc: vi.fn(async () => ({
+        data: [
+          {
+            old_subscription_id: OLD_SUBSCRIPTION_ID,
+            new_subscription_id: SUBSCRIPTION_ID,
+            initial_charge_id: INITIAL_CHARGE_ID,
+            automatic_billing_starts_at: '2026-10-01',
+          },
+        ],
+        error: null,
+      })),
+    };
+
+    const res = await auth(
+      request(createApp(supabase))
+        .post('/api/admin/billing/per-class/upgrade-to-monthly')
+        .send({
+          participant_id: PARTICIPANT_ID,
+          new_plan_definition_id: PLAN_ID,
+          effective_date: '2026-09-21',
+          create_initial_charge: true,
+          notes: 'convert',
+          conversion_policy: 'no_credit',
+        }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      ok: true,
+      old_subscription_id: OLD_SUBSCRIPTION_ID,
+      new_subscription_id: SUBSCRIPTION_ID,
+      initial_charge_id: INITIAL_CHARGE_ID,
+      automatic_billing_starts_at: '2026-10-01',
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith('upgrade_per_class_to_monthly', {
+      p_participant_id: PARTICIPANT_ID,
+      p_new_plan_definition_id: PLAN_ID,
+      p_effective_date: '2026-09-21',
+      p_create_initial_charge: true,
+      p_notes: 'convert',
+      p_conversion_policy: 'no_credit',
     });
     expect(supabase.from).not.toHaveBeenCalled();
   });
