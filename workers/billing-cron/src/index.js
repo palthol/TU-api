@@ -51,12 +51,9 @@ export default {
     );
   },
 
-  async fetch(_request, env) {
+  async fetch() {
     // This worker is schedule-only. A manual HTTP request is never allowed to
     // create charges; use the protected API endpoint from an operator machine.
-    if (env.HEALTHCHECK_TOKEN) {
-      return new Response('Not found', { status: 404 });
-    }
     return new Response('Not found', { status: 404 });
   },
 };
