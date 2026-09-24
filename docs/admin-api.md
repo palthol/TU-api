@@ -47,7 +47,7 @@ Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext re
 
 Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
 
-Until migration `20260914185843_staff_rbac.sql` is applied, only the shared `ADMIN_API_KEY` authenticates.
+Migration `20260914185843_staff_rbac.sql` is applied in production (verified 2026-09-24). Personal staff keys and the shared `ADMIN_API_KEY` compatibility actor are therefore schema-supported.
 
 ### `GET /api/admin/auth/me`
 
@@ -187,7 +187,7 @@ Unmatched (missing account/charge metadata) fails closed: `400` `unmatched_payme
 | 500 | `stripe_webhook_not_configured`, `supabase_not_configured` |
 | 503 | `record_payment_unavailable` |
 
-Live Stripe webhook registration and production `supabase db push` are **not** part of API-PAY-001. Migrations `20260916174649` (RPC) and the processor-ref migration must be applied before this route can book production payments.
+Live Stripe webhook registration remains an operator deployment step. Migrations `20260916174649` (RPC) and `20260916225225` (processor references) are applied in production as of 2026-09-24.
 
 ---
 
@@ -372,9 +372,7 @@ For every paid monthly subscription,
 `automatic_billing_starts_at` is persisted as the first day after the current
 billing period. `create_initial_charge: false` therefore suppresses the entire
 current period: daily generation cannot recreate that charge, but recurring
-billing begins in the next period. Existing subscriptions receive `NULL` when
-migration `20260921185003` is applied and remain excluded from automation until
-an operator establishes an approved current baseline.
+billing begins in the next period. Migration `20260921185003` is applied in production. Pre-existing subscriptions were left with `NULL` and remain excluded from automation until an operator establishes an approved current baseline.
 
 **Errors:** `400` — participant/plan not found, inactive plan, no account binding, explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure, or date validation failure (Postgres exception message in `error`).
 
@@ -436,8 +434,7 @@ than the current run date and covers only the remainder of that month. It does
 not reconstruct undocumented past debt. A `NULL` automation date is a fail-safe
 disabled state.
 
-The supported daily scheduler is the existing Render Cron architecture; see
-`docs/deployment.md`. No Supabase Cron/`pg_cron` job exists in this repository.
+The selected daily billing scheduler is a Cloudflare Worker; it is not yet implemented/deployed. See `docs/deployment.md`. No Supabase Cron/`pg_cron` job exists in this repository. Automatic billing should remain disabled until the known calendar-month coverage bug is replaced with anchored billing-period logic.
 
 **Errors:** `401` `unauthorized`; `403` `forbidden`; `400` — RPC/Postgres message in `error`; `500` `supabase_not_configured` / `server_error`.
 
@@ -533,7 +530,7 @@ Policy:
 
 Calls RPC `record_payment`: inserts a **succeeded** `payments` row, **`payment_allocations`** to one or more charges (same `account_id`), and optionally a **`money_in`** receipt in **one transaction**. Marks each charge **`paid`** when total allocations for that charge reach **net due** (`view_charge_net`). Allocation amounts are integer cents and must not exceed remaining headroom (`net_due_cents` minus existing allocations).
 
-Until migration `20260916174649` is applied, the API falls back to the previous sequential inserts so live record-payment still works. That fallback is **not** atomic and ignores `idempotency_key`. Public Stripe webhooks **do not** use this fallback (API-ADR-006).
+Migration `20260916174649` is applied in production as of 2026-09-24, so production `record-payment` can use the transactional/idempotent RPC. The legacy sequential fallback remains code compatibility for databases missing the RPC; public Stripe webhooks never use that fallback (API-ADR-006).
 
 **Body (JSON):**
 
