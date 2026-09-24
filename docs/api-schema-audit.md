@@ -1,6 +1,7 @@
 # API ↔ Supabase schema audit (live verification)
 
-**Date:** 2026-09-14 (history filenames reconciled; live `list_migrations` last confirmed 2026-09-03; original audit 2026-05-29)
+**Historical audit date:** 2026-09-14 (original audit 2026-05-29)  
+**Current migration-status refresh:** 2026-09-24
 
 **Product map:** [api-capability-audit.md](./api-capability-audit.md) (notifications, finance, scheduling).  
 **Project:** Temple Underground — Supabase `jhxzecxkccqlgyazhsnb` (production, live traffic)
@@ -11,6 +12,8 @@ columns, check constraints) cross-checked against every route in
 
 > This is the authoritative API repo. The `admin/` repo's `services/api` scaffold was
 > retired in favor of this service — do not re-introduce a second backend.
+>
+> **Status note (2026-09-24):** migration-state statements below are historical evidence from the audit date. Production now has all repository migrations through `20260921221500` applied. Use `current-state.md` for current operational status.
 
 ---
 
@@ -23,9 +26,7 @@ types, and check-constraint vocabularies.
 All expected schema changes are present in production. `list_migrations` (2026-09-03)
 returns `0001`–`0020` plus `20260608191715_marketing_leads_first_last_name`. The repo
 file is now `20260608191715_marketing_leads_first_last_name.sql` so the version id
-matches live history. A later `db push` will not re-apply that SQL. Pending
-in-repo migrations (`20260914150818`, `20260914185843`, `20260914202053`) sort
-after the live version and remain unapplied.
+matches live history. A later `db push` will not re-apply that SQL. Those migrations were pending at the time of the audit; production verification on 2026-09-24 confirms they and the later migrations through `20260921221500` are now applied.
 
 Remaining work is **operational smoke-testing** (finance, scheduling, subscriptions) and
 **engineering hardening** (non-transactional write paths — see §3).
