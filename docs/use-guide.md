@@ -78,11 +78,12 @@ Or run the SQL files in **version order** (`0001` through `0020`, then
 `20260608191715`, then any later timestamped files) in the Supabase Dashboard →
 SQL Editor. Prefer `npm run supabase:push` when the CLI project is linked.
 
-Applied live history (last `list_migrations` 2026-09-03): `0001`–`0020` plus
-`20260608191715_marketing_leads_first_last_name`. Repo filenames now use that
-same version id. Pending in-repo only: `20260914150818`, `20260914185843`,
-`20260914202053`. Do not push those until a task authorizes production schema
-writes. See [api-schema-audit.md](./api-schema-audit.md).
+Applied live history (verified with production `list_migrations` 2026-09-24):
+`0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`,
+`20260914202053`, `20260916174649`, `20260916225225`,
+`20260921185003`, and `20260921221500`. There are no known repository
+migrations from this set still pending production application. See
+[api-schema-audit.md](./api-schema-audit.md) for the historical audit context.
 
 What the numbered files do:
 
@@ -97,9 +98,13 @@ What the numbered files do:
 - **0014**–**0019** — Receipts, marketing leads, expenses, personal finance, discounts
 - **0020** — `create_subscription` RPC, `sessions.cancelled_at`
 - **20260608191715** — `marketing_leads` first/last name columns (formerly `0021`; matches live history)
-- **20260914150818** — `waivers.idempotency_key` (formerly `0022`; in-repo, unapplied)
-- **20260914185843** — `staff_users` / staff audit (formerly `0023`; in-repo, unapplied)
-- **20260914202053** — `generate_sessions` RPC (formerly `0024`; in-repo, unapplied)
+- **20260914150818** — `waivers.idempotency_key` (formerly `0022`; applied)
+- **20260914185843** — `staff_users` / staff audit (formerly `0023`; applied)
+- **20260914202053** — `generate_sessions` RPC (formerly `0024`; applied)
+- **20260916174649** — atomic/idempotent `record_payment` RPC (applied)
+- **20260916225225** — payment processor reference fields (applied)
+- **20260921185003** — V1 subscription charge-generation safety and `automatic_billing_starts_at` (applied)
+- **20260921221500** — monthly-period uniqueness scope and per-class conversion billing baseline (applied)
 
 ### 2.4 Make yourself admin
 
@@ -211,7 +216,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 
 ### 5.1 Adding or changing the database
 
-- Add a **new migration** with `npx supabase migration new <name>` so the version sorts after `20260914202053`. Do not edit, reorder, or reuse `0001`–`0020` / `20260608191715` / the three pending timestamped files.
+- Add a **new migration** with `npx supabase migration new <name>` so the version sorts after `20260921221500`. Do not edit, reorder, or reuse already-applied migration history.
 - Apply: `npx supabase db push` or run the new file in SQL Editor.
 
 ### 5.2 Monthly charge generation
@@ -241,10 +246,11 @@ date and does not generate prior months. Existing subscriptions have a `NULL`
 reviews each one and explicitly establishes its current baseline. Never bulk
 derive that value from historical `starts_at`.
 
-The repository has no Supabase Cron/`pg_cron` job. Configure the separate daily
-Render Cron Job only after applying the reviewed billing migration and running
+The repository has no Supabase Cron/`pg_cron` job. The selected billing scheduler is a
+Cloudflare Worker, which is not yet implemented/deployed. Do not enable automatic
+billing until the billing-anchor correction is deployed. After that, configure the Worker and run
 its duplicate-charge preflight. Full setup and observability:
-[deployment.md](./deployment.md#daily-monthly-charge-cron). Do not point the
+[deployment.md](./deployment.md#daily-monthly-charge-scheduler). Do not point the
 Discord digest cron at the billing URL.
 
 ### 5.3 RLS and roles
@@ -314,8 +320,8 @@ x-admin-key: <ADMIN_API_KEY>
 
 or `x-cron-secret` when `CRON_SECRET` is set. The response includes `ran_at`,
 `created`, `charge_ids`, and the generated `charges`. Follow
-[deployment.md](./deployment.md#daily-monthly-charge-cron) to enable the
-separate daily production scheduler.
+[deployment.md](./deployment.md#daily-monthly-charge-scheduler) for the selected
+Cloudflare Worker scheduler and its current deployment gate.
 
 SQL fallback:
 

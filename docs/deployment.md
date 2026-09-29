@@ -96,7 +96,7 @@ Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 | Production DB | Supabase project `jhxzecxkccqlgyazhsnb` |
 | API runtime host | Render service behind `api.templeunderground.com` |
 | Discord digest cron | Render **Cron Job** (Dashboard; not in this repo). Runbook below. |
-| Monthly-charge cron | Render **Cron Job** (Dashboard; not in this repo). Daily billing runbook below. |
+| Monthly-charge scheduler | **Cloudflare Worker** (selected architecture; not yet implemented/deployed). Daily billing runbook below. |
 | Waiver UI | Sibling `TU-Signup` (`VITE_API_BASE_URL` → production API) |
 | Admin / receipts / waiver-viewer UIs | Sibling `admin` repo |
 | Marketing site | Sibling marketing repos |
@@ -104,92 +104,45 @@ Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 Front-end apps should point at `https://api.templeunderground.com` (no trailing slash)
 for production API calls.
 
-## Daily monthly-charge cron
+## Daily monthly-charge scheduler
 
-The repository has no Supabase Cron or `pg_cron` configuration. V1 therefore
-uses the same controlled Render Cron → protected API pattern as notifications.
-The job runs **daily**; PostgreSQL decides which subscription period is due.
-Production scheduling and migration application remain operator actions and
-were not performed by the implementing agent.
+The repository has no Supabase Cron or `pg_cron` configuration. The selected
+production scheduler for monthly billing is a **Cloudflare Worker** that will
+invoke the protected billing endpoint daily. The Express API itself remains
+hosted on Render. This billing-worker decision does **not** change the separate
+Discord notification cron runbook below.
 
-### Database migration preflight
+**Current status (verified 2026-09-24):**
 
-Before applying
-`20260921185003_complete_v1_subscription_charge_generation.sql`, run this
-read-only query against the target database:
+- Production Supabase has migrations
+  `20260921185003_complete_v1_subscription_charge_generation` and
+  `20260921221500_scope_monthly_charge_uniqueness` applied.
+- No Cloudflare billing Worker implementation exists in this repository yet.
+- Automatic billing must remain disabled while billing-anchor and recurring
+  discount semantics are being corrected. The current generator ends coverage
+  at the calendar-month boundary, which is wrong for members billed on dates
+  such as the 26th or 29th.
+- Existing/backfilled subscriptions should therefore keep
+  `automatic_billing_starts_at = NULL` until the corrected generator is
+  deployed and each subscription's billing baseline has been reviewed.
 
-```sql
-select subscription_id, coverage_start, count(*) as nonvoid_charge_count
-from public.charges
-where subscription_id is not null
-  and status <> 'void'
-group by subscription_id, coverage_start
-having count(*) > 1;
-```
+### Intended Worker contract
 
-The result must be empty before `20260921185003` creates its temporary broad
-unique index. If it is not, stop and reconcile those financial rows manually;
-do not delete or merge charges automatically. Apply
-`20260921221500_scope_monthly_charge_uniqueness.sql` in the same reviewed push,
-before enabling the cron and before recording per-class or proration charges.
-That follow-up drops the broad index and enforces uniqueness only for non-void
-`charges.charge_kind = 'monthly_period'`. Same-day per-class charges and a
-prorated upgrade whose effective date matches an existing monthly coverage
-start stay valid. It also persists `automatic_billing_starts_at` when
-`upgrade_per_class_to_monthly` creates a paid monthly subscription. Do not
-enable the daily cron between the two migrations, and do not run an
-unrestricted `supabase db push` if unrelated pending migrations are not also
-approved.
+The Worker should run once daily and call:
 
-The migration deliberately leaves
-`subscriptions.automatic_billing_starts_at = NULL` on every pre-existing
-subscription. `NULL` disables recurring automation. Before enabling the cron,
-review each active paid monthly subscription and set an explicit baseline only
-after confirming the intended current billing period. Do not bulk-fill this
-column from historical `starts_at` values. Example for one reviewed subscription:
+`POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges`
 
-```sql
-update public.subscriptions
-set automatic_billing_starts_at = current_date
-where id = '<reviewed-subscription-uuid>'
-  and status = 'active'
-  and automatic_billing_starts_at is null;
-```
+Authentication remains `x-cron-secret` using the same `CRON_SECRET` configured
+on the API. Do not place `ADMIN_API_KEY` in the Worker.
 
-This is a production financial write and must be performed only through an
-authorized operator process. Verify the subscription, account, plan price, and
-date before committing it.
+A zero-charge response (`created: 0`) is a successful run. The database RPC
+remains responsible for idempotency and deciding which subscriptions are due;
+the Worker is only the scheduler/HTTP caller.
 
-### Render Cron Job
-
-| Field | Value |
-| --- | --- |
-| Suggested name | `tu-api-daily-charge-generation` |
-| Cron expression (UTC) | `0 12 * * *` |
-| Meaning | Daily at 12:00 UTC; the function, not the schedule, determines what is due |
-| HTTP | `POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges` |
-| Authentication | `x-cron-secret` from `CRON_SECRET` |
-
-Create a separate Render Cron Job using a small curl image, following the same
-Dashboard pattern as the Discord job:
-
-```bash
-curl -fsS -X POST \
-  'https://api.templeunderground.com/api/admin/billing/generate-monthly-charges' \
-  -H "x-cron-secret: ${CRON_SECRET}" \
-  -H 'Content-Type: application/json'
-```
-
-Set only `CRON_SECRET` on this cron service, with the same value configured on
-the API web service. Do not use `ADMIN_API_KEY`. `-fsS` makes a non-2xx response
-fail the cron run.
-
-Successful API logs contain `billing.generate_due_charges.succeeded` with
-`ran_at`, `created`, and `charge_ids`. Failures contain
-`billing.generate_due_charges.failed` with `ran_at` and a message. Render retains
-each run result and stdout/stderr. A zero-charge run is successful and returns
-`created: 0`. Suspend the cron job to disable automatic generation; manual
-admin-key invocation remains available.
+Do **not** deploy or enable this Worker until the billing-anchor fix is merged,
+deployed, and validated against production schema. After that change, update
+this section with the Worker project/location, schedule, deployment procedure,
+and disable/rollback procedure.
 
 ## Discord notification cron (API-AUTO-002)
 

@@ -24,7 +24,7 @@ Summary of what the current schema and migrations provide, and optional next ste
 Create participant and waiver (and related rows); query `view_waiver_documents` for PDF/reporting. RLS: admin-only.
 - **Billing**  
   - Create accounts, plans, subscriptions; create charges and payments manually or via your app.  
-  - **Monthly charge generation:** run `generate_monthly_charges()` manually or through the protected API. It only creates charges for active paid monthly plans with a non-null `subscriptions.automatic_billing_starts_at`. Migration `20260921185003` serializes generator runs. Migration `20260921221500` limits the unique coverage invariant to non-void `charge_kind = monthly_period` rows, so per-class and proration charges may share a coverage start, and it anchors paid per-class-to-monthly conversions for later recurring charges. Existing subscriptions remain unanchored/disabled until operator review; historical gaps rebase to the run date rather than manufacturing past debt. It does **not** run by itself; the supported daily Render Cron setup is in `deployment.md`.
+  - **Monthly charge generation:** run `generate_monthly_charges()` manually or through the protected API. It only creates charges for active paid monthly plans with a non-null `subscriptions.automatic_billing_starts_at`. Migration `20260921185003` serializes generator runs. Migration `20260921221500` limits the unique coverage invariant to non-void `charge_kind = monthly_period` rows, so per-class and proration charges may share a coverage start, and it anchors paid per-class-to-monthly conversions for later recurring charges. Existing subscriptions remain unanchored/disabled until operator review; historical gaps rebase to the run date rather than manufacturing past debt. It does **not** run by itself. The selected production scheduler is a Cloudflare Worker, not Render Cron; it is not yet implemented/deployed. See `deployment.md`. The current generator is also calendar-month based and must not be enabled for anchored billing dates until the billing-anchor fix lands.
 - **Entitlements**  
   - **View:** `participant_entitlement_status` — per participant, per entitlement: usage (sessions or minutes), credits, `has_availability`, `remaining`. Respects `reset_rule` (e.g. calendar week) and active `access_overrides`.  
   - **Helper:** `can_attend_group_session(participant_id, session_label)` — returns true if the participant has an active override or a group-session entitlement with availability (optional session label filter).
@@ -35,7 +35,7 @@ Create participant and waiver (and related rows); query `view_waiver_documents` 
 
 ### 1.3 What the DB does *not* do by itself
 
-- **Charge generation** — Only when you call `generate_monthly_charges()`. No Supabase Cron/`pg_cron` job is configured in the DB; use the documented protected daily Render Cron call.
+- **Charge generation** — Only when you call `generate_monthly_charges()`. No Supabase Cron/`pg_cron` job is configured in the DB. A Cloudflare Worker is the selected external scheduler but is not yet implemented/deployed. Keep automatic billing disabled until the billing-anchor correction is deployed.
 - **Per-session / other cadences** — No built-in logic to create charges for `per_session`, `contract`, or `custom`; you’d add that in app code or new functions.  
 - **Payment processing** — No Stripe/payment-provider integration; `payments` and `payment_allocations` are manual (or your app fills them).  
 - **Public waiver submission** — Waiver tables stay admin-only at the RLS layer. Participants submit through `POST /api/waivers/submit`, which uses the API’s **service role**. Do not add anonymous RLS write policies unless that is an explicit product change.  
@@ -45,7 +45,7 @@ Create participant and waiver (and related rows); query `view_waiver_documents` 
 
 ## 2. Indexes and performance (current + one extra)
 
-Already in place (migrations `0001`–`0020` plus `20260608191715`):
+Already in place in production (verified 2026-09-24: `0001`–`0020` plus all timestamped migrations through `20260921221500`):
 
 - Core FKs and common filters: participants (email, full_name); waivers (participant_id, signed_at_utc); audit_trails (participant_id, waiver_id + created_at); emergency_contacts, waiver_medical_histories; accounts (status); subscriptions, charges, payments, payment_allocations, sessions, attendance_records, private_usage, access_overrides, entitlement_credits; plan_entitlements (plan_definition_id).
 - Billing: non-unique partial index on `charges(subscription_id, coverage_start)` where `status != 'void'`, plus unique index `uq_charges_monthly_period_coverage_nonvoid` for non-void `charge_kind = monthly_period` rows (`20260921221500`).
