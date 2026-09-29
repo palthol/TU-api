@@ -247,8 +247,8 @@ reviews each one and explicitly establishes its current baseline. Never bulk
 derive that value from historical `starts_at`.
 
 The repository has no Supabase Cron/`pg_cron` job. The selected billing scheduler is a
-Cloudflare Worker, which is not yet implemented/deployed. Do not enable automatic
-billing until the billing-anchor correction is deployed. After that, configure the Worker and run
+Cloudflare Worker at `workers/billing-cron/`, which is implemented but not deployed/configured. Do not enable automatic
+billing until the billing-anchor correction is deployed. After that, configure and deploy the Worker, then run
 its duplicate-charge preflight. Full setup and observability:
 [deployment.md](./deployment.md#daily-monthly-charge-scheduler). Do not point the
 Discord digest cron at the billing URL.

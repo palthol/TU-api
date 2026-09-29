@@ -96,7 +96,7 @@ Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 | Production DB | Supabase project `jhxzecxkccqlgyazhsnb` |
 | API runtime host | Render service behind `api.templeunderground.com` |
 | Discord digest cron | Render **Cron Job** (Dashboard; not in this repo). Runbook below. |
-| Monthly-charge scheduler | **Cloudflare Worker** (selected architecture; not yet implemented/deployed). Daily billing runbook below. |
+| Monthly-charge scheduler | Cloudflare Worker source at [`workers/billing-cron/`](../workers/billing-cron/); not deployed/configured. Daily billing runbook below. |
 | Waiver UI | Sibling `TU-Signup` (`VITE_API_BASE_URL` → production API) |
 | Admin / receipts / waiver-viewer UIs | Sibling `admin` repo |
 | Marketing site | Sibling marketing repos |
@@ -117,7 +117,7 @@ Discord notification cron runbook below.
 - Production Supabase has migrations
   `20260921185003_complete_v1_subscription_charge_generation` and
   `20260921221500_scope_monthly_charge_uniqueness` applied.
-- No Cloudflare billing Worker implementation exists in this repository yet.
+- Cloudflare Worker source was added at `workers/billing-cron/` after this production audit; it is not deployed or configured.
 - Automatic billing must remain disabled while billing-anchor and recurring
   discount semantics are being corrected. The current generator ends coverage
   at the calendar-month boundary, which is wrong for members billed on dates
@@ -126,23 +126,27 @@ Discord notification cron runbook below.
   `automatic_billing_starts_at = NULL` until the corrected generator is
   deployed and each subscription's billing baseline has been reviewed.
 
-### Intended Worker contract
+### Cloudflare Worker
 
-The Worker should run once daily and call:
+The Worker is configured to run once daily at **12:00 UTC** and calls:
 
 `POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges`
 
-Authentication remains `x-cron-secret` using the same `CRON_SECRET` configured
-on the API. Do not place `ADMIN_API_KEY` in the Worker.
+Authentication is `x-cron-secret` using the same `CRON_SECRET` configured
+on the API. Do not place `ADMIN_API_KEY` in the Worker. The Worker only invokes
+the protected API; it does not connect to Supabase. Source, Wrangler configuration,
+setup, verification, and disable steps are in
+[`workers/billing-cron/README.md`](../workers/billing-cron/README.md).
 
 A zero-charge response (`created: 0`) is a successful run. The database RPC
 remains responsible for idempotency and deciding which subscriptions are due;
 the Worker is only the scheduler/HTTP caller.
 
-Do **not** deploy or enable this Worker until the billing-anchor fix is merged,
-deployed, and validated against production schema. After that change, update
-this section with the Worker project/location, schedule, deployment procedure,
-and disable/rollback procedure.
+Do **not** deploy or enable this Worker until billing-anchor and recurring
+discount semantics are fixed, merged, and validated. Keep existing/backfilled
+subscriptions at `automatic_billing_starts_at = NULL` until each billing baseline
+is reviewed. The Worker source exists in this repository, but production billing
+automation is not configured.
 
 ## Discord notification cron (API-AUTO-002)
 
