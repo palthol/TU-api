@@ -1,9 +1,12 @@
 # API capability audit — notifications, finance, scheduling
 
-**Date:** 2026-09-14 (migration filenames reconciled; live `list_migrations` last confirmed 2026-09-03; original audit 2026-05-29)
+**Historical audit date:** 2026-09-14 (original audit 2026-05-29)  
+**Current migration-status refresh:** 2026-09-24
 
 **Scope:** `services/api` (deployed Express backend) vs `supabase/migrations/` (schema source of truth) vs front-ends (`admin/apps/receipts`, `admin/apps/dashboard`, `marketing/TU-web`, `TU-Signup`).  
 **Companion docs:** [admin-api.md](./admin-api.md) (route contracts), [api-schema-audit.md](./api-schema-audit.md) (live DB alignment), [finance-subsystem-design.md](./finance-subsystem-design.md), [receipts-app.md](./receipts-app.md), [v1-v2-application-map.md](./v1-v2-application-map.md).
+
+> **Status note (2026-09-24):** this remains a historical capability audit. Production now has all repository migrations through `20260921221500` applied. Current operational status belongs in `current-state.md`.
 
 ---
 
@@ -18,8 +21,7 @@
 **Schema sync:** Production includes migrations **0017–0020** and the marketing-lead name
 change (confirmed 2026-09-03 via `list_migrations`, version `20260608191715`). Repo
 filename `20260608191715_marketing_leads_first_last_name.sql` now matches that id
-(formerly `0021`). Pending in-repo: `20260914150818`, `20260914185843`,
-`20260914202053`. See [api-schema-audit.md](./api-schema-audit.md).
+(formerly `0021`). Those migrations were pending at the audit date. Production verification on 2026-09-24 confirms them and later migrations through `20260921221500` are applied. See [api-schema-audit.md](./api-schema-audit.md).
 
 **Recommended iteration order:**
 

@@ -1,5 +1,12 @@
 # Cloudflare monthly-charge scheduler
 
+> **Deployment gate:** Do not deploy or enable this Worker until the billing
+> period-anchor and recurring-discount semantics are fixed, merged, and
+> validated. The current generator ends coverage at the calendar-month boundary
+> and does not persist recurring family/custom discounts. Keep
+> `automatic_billing_starts_at` unset until each subscription baseline has been
+> reviewed. See [`docs/deployment.md`](../../docs/deployment.md).
+
 This Worker runs once daily at **12:00 UTC** and invokes the existing protected
 Temple Underground API endpoint:
 

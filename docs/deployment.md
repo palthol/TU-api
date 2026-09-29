@@ -71,7 +71,7 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service-role key (server only) |
 | `ADMIN_API_KEY` | `x-admin-key` for `/api/admin/*` and admin PDF |
-| `CRON_SECRET` | Shared secret for trusted scheduled callers (`x-cron-secret`). Required on the API and the Cloudflare billing Worker once billing automation is enabled |
+| `CRON_SECRET` | Shared secret for Discord cron routes (`x-cron-secret`). Optional until a scheduler is enabled; required on **both** the API web service and the cron job once Discord cron is live |
 | `DISCORD_WEBHOOK_URL` | Optional Discord webhook (read by the **API** service, not the cron job) |
 | `SLACK_WEBHOOK_URL` | Optional Slack webhook |
 | `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (viewer) |
@@ -96,7 +96,7 @@ Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 | Production DB | Supabase project `jhxzecxkccqlgyazhsnb` |
 | API runtime host | Render service behind `api.templeunderground.com` |
 | Discord digest cron | Render **Cron Job** (Dashboard; not in this repo). Runbook below. |
-| Monthly-charge scheduler | Cloudflare Worker (`workers/billing-cron/`) with a daily Cron Trigger |
+| Monthly-charge scheduler | Cloudflare Worker source at [`workers/billing-cron/`](../workers/billing-cron/); not deployed/configured. Daily billing runbook below. |
 | Waiver UI | Sibling `TU-Signup` (`VITE_API_BASE_URL` → production API) |
 | Admin / receipts / waiver-viewer UIs | Sibling `admin` repo |
 | Marketing site | Sibling marketing repos |
@@ -106,48 +106,47 @@ for production API calls.
 
 ## Daily monthly-charge scheduler
 
-Monthly charge generation is run by the in-repository Cloudflare Worker at
-[`workers/billing-cron/`](../workers/billing-cron/). The Worker runs daily; PostgreSQL decides
-which subscription period is due. The Worker does not access Supabase directly:
-it POSTs to the protected API route, which invokes the service-role-only
-`generate_monthly_charges()` function.
+The repository has no Supabase Cron or `pg_cron` configuration. The selected
+production scheduler for monthly billing is a **Cloudflare Worker** that will
+invoke the protected billing endpoint daily. The Express API itself remains
+hosted on Render. This billing-worker decision does **not** change the separate
+Discord notification cron runbook below.
 
-### Live database status
+**Current status (verified 2026-09-24):**
 
-Read-only Supabase inspection on 2026-09-22 confirmed that migrations
-`20260921185003_complete_v1_subscription_charge_generation` and
-`20260921221500_scope_monthly_charge_uniqueness` are applied. The database
-has `subscriptions.automatic_billing_starts_at`,
-`charges.charge_kind`, `generate_monthly_charges()`, and
-`uq_charges_monthly_period_coverage_nonvoid`.
-
-Pre-existing subscriptions still require individual review before automation is
-enabled. `automatic_billing_starts_at = NULL` disables recurring generation.
-Do not bulk-fill it from historical `starts_at` values. Establish the
-appropriate billing baseline for each active paid monthly subscription when it
-is backfilled.
+- Production Supabase has migrations
+  `20260921185003_complete_v1_subscription_charge_generation` and
+  `20260921221500_scope_monthly_charge_uniqueness` applied.
+- Cloudflare Worker source was added at `workers/billing-cron/` after this production audit; it is not deployed or configured.
+- Automatic billing must remain disabled while billing-anchor and recurring
+  discount semantics are being corrected. The current generator ends coverage
+  at the calendar-month boundary, which is wrong for members billed on dates
+  such as the 26th or 29th.
+- Existing/backfilled subscriptions should therefore keep
+  `automatic_billing_starts_at = NULL` until the corrected generator is
+  deployed and each subscription's billing baseline has been reviewed.
 
 ### Cloudflare Worker
 
-| Field | Value |
-| --- | --- |
-| Worker | `tu-billing-cron` |
-| Cron expression (UTC) | `0 12 * * *` |
-| Meaning | Daily at 12:00 UTC; the database function decides what is due |
-| HTTP | `POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges` |
-| Authentication | `x-cron-secret` from `CRON_SECRET` |
-| Source | `workers/billing-cron/` in this repository |
+The Worker is configured to run once daily at **12:00 UTC** and calls:
 
-Set `CRON_SECRET` as a Cloudflare Worker secret and set the exact same value
-on the Render API web service. Do not use `ADMIN_API_KEY` in the Worker.
-Deploy and verification steps are in
+`POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges`
+
+Authentication is `x-cron-secret` using the same `CRON_SECRET` configured
+on the API. Do not place `ADMIN_API_KEY` in the Worker. The Worker only invokes
+the protected API; it does not connect to Supabase. Source, Wrangler configuration,
+setup, verification, and disable steps are in
 [`workers/billing-cron/README.md`](../workers/billing-cron/README.md).
 
-Successful API logs contain `billing.generate_due_charges.succeeded` with
-`ran_at`, `created`, and `charge_ids`. A zero-charge run is successful.
-Worker failures are visible in Cloudflare Worker logs. To disable automatic
-generation, deploy a configuration with `"crons": []` or disable/delete the
-Worker; Cron Trigger changes can take up to 15 minutes to propagate.
+A zero-charge response (`created: 0`) is a successful run. The database RPC
+remains responsible for idempotency and deciding which subscriptions are due;
+the Worker is only the scheduler/HTTP caller.
+
+Do **not** deploy or enable this Worker until billing-anchor and recurring
+discount semantics are fixed, merged, and validated. Keep existing/backfilled
+subscriptions at `automatic_billing_starts_at = NULL` until each billing baseline
+is reviewed. The Worker source exists in this repository, but production billing
+automation is not configured.
 
 ## Discord notification cron (API-AUTO-002)
 
