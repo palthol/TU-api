@@ -93,10 +93,10 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
     expect(res.body).toEqual({ ok: false, error: 'supabase_not_configured' });
   });
 
-  it('calls generate_monthly_charges and returns the created count for an admin key', async () => {
+  it('preserves the envelope for two obligation charges on one payer with null subscription IDs', async () => {
     const rows = [
-      { charge_id: CHARGE_ID, subscription_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
-      { charge_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' },
+      { charge_id: CHARGE_ID, account_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', subscription_id: null },
+      { charge_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', account_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', subscription_id: null },
     ];
     const supabase = createSupabase({ rpcResult: { data: rows, error: null } });
     const res = await request(createApp(supabase))

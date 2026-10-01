@@ -1,6 +1,6 @@
 # Database overview: what to expect and further optimizations
 
-Summary of what the current schema and migrations provide, and optional next steps.
+Summary of repository schema and optional next steps. Obligation billing is implemented locally, pending production migration and deployment approval; see [recurring-billing-obligations.md](recurring-billing-obligations.md).
 
 ---
 
@@ -13,32 +13,34 @@ Summary of what the current schema and migrations provide, and optional next ste
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Waivers**               | `participants`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails`                                           | Signup flow; a participant may have multiple waiver rows (medical + emergency contact per submission), plus an audit row per submission. |
 | **View**                  | `view_waiver_documents`                                                                                                               | One row per waiver with participant, medical, emergency contact, and latest audit — used for PDF generation and reporting.                                               |
-| **Accounts & billing**    | `accounts`, `account_members`, `plan_definitions`, `plan_entitlements`, `subscriptions`, `charges`, `payments`, `payment_allocations` | One account (payer) can have many participants; plans define price and entitlements; subscriptions link account+participant to a plan; charges and payments are ledgers. |
+| **Accounts & billing**    | `accounts`, `account_members`, `plan_definitions`, `plan_entitlements`, `subscriptions`, `billing_obligations`, `billing_obligation_participants`, `charges`, `payments`, `payment_allocations` | One account (payer) can have many participants; plans define price and entitlements; subscriptions link account+participant to a plan for access; explicit obligations own recurring amounts/cycles; charges and payments are ledgers. |
 | **Schedule & attendance** | `schedule_templates`, `sessions`, `attendance_records`, `private_usage`, `entitlement_credits`, `access_overrides`                    | Recurring schedule, concrete sessions, who attended; private minutes; bonus credits; time-limited overrides.                                                             |
 | **Admin**                 | `app_admin`, `private.is_admin()`, RLS on all tables                                                                                  | Only users listed in `app_admin` (or the service role) can read/write.                                                                                                   |
 
 
 ### 1.2 What works out of the box
 
-- **Waiver flow**  
+- **Waiver flow**
 Create participant and waiver (and related rows); query `view_waiver_documents` for PDF/reporting. RLS: admin-only.
-- **Billing**  
-  - Create accounts, plans, subscriptions; create charges and payments manually or via your app.  
-  - **Monthly charge generation:** run `generate_monthly_charges()` manually or through the protected API. It only creates charges for active paid monthly plans with a non-null `subscriptions.automatic_billing_starts_at`. Migration `20260921185003` serializes generator runs. Migration `20260921221500` limits the unique coverage invariant to non-void `charge_kind = monthly_period` rows, so per-class and proration charges may share a coverage start, and it anchors paid per-class-to-monthly conversions for later recurring charges. Existing subscriptions remain unanchored/disabled until operator review; historical gaps rebase to the run date rather than manufacturing past debt. It does **not** run by itself. The selected production scheduler is a Cloudflare Worker, not Render Cron; its source is in `workers/billing-cron/` but is not deployed/configured. See `deployment.md`. The current generator is also calendar-month based and must not be enabled for anchored billing dates until the billing-anchor fix lands.
-- **Entitlements**  
-  - **View:** `participant_entitlement_status` — per participant, per entitlement: usage (sessions or minutes), credits, `has_availability`, `remaining`. Respects `reset_rule` (e.g. calendar week) and active `access_overrides`.  
+- **Billing**
+  - Create accounts, plans, subscriptions; create charges and payments manually or via your app.
+  - **Monthly charge generation (repository):** `generate_monthly_charges()` now reads only explicitly active `billing_obligations` on active payer accounts. Each agreed amount is integer cents; participant links and catalog prices do not affect it. One charge per obligation + anchored period, including voids for retry suppression. Month-end clamps recover the original day next month. Due date is coverage start; late runs retain dates; fully missed periods are not backfilled. Legacy subscriptions are ignored even when their old automation field is set. The dated private helper supports isolated tests. No obligation data is seeded by the migration.
+  - **Deployment gate:** `20260930063526` is local only. Worker cron list is empty and the Worker remains undeployed. See [design and remaining gates](recurring-billing-obligations.md).
+
+- **Entitlements**
+  - **View:** `participant_entitlement_status` — per participant, per entitlement: usage (sessions or minutes), credits, `has_availability`, `remaining`. Respects `reset_rule` (e.g. calendar week) and active `access_overrides`.
   - **Helper:** `can_attend_group_session(participant_id, session_label)` — returns true if the participant has an active override or a group-session entitlement with availability (optional session label filter).
-- **Security**  
-  - RLS on every table; only admins (and service_role) get access.  
-  - Views use `security_invoker = on`; functions use `search_path = public`.  
+- **Security**
+  - RLS on every table; only admins (and service_role) get access.
+  - Views use `security_invoker = on`; functions use `search_path = public`.
   - First admin: insert into `app_admin` via Dashboard SQL with the **service_role** key.
 
 ### 1.3 What the DB does *not* do by itself
 
-- **Charge generation** — Only when you call `generate_monthly_charges()`. No Supabase Cron/`pg_cron` job is configured in the DB. A Cloudflare Worker is the selected external scheduler; source is in `workers/billing-cron/` but is not deployed/configured. Keep automatic billing disabled until the billing-anchor correction is deployed.
-- **Per-session / other cadences** — No built-in logic to create charges for `per_session`, `contract`, or `custom`; you’d add that in app code or new functions.  
-- **Payment processing** — No Stripe/payment-provider integration; `payments` and `payment_allocations` are manual (or your app fills them).  
-- **Public waiver submission** — Waiver tables stay admin-only at the RLS layer. Participants submit through `POST /api/waivers/submit`, which uses the API’s **service role**. Do not add anonymous RLS write policies unless that is an explicit product change.  
+- **Charge generation** — Only when you call `generate_monthly_charges()`. No Supabase Cron/`pg_cron` job is configured in the DB. A Cloudflare Worker is the selected external scheduler; source is in `workers/billing-cron/` but is not deployed/configured. Keep automatic billing disabled until the obligation migration, non-production integration validation, operator reporting review, and explicit deployment approval are complete.
+- **Other recurring cadences** — Obligations are monthly/USD only. The existing per-class attendance RPC remains separate.
+- **Payment collection** — Obligation generation records debt; it does not debit a card. Existing Stripe webhooks and manual payment recording use the same ledger.
+- **Public waiver submission** — Waiver tables stay admin-only at the RLS layer. Participants submit through `POST /api/waivers/submit`, which uses the API’s **service role**. Do not add anonymous RLS write policies unless that is an explicit product change.
 - **Auth** — Supabase Auth handles login; `app_admin` only decides who can access **data** in this project.
 
 ---
@@ -53,7 +55,7 @@ Already in place in production (verified 2026-09-24: `0001`–`0020` plus all ti
 
 So you can expect:
 
-- **Small/medium data:** Queries and the two main views should stay fast.  
+- **Small/medium data:** Queries and the two main views should stay fast.
 - **Large data (e.g. 100k+ waivers, millions of attendance rows):** Still fine for normal admin usage; if the entitlement view is hit very often, consider a materialized view (see below).
 
 ---
@@ -78,6 +80,12 @@ No need to add these unless you have a concrete performance or scaling requireme
 
 ## 4. Summary
 
-- **Functionality:** Waiver capture, waiver document view, accounts/plans/subscriptions, charges and payments (manual or via your app), monthly charge generation when you call it, entitlement view and “can attend” helper, admin-only RLS, secure views and functions.  
-- **Expectations:** DB is ready for admin-driven use and for the dashboard/API to rely on the views and functions above. Charge generation and payment recording are under your control (cron + app).  
+- **Functionality:** Waiver capture, waiver document view, accounts/plans/subscriptions, charges and payments (manual or via your app), monthly charge generation when you call it, entitlement view and “can attend” helper, admin-only RLS, secure views and functions.
+- **Expectations:** DB is ready for admin-driven use and for the dashboard/API to rely on the views and functions above. Charge generation and payment recording are under your control (cron + app).
 - **Optimizations:** Indexing is in good shape; add a materialized view and/or scheduled refresh only if the entitlement view becomes a bottleneck.
+
+## Obligation schema (pending production application)
+
+`billing_obligations` has a required payer FK, immutable economic terms, draft/active/paused/ended states, explicit billing start, exclusive replacement cutoff, and audited lifecycle transitions. `billing_obligation_participants` is informational. Both tables enable RLS and grant access only to the service role. `charges.billing_obligation_id` uses a composite FK with `account_id`; the new unique index includes all statuses. The existing subscription monthly-only index is retained.
+
+Existing member payment boards/reminders remain subscription-based and exclude obligation charges. Account receivable and charge net-due views still work. An operator reporting/UI decision is a deployment gate; do not assign the entire household charge to every participant.

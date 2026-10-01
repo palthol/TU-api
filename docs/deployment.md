@@ -118,17 +118,13 @@ Discord notification cron runbook below.
   `20260921185003_complete_v1_subscription_charge_generation` and
   `20260921221500_scope_monthly_charge_uniqueness` applied.
 - Cloudflare Worker source was added at `workers/billing-cron/` after this production audit; it is not deployed or configured.
-- Automatic billing must remain disabled while billing-anchor and recurring
-  discount semantics are being corrected. The current generator ends coverage
-  at the calendar-month boundary, which is wrong for members billed on dates
-  such as the 26th or 29th.
-- Existing/backfilled subscriptions should therefore keep
-  `automatic_billing_starts_at = NULL` until the corrected generator is
-  deployed and each subscription's billing baseline has been reviewed.
+- Local migration `20260930063526` now implements payer obligations with custom amounts and anchored cycles; it has **not** been applied to production in this work.
+- Recurring generation now ignores legacy `automatic_billing_starts_at`; each new obligation starts as a draft and needs explicit activation. No obligations are backfilled by the migration.
+- Deployment remains gated on non-production Supabase/API integration and concurrency checks, operator reporting and enrollment-flow review, and explicit approval. Existing member billing boards/reminders exclude obligation charges. See [remaining gates](recurring-billing-obligations.md#deployment-gate--remaining-validation).
 
 ### Cloudflare Worker
 
-The Worker is configured to run once daily at **12:00 UTC** and calls:
+The intended approved schedule is once daily at **12:00 UTC**. The checked-in cron list is empty, so it is currently disabled. Its endpoint is:
 
 `POST https://api.templeunderground.com/api/admin/billing/generate-monthly-charges`
 
@@ -139,14 +135,13 @@ setup, verification, and disable steps are in
 [`workers/billing-cron/README.md`](../workers/billing-cron/README.md).
 
 A zero-charge response (`created: 0`) is a successful run. The database RPC
-remains responsible for idempotency and deciding which subscriptions are due;
+remains responsible for idempotency and deciding which explicit payer obligations are due;
 the Worker is only the scheduler/HTTP caller.
 
-Do **not** deploy or enable this Worker until billing-anchor and recurring
-discount semantics are fixed, merged, and validated. Keep existing/backfilled
-subscriptions at `automatic_billing_starts_at = NULL` until each billing baseline
-is reviewed. The Worker source exists in this repository, but production billing
-automation is not configured.
+Do **not** deploy or enable this Worker until the new migration and API are reviewed,
+non-production integration/concurrency checks pass, operator agreements and
+reporting are reviewed, and deployment is explicitly approved. No production
+migration, obligation activation, or scheduler configuration was performed here.
 
 ## Discord notification cron (API-AUTO-002)
 

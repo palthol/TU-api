@@ -195,3 +195,61 @@ Env files loaded, in order, without overriding already-set variables:
   can create extra rows until that task lands.
 - Cleanup cannot remove `event_ledger` history.
 - There is no hosted preview environment in this repo yet.
+
+## Billing database tests
+
+With local Supabase running, execute **both** suites:
+
+```bash
+npm run test:billing-db
+```
+
+This resolves to `supabase test db supabase/tests/database --local` and never uses
+a linked production DB. Tests are transactionally rolled back. The legacy suite
+retains enrollment, initial charge, per-class, conversion, and proration coverage;
+the obligation suite uses synthetic agreements (not actual member details).
+
+### Isolated PostgreSQL fallback without Docker
+
+When Docker/Podman is unavailable, the following local-only fallback replays the
+unaltered migrations, catalog seed, and pgTAP suites using PGlite (PostgreSQL in
+WASM). It is additional SQL validation, **not** a replacement for the predeployment
+Supabase/PostgREST and multi-connection concurrency gate. No URL, credential, or
+production connection is accepted by the runner. It uses a fresh in-memory DB
+with minimal `auth.users`/`auth.uid()` scaffolding and Supabase-style roles/grants.
+
+Validated dependency versions: `@electric-sql/pglite@0.5.8`, pgTAP `1.3.2` from
+Ubuntu package `postgresql-16-pgtap_1.3.2-2_all.deb` (pgTAP is SQL-only). No runtime
+dependency or lockfile change to the API is necessary. On Ubuntu, prepare the
+isolated runtime and the extension bundle outside the repository:
+
+```bash
+mkdir -p /tmp/tu-billing-runtime /tmp/tu-billing-pg
+npm --prefix /tmp/tu-billing-runtime install --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.5.8
+(cd /tmp/tu-billing-pg && apt-get -o APT::Sandbox::User=root download postgresql-16-pgtap=1.3.2-2)
+dpkg-deb -x /tmp/tu-billing-pg/postgresql-16-pgtap_1.3.2-2_all.deb /tmp/tu-billing-pg/extracted
+mkdir -p /tmp/tu-billing-pg/bundle/share/postgresql/extension
+cp /tmp/tu-billing-pg/extracted/usr/share/postgresql/16/extension/pgtap* /tmp/tu-billing-pg/bundle/share/postgresql/extension/
+tar -czf /tmp/tu-billing-pg/pgtap.tar.gz -C /tmp/tu-billing-pg/bundle share
+
+# From the repository root:
+TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite \
+TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz \
+node scripts/test-billing-pglite.mjs
+```
+
+The apt sandbox option above was needed in this root-only container to download
+packages; it does not install a database service. An ordinary host can use its
+normal package download command or supply its installed pgTAP SQL/control files.
+The runner never edits the SQL suites, opens a socket, or loads repository env
+files. It exits nonzero on SQL errors, failed TAP assertions, or test-plan errors.
+
+2026-10-01 final rerun: new migration replay and reapply succeeded; **37 legacy + 84
+obligation assertions passed**; RLS and service-role execution checks passed.
+Local Supabase startup and the CLI database test command were blocked because
+Docker/Podman is absent. No production access was used to work around that limit.
+
+Generated obligation history intentionally cannot be deleted. Do not run the
+legacy `tu-test:cleanup` account deletion flow against obligation-test accounts;
+use these rollback-based suites or reset a disposable local database. The
+production prohibition remains unchanged.
