@@ -89,3 +89,12 @@ No need to add these unless you have a concrete performance or scaling requireme
 `billing_obligations` has a required payer FK, immutable economic terms, draft/active/paused/ended states, explicit billing start, exclusive replacement cutoff, and audited lifecycle transitions. `billing_obligation_participants` is informational. Both tables enable RLS and grant access only to the service role. `charges.billing_obligation_id` uses a composite FK with `account_id`; the new unique index includes all statuses. The existing subscription monthly-only index is retained.
 
 Existing member payment boards/reminders remain subscription-based and exclude obligation charges. Account receivable and charge net-due views still work. An operator reporting/UI decision is a deployment gate; do not assign the entire household charge to every participant.
+
+
+Follow-up migration `20261001080133_obligation_reporting_entitlements.sql` adds
+`view_payer_charge_board` and `view_payer_payment_reminders` (invoker, service-role
+only), and atomic `enroll_obligation_entitlement` (service-role only). Reports
+include all ledger charges without participant fan-out and use `view_charge_net`
+minus allocations. The entitlement RPC creates no debt and never updates
+obligation terms. Chained replacement cutovers must be at or after the predecessor's
+billing start. No new table, backfill, or ledger is introduced by this follow-up.

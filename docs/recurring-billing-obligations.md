@@ -120,8 +120,8 @@ Plan or entitlement changes do not update the agreed obligation amount.
 catalog/proration charges.** Use `create_initial_charge: false` when adding
 subscriptions whose fees are already covered by an obligation. Entitlement-only
 plan changes must not be routed through `subscription-upgrade`, which explicitly
-means a charged prorated upgrade. There is no new entitlement-edit HTTP route in
-this change.
+means a charged prorated upgrade. Use the new `/billing/obligations/:id/entitlements` route for explicit
+no-charge enrollment and today-only plan replacement; see `admin-api.md`.
 
 ## Legacy handling and contracts
 
@@ -149,14 +149,55 @@ approving deployment:
 - Review actual payer agreements, prior charges, first billing boundaries, USD
   amounts, paused states, missed-period handling, and the absence of proration.
   Configure/activate agreements only under separate operator authorization.
-- Update the operator billing workflow and reminders. Existing participant-based
-  `view_member_payment_board` / `view_member_payment_reminders` join charges by
-  subscription and **do not display obligation charges**. Existing charge-level
-  net-due and account receivable views include them. Do not reinterpret a family
-  charge as debt for each participant; an obligation/account reporting contract
-  needs its own UI review before enabling automated billing/reminders.
-- Review enrollment/upgrade defaults with the frontend so covered participants
-  do not receive unintended separate one-off fees.
+- Adopt the additive `payer-charge-board` and `payer-payment-reminders` contracts
+  in the sibling admin frontend. The backend now reports one row per charge and
+  both Discord handlers read that report, but the frontend has not been updated.
+  Legacy participant views still omit obligation charges by design.
+- Review the explicit no-charge enrollment path and today-only plan replacements.
+  Keep paid legacy upgrades visibly separate in the operator workflow.
 - Only after those gates and explicit deployment approval, configure the intended
   daily trigger and shared cron secret. No production migration, backfill,
   activation, Worker deployment, push, or merge is part of this change.
+
+
+## Follow-up implementation and operator decisions (2026-10-01)
+
+Migration `20261001080133_obligation_reporting_entitlements.sql` fixes a chained
+replacement overlap: an A → B → C cutover cannot start C before B's configured
+billing start. Existing charges are unchanged; no terms or accounts are backfilled.
+Activation retries keep their existing semantics (same boundary is a no-op);
+create retries conflict on the caller-supplied ID. All generation/lifecycle RPCs
+still share the same transaction advisory lock. Multi-connection behavior is not
+proven by the single-session fallback.
+
+Reporting uses additive invoker views, one row per charge including legacy/manual
+debt, and nests descriptive participants. Canonical net due minus allocations
+handles discounts, refunds and write-offs. Historical unpaid charges remain in
+reminders after pause/end/replacement. No unissued upcoming period is forecast.
+Legacy member-report row meanings remain unchanged. Full fields are in `admin-api.md`.
+
+Covered monthly access can now be enrolled or changed explicitly without any
+charge via `enroll_obligation_entitlement`. The operation is atomic, checks payer
+membership and descriptive coverage, and serializes with obligation lifecycle
+changes. It only changes access today; old subscription plan/dates/history remain
+with an end of yesterday. It refuses same-day predecessor changes or overlapping
+active subscriptions. Legacy enrollment/charged upgrade APIs still work as before;
+operators must select the intended operation. Legacy enrollment callers do not
+share the new participant lock; concurrent mixed legacy/covered enrollment is not
+a supported operator workflow and is part of integration review.
+
+Sibling `admin` frontend work (not performed here):
+
+- Adopt payer reports, group by payer/obligation IDs, use charge IDs for allocations,
+  and sum only `outstanding_cents` once per charge. Nested coverage is display only.
+- Show agreed amount separately from catalog price and historical charge gross.
+  Retain paused/ended debt and provide access to all pages of charge history.
+- Use a stable subscription UUID for covered enrollment/change; reconcile a 409.
+  Make charged legacy upgrades an explicit separate choice; do not use them for
+  entitlement-only changes.
+- Review today-only changes, no same-day replacement, explicit participant links,
+  current-period-only billing, manual missed-period/proration handling, and the
+  reminder change from participant counts/forecasts to issued charge balances.
+- Review notification presentation/delivery separately: the existing Discord sender
+  still truncates messages at 2,000 characters and has no delivery deduplication.
+  No notification or schedule was triggered by this implementation.

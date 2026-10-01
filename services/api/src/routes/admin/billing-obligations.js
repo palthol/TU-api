@@ -17,6 +17,21 @@ export function registerBillingObligationRoutes(router, { supabase }) {
     if (error) return res.status(error.code === '23505' ? 409 : 400).json({ ok: false, error: error.message });
     return res.json({ ok: true, obligation: data });
   }
+  router.post('/billing/obligations/:id/entitlements', handler(async (req, res) => {
+    const b = req.body ?? {};
+    if (!isUuid(req.params.id)) return invalid(res, 'invalid_obligation_id');
+    for (const field of ['id', 'participant_id', 'plan_definition_id']) {
+      if (!isUuid(b[field])) return invalid(res, `invalid_${field}`);
+    }
+    if (b.replaces_subscription_id != null && !isUuid(b.replaces_subscription_id)) return invalid(res, 'invalid_replaces_subscription_id');
+    if (Object.keys(b).some(k => !['id', 'participant_id', 'plan_definition_id', 'replaces_subscription_id'].includes(k))) return invalid(res, 'unsupported_entitlement_field');
+    const { data, error } = await supabase.rpc('enroll_obligation_entitlement', {
+      p_id: b.id, p_obligation_id: req.params.id, p_participant_id: b.participant_id,
+      p_plan_definition_id: b.plan_definition_id, p_replaces_subscription_id: b.replaces_subscription_id ?? null,
+    });
+    if (error) return res.status(error.code === '23505' ? 409 : 400).json({ ok: false, error: error.message });
+    return res.json({ ok: true, ...data });
+  }));
   router.get('/billing/obligations', handler(async (req, res) => {
     if (!isUuid(req.query.account_id)) return invalid(res, 'invalid_account_id');
     const { data, error } = await supabase.from('billing_obligations')

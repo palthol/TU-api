@@ -38,12 +38,13 @@ See [design](../../docs/recurring-billing-obligations.md) and
 1. Review and merge the implementation through a separately authorized workflow.
 2. Verify the migration against an approved non-production Supabase stack and run
    the API/PostgREST integration smoke plus concurrent generation/lifecycle tests.
-   Current local evidence is 171 API tests and 121 pgTAP assertions in isolated
+   Current local evidence is 191 API tests and 165 pgTAP assertions in isolated
    WASM PostgreSQL; Docker was unavailable. This is not a live deployment proof.
-3. Resolve the obligation/account operator reporting workflow: existing member
-   billing boards and reminders join by subscription and do not include these
-   charges. Review enrollment/upgrade defaults to prevent separate unintended
-   catalog-price one-off charges for already-covered participants.
+3. Complete sibling frontend adoption of the additive payer/charge reports and
+   explicit covered-entitlement route from migration `20261001080133`. Backend
+   Discord handlers now use charge-level balances; legacy member views retain
+   their contracts. Review reminder semantics and delivery limits, today-only
+   entitlement changes, and operator separation from paid legacy upgrades.
 4. Review each payer agreement, existing charge coverage, amount, first billing
    boundary, participant/service description, and pause/cutover behavior. Accept
    current-period-only recovery and manual handling of missed periods/proration.

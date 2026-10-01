@@ -198,7 +198,7 @@ Env files loaded, in order, without overriding already-set variables:
 
 ## Billing database tests
 
-With local Supabase running, execute **both** suites:
+With local Supabase running, execute **all three** suites:
 
 ```bash
 npm run test:billing-db
@@ -253,3 +253,69 @@ Generated obligation history intentionally cannot be deleted. Do not run the
 legacy `tu-test:cleanup` account deletion flow against obligation-test accounts;
 use these rollback-based suites or reset a disposable local database. The
 production prohibition remains unchanged.
+
+
+## Follow-up validation evidence — 2026-10-01
+
+From the repository root, the following commands were executed:
+
+```bash
+npm --workspace services/api test
+# PASS: 191 tests, 20 files. Notification delivery is mocked; no messages sent.
+
+TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite \
+TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz \
+node scripts/test-billing-pglite.mjs
+# PASS: 165 assertions = 37 legacy + 84 obligations + 44 reporting/integration.
+# PASS: ordered migrations, follow-up reapplication, populated financial preservation.
+
+npm run guard:waiver-schema
+# PASS
+
+git diff --check
+# PASS
+
+npm run supabase:start
+# BLOCKED: docker not found; podman not found.
+
+npm run test:billing-db
+# BLOCKED: local 127.0.0.1:54322 connection refused; never used a linked DB.
+```
+
+The fallback now seeds `scripts/fixtures/billing-pre-obligations.sql` after the
+catalog and before `20260930063526`, preserving a synthetic subscription, charge,
+partial payment and allocation. `billing-post-obligations.sql` compares full
+original row JSON after migrations and reapplication (excluding only the new null
+charge column), fails on unexpected obligations/legacy generation, and removes
+only its fixture. These files must only run in a disposable local database; the
+PGlite runner never accepts a connection URL or loads any env file.
+
+New integration assertions verify report cardinality and discount/refund/write-off
+balances, retained ended debt, void/paid exclusion, date thresholds, no-charge
+covered enrollment/replacement, repeated UUIDs, rejected coverage/overlap, immutable
+terms/history, replacement-chain overlap regression, view grants/invoker security,
+and actual `service_role` SQL execution. The separate API tests verify role gates,
+request validation, response shapes, additive report queries, and both reminder
+consumers with the transport mocked.
+
+Still environment-blocked (required before a separately authorized rollout):
+
+1. Local Supabase migration replay/reapplication with real auth schema, default
+   grants and PostgREST; validate the additive view/RPC discovery and service-key
+   versus anon/authenticated HTTP behavior.
+2. Local API → PostgREST exercise of create/list/transition, no-charge enrollment,
+   both report slugs, record-payment, discounts and refunds. Stub Discord transport;
+   do not configure or send a real webhook for this validation.
+3. Independent database connections: simultaneous generator/generator calls and
+   generator races with pause, end, replacement (both lock acquisition orders).
+   Assert one row per obligation/period, unchanged historical charge terms, no
+   partial replacement and no ancestor/descendant overlap. Generation that wins
+   before a pause/end can legitimately issue the current period's full charge;
+   a lifecycle operation that wins first must prevent a new charge.
+4. Concurrent same-UUID create/activation and competing replacement activation;
+   expect create conflict or activation no-op, exactly one accepted replacement.
+   Exercise covered enrollment races and review unsupported mixed legacy/covered
+   enrollment requests before frontend adoption.
+
+No single-session result above is evidence that these multi-connection or HTTP
+checks passed. Worker deployment remains disabled regardless of local results.

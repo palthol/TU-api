@@ -22,12 +22,18 @@ try {
   `);
   const files = (await readdir('supabase/migrations')).filter(f => f.endsWith('.sql')).sort();
   for (const f of files) {
+    if (f === '20260930063526_account_billing_obligations.sql') {
+      await db.exec(await readFile('supabase/seed.sql', 'utf8'));
+      await db.exec(await readFile('scripts/fixtures/billing-pre-obligations.sql', 'utf8'));
+      console.log('synthetic pre-existing financial data: seeded before obligation migrations');
+    }
     await db.exec(await readFile(`supabase/migrations/${f}`, 'utf8'));
     console.log(`migration OK: ${f}`);
   }
   await db.exec(await readFile(`supabase/migrations/${files.at(-1)}`, 'utf8'));
   console.log('new migration reapplied: OK');
-  await db.exec(await readFile('supabase/seed.sql', 'utf8'));
+  await db.exec(await readFile('scripts/fixtures/billing-post-obligations.sql', 'utf8'));
+  console.log('populated migration preservation and legacy no-charge verification: OK');
   for (const f of (await readdir('supabase/tests/database')).filter(f => f.endsWith('.test.sql')).sort()) {
     console.log(`suite: ${f}`);
     const result = await db.exec(await readFile(`supabase/tests/database/${f}`, 'utf8'));

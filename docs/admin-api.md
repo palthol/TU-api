@@ -840,7 +840,7 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
-Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
+Reads **`view_payer_payment_reminders`** (one outstanding charge per row; overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
 
 **Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
@@ -1061,3 +1061,89 @@ For all operator apps:
 - Start the API first: `npm run dev:api` (this repo).
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
 - Paste **x-admin-key** (shared owner key or personal staff key) only in trusted sessions; do not commit keys.
+
+
+## Payer reporting and covered entitlements (local, pending rollout)
+
+Migration `20261001080133_obligation_reporting_entitlements.sql` adds two read-only
+slugs to `GET /api/admin/reporting/views/:slug`:
+
+| Slug | Relation | Row meaning |
+| --- | --- | --- |
+| `payer-charge-board` | `view_payer_charge_board` | Exactly one row per charge, including legacy/manual and obligation charges |
+| `payer-payment-reminders` | `view_payer_payment_reminders` | Outstanding issued charges due on/before New York today + 3 days |
+
+Existing `payment-board` / `payment-reminders` slugs retain their participant row
+contracts. Do not combine their monetary totals with the payer report. New slugs
+use `due_at` for `start`/`end`, support standard pagination, and sort by `due_at`,
+`payer_name`, `outstanding_cents`, or `charge_id`; board additionally supports
+`billing_obligation_id`, reminders support `days_late` / `reminder_bucket`.
+
+Fields: `charge_id`, `account_id`, `payer_name`, `billing_obligation_id`,
+`obligation_label`, `obligation_status`, `agreed_amount_cents`, `anchor_date`,
+`billing_starts_on`, `ends_before`, `subscription_id`, `charge_kind`, `currency`,
+`charge_status`, `coverage_start`, `coverage_end`, `due_at`, `gross_cents`,
+`credit_applied_cents`, `write_off_cents`, `net_due_cents`, `allocated_cents`,
+`outstanding_cents`, and nested `covered_participants: [{participant_id,name}]`.
+Obligation fields are null for legacy/manual debt. Covered participants are
+informational; the report never multiplies debt by the participant count.
+
+Net due comes from `view_charge_net` (including discounts); outstanding is
+`max(0, net_due - allocations)`, or zero for voids. Refunds affect the remaining
+allocations. Paused/ended obligations and inactive accounts retain their unpaid
+charges. Reminders exclude fully settled/void charges, use `overdue` before New
+York today and `due_soon` through today + 3, and add `days_late`.
+They do not forecast charges that have not been issued. Read access remains
+staff-authenticated through the API; new views and RPC have no anon/authenticated
+database grants and views use invoker security.
+
+Both Discord reminder handlers now consume `view_payer_payment_reminders`, show
+payer, agreement label and charge ID, and format outstanding cents as dollars.
+Response envelopes are unchanged; counts now mean unpaid charges, not members.
+No notification was sent or schedule enabled in this change. Deploy this migration
+before the API: missing views fail closed without posting a partial reminder.
+
+### `POST /api/admin/billing/obligations/:id/entitlements`
+
+Owner/finance only. Explicit **no-charge** monthly enrollment or plan change for
+an obligation-linked participant. Body:
+
+```json
+{
+  "id": "stable client-generated subscription UUID",
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "replaces_subscription_id": "optional existing subscription UUID"
+}
+```
+
+Calls atomic `enroll_obligation_entitlement(uuid,uuid,uuid,uuid,uuid)`. Requires an
+active, unexpired obligation on an active account, explicit participant coverage
+and membership of that payer account, and an active monthly target plan.
+Effective date is New York today. A replacement predecessor must be active for
+the same participant and payer, started before today, and not already ended.
+It retains its original plan/history and ends yesterday; new access begins today.
+Any other active subscription with an open/current/future end rejects the operation,
+including a future-start subscription. Failure rolls back predecessor changes.
+No charge, proration, obligation activation, or term update occurs.
+
+Success: `{ok:true, subscription_id, account_id, billing_obligation_id,
+participant_id, plan_definition_id, starts_at, replaced_subscription_id,
+initial_charge_id:null}`. New subscription `automatic_billing_starts_at` is null.
+Retry the same UUID: `409 subscription_id_already_exists`; reconcile by subscription
+ID instead of generating a new UUID. Legacy enrollment/paid-upgrade contracts remain
+unchanged and intentionally requested one-off charges remain supported.
+
+Validation errors are `400 invalid_<field>` / `unsupported_entitlement_field`.
+Database errors include `participant_not_found`, `active_obligation_required`,
+`active_payer_account_required`, `participant_not_covered_by_obligation`,
+`participant_not_in_payer_account`, `active_monthly_plan_required`,
+`invalid_entitlement_predecessor`, and `overlapping_active_subscription`.
+Scheduled/backdated changes and replacing an enrollment created today are not
+supported by this deliberately narrow path. Enrollment does not automatically
+end when the billing obligation ends; access and billing lifecycle are separate.
+
+Replacement activation additionally rejects
+`replacement_precedes_previous_billing_start`: a descendant cannot cut over before
+its predecessor begins, even when both anchor days align. The shared generator/
+lifecycle advisory lock and existing unique index remain in place.

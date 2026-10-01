@@ -1,6 +1,6 @@
 # API current state
 
-**Verified:** 2026-10-01 (local obligation implementation; 171 API tests and 121 isolated PostgreSQL/pgTAP assertions; no production access); 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
+**Verified:** 2026-10-01 (local obligation implementation; 191 API tests and 165 isolated PostgreSQL/pgTAP assertions; no production access); 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
 **Repository:** `palthol/TU-api`  
 **Production database:** Supabase `jhxzecxkccqlgyazhsnb`  
 **Deployed API:** Render — `https://api.templeunderground.com` (see [deployment.md](./deployment.md))
@@ -16,9 +16,9 @@ response contracts and `api-schema-audit.md` for detailed schema evidence.
 | Waiver submission | verified | 32 participants and 36 waivers in production | Only workflow proven by production usage |
 | Schema | verified | Production `list_migrations` checked 2026-09-24 | Applied: `0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`, `20260914202053`, `20260916174649`, `20260916225225`, `20260921185003`, `20260921221500`. No known migration from that repository set remains pending production application. |
 | Public/admin routes | implemented | Routes mounted; API suite passes 18/18 | Most business routes lack integration tests |
-| Reporting | implemented | All 19 referenced views exist | Most operational source tables are empty |
-| Billing/receipts | explicit payer obligations implemented locally; deployment gated | `20260930063526` replaces recurring subscription-price generation with one charge per active obligation/anchored period; 84 new obligation pgTAP assertions plus 37 retained legacy checks pass | Migration not applied to production. No obligation backfill/activation. Worker remains undeployed and its checked-in cron list is empty. Non-prod Supabase/PostgREST/concurrency and operator reporting review remain gates. |
-| Subscriptions | legacy one-off behavior retained; recurring terms separated | Enrollment/conversion/proration/per-class regressions pass; `automatic_billing_starts_at` stays in responses but is ignored by the new generator | No automatic obligation inference. Covered participants should enroll with `create_initial_charge: false`; paid upgrade APIs still mean an explicit one-off charge. Production counts below are the historical snapshot, not a fresh query. |
+| Reporting | obligation-aware backend implemented locally | Two additive payer views and Discord consumer tests; legacy contracts retained | Sibling frontend adoption, HTTP integration and operator review pending |
+| Billing/receipts | explicit payer obligations implemented locally; deployment gated | `20260930063526` replaces recurring subscription-price generation with one charge per active obligation/anchored period; 84 obligation + 44 integration/reporting assertions plus 37 retained legacy checks pass | Migration not applied to production. No obligation backfill/activation. Worker remains undeployed and its checked-in cron list is empty. Non-prod Supabase/PostgREST/concurrency, sibling frontend adoption, and operator workflow review remain gates. |
+| Subscriptions | legacy one-off behavior retained; recurring terms separated | Enrollment/conversion/proration/per-class regressions pass; `automatic_billing_starts_at` stays in responses but is ignored by the new generator | No automatic obligation inference. Explicit `/billing/obligations/:id/entitlements` enrolls/changes covered monthly access without debt; paid upgrade APIs still mean an explicit one-off charge. Production counts below are the historical snapshot, not a fresh query. |
 | Scheduling | schema applied; production data empty | `20260914202053` (`generate_sessions`) is applied; local route/RPC tests cover template/session flows | Production still has 0 sessions and attendance rows. **Entitlement:** default `enforce_entitlement: true` blocks when `can_attend_group_session` is false; `enforce_entitlement: false` bypasses that check. |
 | Notifications | schedule documented; live cron not enabled | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md) | Digest once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled (same overdue / due-soon list as digest). Render MCP unauthorized; no live job created |
 | On-demand waiver PDF | implemented, unwired | Renderer/route tests pass | Active admin UI uses stored signed PDF URLs |
@@ -50,7 +50,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Route-level billing, subscription, scheduling, and obligation suites pass using in-process fixtures; they do not prove production integration.
 - Production's historical generator remains unchanged by this work. Locally, `20260930063526_account_billing_obligations.sql` implements explicit payer amounts, multiple obligations per account, stable anchored periods, and obligation-period uniqueness including voids. No legacy subscription is automatically charged by the new generator. See [design and lifecycle rules](recurring-billing-obligations.md).
 - Worker deployment remains disabled (`triggers.crons = []`). Before approval, complete non-production Supabase/PostgREST/concurrent-run validation and operator agreement review. The in-memory PostgreSQL fallback ran real migrations and pgTAP, but does not validate multiple database connections or the Supabase HTTP layer.
-- Existing participant-based billing boards/reminders do not include obligation charges because they join by subscription. Charge-level net due and account receivables include them. Review an obligation/account reporting contract and frontend enrollment/upgrade flows before scheduler enablement; never duplicate household debt across participants. Replacement cutovers require a shared anchor boundary; unmatched anchor changes and missed periods/proration require explicit operator handling.
+- Additive payer reports now expose one row per charge with canonical outstanding debt and nested participant coverage; both Discord handlers consume payer reminders. Legacy member reports retain their old contracts. Sibling frontend adoption and operator review remain gates. Today-only covered entitlement changes create no charges; legacy paid upgrades are unchanged. Replacement cutovers require a shared boundary and cannot precede the predecessor billing start; unmatched anchor changes and missed periods/proration require explicit operator handling.
 - Discord notifications: operator Render cron runbook is in [deployment.md](./deployment.md) (API-AUTO-002). Live cron was **not** enabled (Render MCP unauthorized; avoid silent production Discord posts). Digest is the only recommended scheduled job; `payment-reminders` stays on-demand because it repeats digest’s overdue / due-soon list. Handlers have no last-run marker, so a manual Trigger Run plus the scheduled tick can still double-post.
 - Schedule-template CRUD and recurring-session generation exist in-repo (API-SCHED-001); migration `20260914202053` is applied in production.
 - Staff authorization is per-person hashed `x-admin-key` values with roles
@@ -61,9 +61,9 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Verification baseline
 
-- `npm --workspace services/api test`: **171/171 passing**, 19 files (2026-10-01).
+- `npm --workspace services/api test`: **191/191 passing**, 20 files (2026-10-01).
 - `npm run supabase:start` and `npm run test:billing-db`: local stack startup blocked by unavailable Docker/Podman; the CLI suite then reports connection refused at `127.0.0.1:54322`. No production connection was attempted.
-- `TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz node scripts/test-billing-pglite.mjs`: **121/121 pgTAP assertions passing** (37 legacy, 84 obligation). All repository migrations and catalog seed replay in a fresh in-memory PostgreSQL instance; the new migration also reapplies successfully. RLS, private RPC grants, and service-role operations are exercised. See [reproduction instructions](validation-environment.md#isolated-postgresql-fallback-without-docker).
+- `TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz node scripts/test-billing-pglite.mjs`: **165/165 pgTAP assertions passing** (37 legacy, 84 obligation, 44 reporting/integration). All repository migrations and catalog seed replay in a fresh in-memory PostgreSQL instance; the follow-up migration also reapplies successfully, and synthetic pre-existing subscriptions, charges, payments, and allocations survive both obligation migrations unchanged. RLS, private RPC grants, and service-role operations are exercised. See [reproduction instructions](validation-environment.md#isolated-postgresql-fallback-without-docker).
 - `npm run guard:waiver-schema`: passing. `git diff --check`: passing.
 - No production access, migration, seed, obligation activation, Worker deployment, queue modification, push, or merge occurred. Production evidence in the snapshot above remains dated 2026-09-24.
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
@@ -74,3 +74,22 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Schedule templates (API-SCHED-001): Vitest covers template create/update, generate-sessions, duplicate generate, and validation errors. Migration `20260914202053` (formerly `0024`) is applied in production.
 - Atomic record-payment (API-HARD-001): Vitest covers RPC success, RPC failure with no leftover rows, idempotent retry, idempotency-key conflict, and missing-function sequential fallback. Migration `20260916174649` is applied in production.
 - Stripe webhook (API-PAY-001): Vitest covers signature accept/reject, `payment_intent.succeeded` → `record_payment` (`method=card`, `issued_by=stripe_webhook`, `idempotency_key=stripe:pi_…`), duplicate event replay with one payment, unmatched metadata `400 unmatched_payment`, missing RPC `503` with no sequential inserts, ignored `charge.succeeded`, `refund.created` → `record_payment_refund`, and refund-before-payment `400 payment_not_found`. Migration `20260916225225` is applied in production. Env name `STRIPE_WEBHOOK_SECRET` only.
+
+
+## Follow-up review evidence (2026-10-01)
+
+Starting commit `da021cfd63b87a868947d03cb2f3e15d70488666`, same branch. New
+migration `20261001080133_obligation_reporting_entitlements.sql` rejects chained
+replacement cutovers before the predecessor's start, adds invoker payer reports,
+and exposes a service-only no-charge entitlement RPC. API adds one owner/finance
+route, two report slugs, and switches Discord handlers to issued-charge debt.
+No production access, real notification sends, queue edits, push, merge, or deploy.
+Worker `triggers.crons` remains empty. No rollout action is authorized by these repository changes.
+
+Populated replay compares the complete original subscription, charge (excluding
+the added null obligation column), payment and allocation JSON before/after both
+obligation migrations and follow-up reapplication. It also verifies that the
+migrations create no obligations and legacy automation creates no debt.
+Single-session SQL tests and mocked API tests do not establish multiple-connection
+serialization, PostgREST schema discovery/authentication, or Supabase integration.
+Full commands and blockers are in `validation-environment.md`.
