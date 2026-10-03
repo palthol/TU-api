@@ -22,6 +22,7 @@
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "test:billing-db": "supabase test db supabase/tests/database --local",
+    "test:billing-local": "node scripts/test-billing-local.mjs",
     "guard:waiver-schema": "node scripts/guard-waiver-schema.mjs",
     "test:waiver-smoke": "node scripts/waiver-smoke-test.mjs",
     "tu-test:seed": "node scripts/tu-test-seed.mjs",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "dotenv": "^16.4.5",
+    "pg": "8.16.3",
     "supabase": "^2.75.5"
   }
 }

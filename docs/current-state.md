@@ -8,6 +8,16 @@
 This is the API repository's status source of truth. Use `admin-api.md` for request and
 response contracts and `api-schema-audit.md` for detailed schema evidence.
 
+**Local verification update — 2026-10-03:** branch `cursor/custom-household-billing`,
+commit `0c97a4cce45cb69bf2c86d690f5152ef1b3a0708` plus uncommitted corrective migration
+`20261003045729`. Real Docker/Supabase PostgreSQL 17.6 replayed all 31 migrations;
+191 API unit tests, 177 pgTAP assertions, populated-history preservation/reapplication,
+and 22 live database/HTTP/concurrency scenarios passed. The original mixed-enrollment
+gap was reproduced and fixed with a shared participant lock and overlap rejection.
+The 2026-10-01 Docker/HTTP/concurrency blockers below are historical, not current.
+No production contact, commit/push, deployment, backfill or cron enabling occurred.
+See [the full validation report](obligation-validation-attempt-2026-10-03.md).
+
 ## Status
 
 | Domain | Status | Evidence | Qualification |
@@ -16,8 +26,8 @@ response contracts and `api-schema-audit.md` for detailed schema evidence.
 | Waiver submission | verified | 32 participants and 36 waivers in production | Only workflow proven by production usage |
 | Schema | verified | Production `list_migrations` checked 2026-09-24 | Applied: `0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`, `20260914202053`, `20260916174649`, `20260916225225`, `20260921185003`, `20260921221500`. No known migration from that repository set remains pending production application. |
 | Public/admin routes | implemented | Routes mounted; API suite passes 18/18 | Most business routes lack integration tests |
-| Reporting | obligation-aware backend implemented locally | Two additive payer views and Discord consumer tests; legacy contracts retained | Sibling frontend adoption, HTTP integration and operator review pending |
-| Billing/receipts | explicit payer obligations implemented locally; deployment gated | `20260930063526` replaces recurring subscription-price generation with one charge per active obligation/anchored period; 84 obligation + 44 integration/reporting assertions plus 37 retained legacy checks pass | Migration not applied to production. No obligation backfill/activation. Worker remains undeployed and its checked-in cron list is empty. Non-prod Supabase/PostgREST/concurrency, sibling frontend adoption, and operator workflow review remain gates. |
+| Reporting | obligation-aware backend validated locally | Real PostgREST payer views, payment balances, both reminder consumers with loopback transport stub; legacy contracts retained | Sibling frontend adoption and operator review pending |
+| Billing/receipts | explicit payer obligations validated locally; deployment gated | 177 real PostgreSQL assertions and 22 live scenarios include generation/lifecycle races, independent payer cycles and atomic payment/reporting flows | No production changes or verification on 2026-10-03. No production obligation backfill/activation. Worker cron list remains empty. Sibling frontend adoption, operator review and explicit rollout approval remain gates. |
 | Subscriptions | legacy one-off behavior retained; recurring terms separated | Enrollment/conversion/proration/per-class regressions pass; `automatic_billing_starts_at` stays in responses but is ignored by the new generator | No automatic obligation inference. Explicit `/billing/obligations/:id/entitlements` enrolls/changes covered monthly access without debt; paid upgrade APIs still mean an explicit one-off charge. Production counts below are the historical snapshot, not a fresh query. |
 | Scheduling | schema applied; production data empty | `20260914202053` (`generate_sessions`) is applied; local route/RPC tests cover template/session flows | Production still has 0 sessions and attendance rows. **Entitlement:** default `enforce_entitlement: true` blocks when `can_attend_group_session` is false; `enforce_entitlement: false` bypasses that check. |
 | Notifications | schedule documented; live cron not enabled | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md) | Digest once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled (same overdue / due-soon list as digest). Render MCP unauthorized; no live job created |

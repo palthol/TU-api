@@ -374,7 +374,16 @@ never configures a payer obligation. For an obligation-covered participant, pass
 `create_initial_charge: false` to avoid a separate catalog-priced one-off charge.
 Recurring billing requires an explicitly activated obligation (below).
 
-**Errors:** `400` — participant/plan not found, inactive plan, no account binding, explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure, or date validation failure (Postgres exception message in `error`).
+Corrective migration `20261003045729` serializes enrollment on the participant
+with the covered-entitlement RPC. It rejects overlap with any existing active
+subscription, including another payer account and future access. `ends_at` is
+inclusive; a nonoverlapping successor starts the following day. Rejection is atomic
+and creates neither access nor an initial charge.
+
+**Errors:** `400` — participant/plan not found, inactive plan, no account binding,
+`overlapping_active_subscription`, explicit `create_initial_charge: true` on a
+non-monthly plan, plan lookup failure, or date validation failure (Postgres exception
+message in `error`).
 
 ---
 

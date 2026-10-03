@@ -189,10 +189,11 @@ Env files loaded, in order, without overriding already-set variables:
   `services/api/.env` on disk) would still write to production if someone posted
   to `localhost`. Confirm `npx supabase status` keys are what the API process
   actually loaded.
-- `record-payment` is still non-transactional (API-HARD-001). VAL-001 should
-  expect partial writes on failure paths.
-- Waiver submit is not end-to-end idempotent (API-HARD-002). Duplicate submits
-  can create extra rows until that task lands.
+- With the complete migration history, `record-payment` uses the atomic RPC.
+  The missing-RPC compatibility fallback remains sequential; never mistake that
+  fallback for successful validation of the migrated database.
+- Waiver submit supports idempotent retries, but Storage and database writes are
+  not one atomic transaction; see the current-state qualifications.
 - Cleanup cannot remove `event_ledger` history.
 - There is no hosted preview environment in this repo yet.
 
@@ -298,7 +299,9 @@ and actual `service_role` SQL execution. The separate API tests verify role gate
 request validation, response shapes, additive report queries, and both reminder
 consumers with the transport mocked.
 
-Still environment-blocked (required before a separately authorized rollout):
+The following were environment-blocked on 2026-10-01. They are superseded by
+[real local Supabase evidence from 2026-10-03](obligation-validation-attempt-2026-10-03.md)
+(still required before a separately authorized rollout):
 
 1. Local Supabase migration replay/reapplication with real auth schema, default
    grants and PostgREST; validate the additive view/RPC discovery and service-key
@@ -319,3 +322,27 @@ Still environment-blocked (required before a separately authorized rollout):
 
 No single-session result above is evidence that these multi-connection or HTTP
 checks passed. Worker deployment remains disabled regardless of local results.
+
+## Real local gate — 2026-10-03
+
+Use `scripts/fixtures/obligation-validation.config.toml` in the isolated workdir
+`tmp/obligation-validation-20261003`, not the root project's database. CLI version
+is the lockfile's `2.105.0`; use `node_modules/.bin/supabase`, not the global CLI.
+Start, reset, and test commands must all specify the same `--network-id
+tu_obligation_validation_20261003` and `--workdir`. Exclude `logflare,vector,edge-runtime`
+(this CLI's actual container names). Ports are API 55321, DB 55322, Studio 55323,
+mail 55324. Clients use only literal loopback addresses; Docker itself publishes
+these ports on all host interfaces, so do not expose this development stack on an
+untrusted network. Standard local keys are development-only.
+
+Run pgTAP **before** `npm run test:billing-local`. The live harness leaves committed
+synthetic fixtures and asserts a fresh starting state; mixing those with pgTAP's
+global empty-ledger assumptions creates invalid test results. It captures local
+keys in memory, disables dotenv file loading in the actual API child, uses real
+PostgREST/Auth, and shuts down its temporary API and loopback notification stub.
+It never accepts a remote URL. Do not run legacy account cleanup against these
+immutable obligation histories; stop/reset only this explicitly disposable project.
+
+See the validation report for commands, historical-preservation replay, genuine
+lock-wait race evidence, final results, and remaining rollout gates. No deployment
+or cron authorization is implied by local validation.

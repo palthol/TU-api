@@ -181,10 +181,13 @@ charge via `enroll_obligation_entitlement`. The operation is atomic, checks paye
 membership and descriptive coverage, and serializes with obligation lifecycle
 changes. It only changes access today; old subscription plan/dates/history remain
 with an end of yesterday. It refuses same-day predecessor changes or overlapping
-active subscriptions. Legacy enrollment/charged upgrade APIs still work as before;
-operators must select the intended operation. Legacy enrollment callers do not
-share the new participant lock; concurrent mixed legacy/covered enrollment is not
-a supported operator workflow and is part of integration review.
+active subscriptions. Corrective migration `20261003045729` makes legacy
+`create_subscription` share the participant row lock and reject intersecting
+inclusive access date ranges across payer accounts (`overlapping_active_subscription`).
+Mixed legacy/covered requests now accept at most one enrollment, regardless of
+lock acquisition order; rejected requests create no subscription or initial charge.
+Nonoverlapping historical access remains allowed. Charged upgrade APIs retain
+their separate semantics; operators must still select the intended operation.
 
 Sibling `admin` frontend work (not performed here):
 

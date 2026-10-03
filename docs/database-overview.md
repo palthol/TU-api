@@ -2,6 +2,12 @@
 
 Summary of repository schema and optional next steps. Obligation billing is implemented locally, pending production migration and deployment approval; see [recurring-billing-obligations.md](recurring-billing-obligations.md).
 
+Corrective migration `20261003045729_serialize_subscription_enrollment.sql`
+preserves legacy enrollment and initial-charge contracts but adds a participant
+row lock shared with covered enrollment and an inclusive-date overlap check.
+No historical data is changed. Local real-Supabase evidence is recorded in
+[the 2026-10-03 validation report](obligation-validation-attempt-2026-10-03.md).
+
 ---
 
 ## 1. What the current setup provides
