@@ -124,6 +124,8 @@ Stores the waiver submission and then records a **`waiver.submitted`** event in 
 
 Notification failures are logged server-side and do **not** fail an otherwise successful waiver submission. If neither webhook is configured, the API logs a warning and returns the normal waiver response.
 
+Discord now receives a student/contact summary and a separate in-memory vCard attachment message. It omits submission time, waiver ID and admin reference; medical information is limited to disclosure status pending verified privacy/consent requirements. Slack keeps its existing layout. Mapping, partial delivery handling, process-local retry limits and manual import checks are documented in [discord-waiver-notifications.md](./discord-waiver-notifications.md).
+
 **Success envelope (unchanged fields):** `{ "ok": true, "waiverId": "<uuid>", "participantId": "<uuid>", "accountId": "<uuid>", "accountMemberId": "<uuid>", "sha256": "<hex>" }`
 
 **Failure:** non-2xx `{ "ok": false, "errors": [...] }` and/or `{ "ok": false, "error": "<machine_key>" }` as today.
