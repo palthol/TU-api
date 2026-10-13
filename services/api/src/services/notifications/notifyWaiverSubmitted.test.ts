@@ -19,15 +19,19 @@ describe('operator summary', () => {
   it('shows adult identity and optional contacts without metadata or timestamp', () => {
     const message = buildWaiverSubmittedNotification({ participant: student });
     const payload = discordPayload(message);
-    expect(message.fields[0]).toEqual({ name: 'Student', value: expect.stringContaining('John Smith') });
+    expect(message.title).toBe('New Waiver — John Smith');
+    expect(message.fields[0].name).toBe('Student');
+    expect(message.fields[0].value.split('\n')).toEqual(['John Smith', '5551234567', expect.stringContaining('john@'), '\u200b']);
+    expect(message.fields[0].value).not.toMatch(/Name:|Phone:|Email:/);
+    expect(buildWaiverSubmittedNotification({ participant: {} }).title).toBe('New Waiver Submitted');
     expect(JSON.stringify(payload)).not.toMatch(/Submission Time|Waiver ID|Admin Reference|timestamp/);
     expect(message.fields).toHaveLength(2);
     expect(buildWaiverSubmittedNotification({ participant: { full_name: 'John Smith' } }).fields[0].value).not.toMatch(/Phone|Email/);
   });
   it('separates minor guardians and never infers guardianship from an emergency contact', () => {
     const message = buildWaiverSubmittedNotification({ participant: { ...student, date_of_birth: '2015-01-01' }, emergencyContacts: [guardian, { ...guardian, name: 'Jim Smith', relationship: 'Father' }, { ...guardian, relationship: 'Friend' }] });
-    expect(message.fields.map(f => f.name)).toEqual(['Student', 'Parent / Guardian', 'Parent / Guardian', 'Emergency Contact', 'Medical & Injury Information']);
-    expect(message.fields[1].value).toContain('Mother');
+    expect(message.fields.map(f => f.name)).toEqual(['Student', 'Parent / Guardian · Mother', 'Parent / Guardian · Father', 'Emergency Contact · Friend', 'Medical & Injury']);
+    expect(buildWaiverSubmittedNotification({ participant: student, emergencyContacts: [{ name: 'Sam Lee' }] }).fields[1].name).toBe('Emergency Contact');
     expect(JSON.stringify(message)).not.toContain('2015-01-01');
   });
   it.each([
@@ -39,7 +43,7 @@ describe('operator summary', () => {
     { clearance_notes: 'PRIVATE precaution' },
   ])('reports disclosure presence without leaking medical wording %j', medicalInformation => {
     const message = buildWaiverSubmittedNotification({ participant: student, medicalInformation });
-    expect(message.fields.at(-1)?.value).toContain('disclosure present');
+    expect(message.fields.at(-1)?.value).toContain('Disclosure present');
     expect(JSON.stringify(message)).not.toContain('PRIVATE');
   });
   it('distinguishes explicit negative answers, partial answers, and missing information', () => {
@@ -59,6 +63,12 @@ describe('operator summary', () => {
     expect(embed.title.length + (embed.footer?.text.length ?? 0) + embed.fields.reduce((n,f) => n + f.name.length + f.value.length, 0)).toBeLessThanOrEqual(6000);
     expect(payload.allowed_mentions.parse).toEqual([]);
   });
+  it('sends untitled messages as bounded plain content without an embed', () => {
+    const payload = discordPayload({ content: 'c'.repeat(3000) });
+    expect(payload).not.toHaveProperty('embeds');
+    expect(payload.content).toHaveLength(2000);
+    expect(payload.allowed_mentions.parse).toEqual([]);
+  });
 });
 
 describe('two-message delivery', () => {
@@ -74,6 +84,10 @@ describe('two-message delivery', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('thread_id=123&wait=true');
     const form = fetchMock.mock.calls[1][1].body as FormData;
     expect(form).toBeInstanceOf(FormData);
+    const contactsPayload = JSON.parse(form.get('payload_json') as string);
+    expect(contactsPayload.content).toBe('Contact cards for John Smith — import each separately.');
+    expect(contactsPayload).not.toHaveProperty('embeds');
+    expect(contactsPayload.attachments.map(a => a.filename)).toEqual(['John_Smith_Student.vcf', 'Jane_Smith_Guardian.vcf']);
     expect(form.get('files[0]')).toBeInstanceOf(Blob);
     expect(await (form.get('files[1]') as Blob).text()).toContain('Guardian of John Smith');
     expect(fetchMock.mock.calls[1][1].headers).toBeUndefined();

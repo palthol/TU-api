@@ -8,19 +8,26 @@ storage bucket, scheduler, or unrelated webhook transport changes are required.
 
 After successful waiver and audit persistence, `submitWaiver.js` schedules:
 
-1. **New Waiver Submitted**: mobile-friendly Student, Parent / Guardian (when
-   explicitly identified), Emergency Contact (otherwise), and Medical & Injury
-   Information sections. Only supplied phone/email/relationship values appear.
-2. **Contacts Ready — <student name>**: individually labeled `.vcf` attachments.
+1. **New Waiver — <student name>** embed: mobile-friendly Student, Parent / Guardian
+   (when explicitly identified), Emergency Contact (otherwise), and Medical & Injury
+   sections. Each contact section lists the name, then only supplied phone and
+   email lines, without field labels. A supplied relationship is shown in the
+   section heading (for example `Parent / Guardian · Mother`). Each section ends
+   with a zero-width spacer line so sections are visually separated. When no
+   student name was supplied the title falls back to **New Waiver Submitted**.
+2. A plain-text caption, `Contact cards for <student name> — import each
+   separately.`, with individually labeled `.vcf` attachments. This message has
+   no embed, so Discord shows the cards directly under their own caption instead
+   of above a second embed.
 
 Discord does not display submission time, waiver ID, admin reference, or an embed
 timestamp. Those values remain in the existing database, operational logs,
 authenticated admin contracts, and the unchanged Slack waiver summary. The full
 signed waiver remains authoritative.
 
-The footer directs authorized staff to open the existing waiver viewer or admin
-waiver list, find the named student, and review the signed waiver. It is deliberately
-not a public medical-record URL. The authenticated review paths remain
+The footer (`Staff only · Full waiver in the waiver viewer`) directs authorized
+staff to the existing waiver viewer or admin waiver list to review the signed
+waiver. It is deliberately not a public medical-record URL. The authenticated review paths remain
 `GET /api/viewer/waiver-documents` (Cloudflare Access + email allowlist),
 `GET /api/admin/waivers` and `GET /api/admin/waivers/:id` (staff/admin key), and
 `GET /api/waivers/:id/pdf` (admin key). Existing admin detail returns signed asset
@@ -125,7 +132,8 @@ DOB, medical fields, and free-form unapproved notes are excluded.
 
 `sendDiscordNotification.js` extends the existing incoming webhook transport:
 JSON embeds for the summary, native `FormData` with `payload_json` and `files[n]`
-for attachments. Native fetch supplies multipart boundaries. `wait=true` requests
+for attachments. A message without a title is sent as plain `content` (bounded to
+2000 characters) with no embed; the contact-card message uses this form. Native fetch supplies multipart boundaries. `wait=true` requests
 server confirmation; existing query parameters such as `thread_id` are preserved.
 Cards are not uploaded to Supabase Storage. No bot or Cloudflare Worker is added.
 Discord itself hosts the delivered attachments; they remain personal data at the

@@ -18,7 +18,7 @@ export function medicalDisclosureStatus(medical) {
     injuries.other?.has, medical.had_recent_injury];
   const text = [medical.exercise_restriction, medical.injury_details, injuries.other?.details, medical.clearance_notes];
   if (flags.some(positive) || medical.physician_cleared === 'no' || text.some(contactText)) {
-    return 'Medical or injury disclosure present. Review the signed waiver before training.';
+    return 'Disclosure present — review the signed waiver before training.';
   }
   if (flags.every(negative)) return 'Explicit negative answers to condition and injury questions; no condition or injury disclosed.';
   if (flags.some(negative)) return 'No condition or injury disclosed in supplied answers; some information not provided.';
@@ -26,23 +26,32 @@ export function medicalDisclosureStatus(medical) {
 }
 
 const identity = (contact, nameKey) => [
-  contactText(contact?.[nameKey]) ? `Name: ${discordText(contact[nameKey])}` : 'Name not provided',
-  ...(contactText(contact?.relationship) ? [`Relationship: ${discordText(contact.relationship)}`] : []),
-  ...(contactText(contact?.phone) ? [`Phone: ${discordText(contact.phone)}`] : []),
-  ...(contactText(contact?.email) ? [`Email: ${discordText(contact.email)}`] : []),
+  contactText(contact?.[nameKey]) ? discordText(contact[nameKey]) : 'Name not provided',
+  ...(contactText(contact?.phone) ? [discordText(contact.phone)] : []),
+  ...(contactText(contact?.email) ? [discordText(contact.email)] : []),
 ].join('\n');
 
+const contactHeading = (contact) => {
+  const role = contactRole(contact.relationship) === 'Guardian' ? 'Parent / Guardian' : 'Emergency Contact';
+  return contactText(contact.relationship) ? `${role} · ${discordText(contact.relationship)}` : role;
+};
+
+// Discord trims trailing blank lines in embed fields; a zero-width line survives
+// and separates each section from the next heading.
+const SECTION_GAP = '\n\u200b';
+
 export function buildWaiverSubmittedNotification({ participant, emergencyContacts = [], medicalInformation }) {
+  const studentName = contactText(participant?.full_name);
   return {
-    title: 'New Waiver Submitted',
+    title: studentName ? `New Waiver — ${discordText(studentName)}` : 'New Waiver Submitted',
     fields: [
-      { name: 'Student', value: identity(participant, 'full_name') },
+      { name: 'Student', value: identity(participant, 'full_name') + SECTION_GAP },
       ...emergencyContacts.filter((c) => [c?.name, c?.relationship, c?.phone, c?.email].some(contactText)).map((c) => ({
-        name: contactRole(c.relationship) === 'Guardian' ? 'Parent / Guardian' : 'Emergency Contact',
-        value: identity(c, 'name'),
+        name: contactHeading(c),
+        value: identity(c, 'name') + SECTION_GAP,
       })),
-      { name: 'Medical & Injury Information', value: medicalDisclosureStatus(medicalInformation) },
+      { name: 'Medical & Injury', value: medicalDisclosureStatus(medicalInformation) + SECTION_GAP },
     ],
-    footerText: 'Authorized staff: open the existing waiver viewer or admin waiver list, find the student, and review the signed waiver. Discord is an operational summary.',
+    footerText: 'Staff only · Full waiver in the waiver viewer',
   };
 }

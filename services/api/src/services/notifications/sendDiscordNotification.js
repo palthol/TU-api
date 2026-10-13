@@ -4,9 +4,12 @@ const truncate = (value, limit) => {
   return text.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, '') + '…';
 };
 
+// Without a title, send plain message content (2000 characters) and no embed.
 // One embed, at most 25 fields and 6000 aggregate characters. Reserve room
 // for footer/title and stop adding fields when the available budget is spent.
-export function discordPayload({ title, fields = [], footerText }) {
+export function discordPayload({ title, fields = [], footerText, content }) {
+  const allowedMentions = { parse: [], users: [], roles: [], replied_user: false };
+  if (!title) return { content: truncate(content, 2000), allowed_mentions: allowedMentions };
   const embed = { title: truncate(title, 256), color: 0x2563eb, fields: [] };
   if (footerText) embed.footer = { text: truncate(footerText, 2048) };
   let remaining = 6000 - embed.title.length - (embed.footer?.text.length ?? 0);
@@ -18,7 +21,7 @@ export function discordPayload({ title, fields = [], footerText }) {
     embed.fields.push({ name, value, inline: Boolean(field.inline) });
     remaining -= name.length + value.length;
   }
-  return { embeds: [embed], allowed_mentions: { parse: [], users: [], roles: [], replied_user: false } };
+  return { embeds: [embed], allowed_mentions: allowedMentions };
 }
 
 /** Incoming webhook supports in-memory multipart attachments; no storage URLs.

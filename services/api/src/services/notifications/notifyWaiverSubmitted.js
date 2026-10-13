@@ -89,10 +89,11 @@ export function createWaiverNotifier({ retentionMs = 24 * 60 * 60 * 1000, maxEnt
           buildWaiverSubmittedNotification({ participant, emergencyContacts, medicalInformation }), { timeoutMs }));
         await deliver('discord', 'contacts', () => {
           const files = buildContactFiles(participant, emergencyContacts);
+          const studentName = discordText(participant?.full_name) || 'this student';
           return sendDiscordNotification(discord, {
-            title: `Contacts Ready — ${discordText(participant?.full_name)}`,
-            fields: files.map((file) => ({ name: file.role, value: discordText(file.filename) })),
-            footerText: files.length ? 'Import each contact separately into your phone.' : 'No named contacts were provided.',
+            content: files.length
+              ? `Contact cards for ${studentName} — import each separately.`
+              : `No named contacts were provided for ${studentName}.`,
           }, { timeoutMs, files });
         });
       }
