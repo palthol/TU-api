@@ -39,6 +39,7 @@ These stay in the live tree because they explain behavior that `admin-api.md` do
 | [phase2-high-impact-views.md](./phase2-high-impact-views.md) | Ops view semantics |
 | [phase3-analytics-views.md](./phase3-analytics-views.md) | Analytics view semantics |
 | [frontend-backend-payload.md](./frontend-backend-payload.md) | Waiver submit payload |
+| [discord-waiver-notifications.md](./discord-waiver-notifications.md) | Operator Discord summary, vCards, privacy and delivery limits |
 | [waiver-pdf-generation.md](./waiver-pdf-generation.md) | On-demand PDF renderer |
 | [waiver-entrypoint-automation-checklist.md](./waiver-entrypoint-automation-checklist.md) | Submit → account tether (implemented; leftover monitoring checks) |
 
