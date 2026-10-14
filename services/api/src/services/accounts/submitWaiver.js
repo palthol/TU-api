@@ -352,6 +352,8 @@ async function persistRelatedRows({
   locale,
   contentVersion,
 }) {
+  let emergencyContactPersisted = false;
+  let medicalPersisted = false;
   if (hasEmergencyContactDetails(emergencyContact)) {
     const emergencyPayload = {
       waiver_id: waiverId,
@@ -363,12 +365,14 @@ async function persistRelatedRows({
     };
     const { error: ecErr } = await supabase.from('emergency_contacts').insert(emergencyPayload);
     if (ecErr && !isUniqueViolation(ecErr)) console.error('emergency_contacts.insert error', ecErr);
+    emergencyContactPersisted = !ecErr;
   }
 
   const medicalPayload = buildMedicalHistoryPayload(waiverId, medicalInformation);
   if (medicalPayload) {
     const { error: mhErr } = await supabase.from('waiver_medical_histories').insert(medicalPayload);
     if (mhErr && !isUniqueViolation(mhErr)) console.error('waiver_medical_histories.insert error', mhErr);
+    medicalPersisted = !mhErr;
   }
 
   const { error: aErr } = await supabase.from('audit_trails').insert({
@@ -384,7 +388,7 @@ async function persistRelatedRows({
     console.error('audit_trails.insert error', aErr);
     return { error: aErr };
   }
-  return { error: null };
+  return { error: null, emergencyContactPersisted, medicalPersisted };
 }
 
 function scheduleWaiverNotification({
@@ -393,6 +397,8 @@ function scheduleWaiverNotification({
   participantId,
   participant,
   submittedAt,
+  emergencyContacts,
+  medicalInformation,
 }) {
   try {
     void Promise.resolve(
@@ -401,6 +407,8 @@ function scheduleWaiverNotification({
         participantId,
         participant,
         submittedAt,
+        emergencyContacts,
+        medicalInformation,
       }),
     ).catch((notificationError) => {
       const message = notificationError instanceof Error ? notificationError.message : String(notificationError);
@@ -712,6 +720,8 @@ export async function handleWaiverSubmit(req, res, deps) {
       participantId,
       participant,
       submittedAt,
+      emergencyContacts: related.emergencyContactPersisted ? [emergencyContact] : [],
+      medicalInformation: related.medicalPersisted ? medicalInformation : undefined,
     });
 
     return res.json({

@@ -1,5 +1,8 @@
 import { sendDiscordNotification } from './sendDiscordNotification.js';
 import { sendSlackNotification } from './sendSlackNotification.js';
+import { buildContactFiles } from './waiverContacts.js';
+import { buildWaiverSubmittedNotification, discordText } from './waiverSummary.js';
+export { buildWaiverSubmittedNotification } from './waiverSummary.js';
 
 const EVENT_NAME = 'waiver.submitted';
 
@@ -10,7 +13,7 @@ const formatSubmittedAt = (value) => {
   return date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 };
 
-export function buildWaiverSubmittedNotification({
+function buildSlackWaiverNotification({
   waiverId,
   participant,
   submittedAt,
@@ -31,72 +34,77 @@ export function buildWaiverSubmittedNotification({
   };
 }
 
-/**
- * Fan out a waiver submission notification to configured webhook providers.
- * Provider failures are logged and returned, but never thrown to the submit path.
+/** Process-local delivery receipts contain identifiers only, never waiver data.
+ * Replays coalesce while running and retry only unsuccessful message parts.
+ * No durable job exists: HTTP duplicate submissions still never re-notify.
  */
-export async function notifyWaiverSubmitted({
-  waiverId,
-  participantId,
-  participant,
-  submittedAt,
-  timeoutMs = 3000,
-  logger = console,
-}) {
-  const message = buildWaiverSubmittedNotification({ waiverId, participant, submittedAt });
-  const providers = [
-    {
-      name: 'discord',
-      webhookUrl: process.env.DISCORD_WEBHOOK_URL,
-      send: sendDiscordNotification,
-    },
-    {
-      name: 'slack',
-      webhookUrl: process.env.SLACK_WEBHOOK_URL,
-      send: sendSlackNotification,
-    },
-  ].filter((provider) => Boolean(provider.webhookUrl));
-
-  if (!providers.length) {
-    logger.warn('waiver.notification.no_providers_configured', {
-      eventName: EVENT_NAME,
-      waiverId,
-      participantId,
-    });
-    return [];
-  }
-
-  const results = await Promise.all(
-    providers.map(async (provider) => {
-      logger.info('waiver.notification.attempt', {
-        eventName: EVENT_NAME,
-        provider: provider.name,
-        waiverId,
-        participantId,
-      });
-
-      try {
-        await provider.send(provider.webhookUrl, message, { timeoutMs });
-        logger.info('waiver.notification.sent', {
-          eventName: EVENT_NAME,
-          provider: provider.name,
-          waiverId,
-          participantId,
-        });
-        return { provider: provider.name, ok: true };
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        logger.error('waiver.notification.failed', {
-          eventName: EVENT_NAME,
-          provider: provider.name,
-          waiverId,
-          participantId,
-          error: errorMessage,
-        });
-        return { provider: provider.name, ok: false, error: errorMessage };
+export function createWaiverNotifier({ retentionMs = 24 * 60 * 60 * 1000, maxEntries = 1000 } = {}) {
+  const receipts = new Map();
+  return async function notify({ waiverId, participantId, participant, submittedAt,
+    emergencyContacts = [], medicalInformation, timeoutMs = 3000, logger = console }) {
+    if (!waiverId) throw new Error('persisted_waiver_id_required');
+    for (const [key, entry] of receipts) {
+      if (!entry.running && Date.now() - entry.createdAt > retentionMs) receipts.delete(key);
+    }
+    let entry = receipts.get(waiverId);
+    if (entry?.running) return entry.running;
+    if (!entry) {
+      if (receipts.size >= maxEntries) {
+        // Keep existing receipts instead of evicting and silently double-posting.
+        logger.error('waiver.notification.capacity_exceeded', { waiverId, participantId });
+        return [{ provider: 'discord', ok: false, error: 'delivery_capacity_exceeded' }];
       }
-    }),
-  );
-
-  return results;
+      entry = { createdAt: Date.now(), delivered: new Set(), running: null };
+      receipts.set(waiverId, entry);
+    }
+    const run = async () => {
+      const results = [];
+      const deliver = async (provider, part, send) => {
+        const key = `${provider}:${part}`;
+        if (entry.delivered.has(key)) {
+          results.push({ provider, part, ok: true, skipped: true });
+          return;
+        }
+        const metadata = { eventName: EVENT_NAME, provider, part, waiverId, participantId };
+        logger.info('waiver.notification.attempt', metadata);
+        try {
+          await send();
+          entry.delivered.add(key);
+          logger.info('waiver.notification.sent', metadata);
+          results.push({ provider, part, ok: true });
+        } catch (error) {
+          // Never log network error text, webhook URLs, Discord response bodies,
+          // or attachment contents. Known transport errors contain no PII.
+          const code = /^discord_(http_\d+|timeout|network_error|rate_limited|webhook_not_configured)$/.test(error?.message)
+            ? error.message : 'notification_delivery_failed';
+          logger.error('waiver.notification.failed', { ...metadata, error: code });
+          results.push({ provider, part, ok: false, error: code });
+        }
+      };
+      const discord = process.env.DISCORD_WEBHOOK_URL;
+      const slack = process.env.SLACK_WEBHOOK_URL;
+      if (!discord && !slack) logger.warn('waiver.notification.no_providers_configured', { waiverId, participantId });
+      if (discord) {
+        await deliver('discord', 'summary', () => sendDiscordNotification(discord,
+          buildWaiverSubmittedNotification({ participant, emergencyContacts, medicalInformation }), { timeoutMs }));
+        await deliver('discord', 'contacts', () => {
+          const files = buildContactFiles(participant, emergencyContacts);
+          const studentName = discordText(participant?.full_name) || 'this student';
+          return sendDiscordNotification(discord, {
+            content: files.length
+              ? `Contact cards for ${studentName} — import each separately.`
+              : `No named contacts were provided for ${studentName}.`,
+          }, { timeoutMs, files });
+        });
+      }
+      // Preserve the existing Slack notification layout and single-message flow.
+      if (slack) await deliver('slack', 'summary', () => sendSlackNotification(slack,
+        buildSlackWaiverNotification({ waiverId, participant, submittedAt }), { timeoutMs }));
+      return results;
+    };
+    entry.running = run();
+    try { return await entry.running; } finally { entry.running = null; }
+  };
 }
+
+export const notifyWaiverSubmitted = createWaiverNotifier();

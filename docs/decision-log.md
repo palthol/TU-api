@@ -10,10 +10,11 @@ Entries are append-only. Supersede an earlier decision by referencing its ID.
 | API-ADR-004 | 2026-09-03 | Privileged multi-write operations should use transactional RPCs and idempotency where retryable. | accepted |
 | API-ADR-005 | 2026-09-14 | Staff identity uses per-person hashed API keys and roles on the existing `x-admin-key` header; the shared env key remains an owner compatibility actor. | accepted |
 | API-ADR-006 | 2026-09-16 | Card-processor webhooks use Stripe; public `POST /api/webhooks/stripe` verifies signatures and maps succeeded PaymentIntents into `record_payment`. | accepted |
+| API-ADR-007 | 2026-09-24 | Monthly billing scheduling will use a Cloudflare Worker calling the protected API endpoint; Render remains the API host and the existing Render cron guidance remains only for Discord notifications. | accepted |
 
 ## Open decisions
 
-- Deployment and scheduling platform ownership.
+- Deployment ownership beyond the accepted billing-scheduler decision (API-ADR-007), including implementation/deployment details for the Cloudflare Worker.
 - Email and SMS providers.
 - Long-term role of personal-finance entries versus formal billing.
 
