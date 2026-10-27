@@ -15,7 +15,10 @@ Doc map: `docs/README.md`. Historical checklists live in `docs/archive/`.
    **Cursor Cloud specific instructions**. Skip if already fast-forwarded.
 2. Read `docs/current-state.md` and this file.
 3. In `queue.json`, pick a task with `"status": "ready"` whose `depends_on` IDs are
-   all `"done"`. There is currently no `ready` task; the queue is complete.
+   all `"done"`. There is currently no `ready` task. Household billing
+   (`API-BILL-001`) is `in_progress` on `cursor/custom-household-billing` (no PR).
+   The September 2026 subscription backfill (`API-OPS-002`) is
+   `needs_verification`.
 4. Open `work-queue/tasks/<ID>.md`. If you cannot satisfy its constraints, stop.
 5. Copy `claims/TEMPLATE.md` to `claims/<ID>.md`. **If that path already exists,
    do not take the task.**
@@ -55,5 +58,10 @@ match that task's `status` in `queue.json`.
 | [API-AUTO-002](tasks/API-AUTO-002.md) | automation | done | API-OPS-001, API-VAL-001 | Deploy controlled Discord schedules |
 | [API-AUTH-001](tasks/API-AUTH-001.md) | security | done | API-OPS-001 | Design and implement staff RBAC |
 | [API-PAY-001](tasks/API-PAY-001.md) | integrations | done | API-HARD-001, API-AUTH-001 | Design payment-provider integration |
+| [API-AUTO-003](tasks/API-AUTO-003.md) | automation | done | API-AUTO-001, API-VAL-001 | V1 monthly charge generation (PRs #41/#42; released v1.1.0 via #43) |
+| [API-AUTO-004](tasks/API-AUTO-004.md) | automation | done | API-AUTO-003 | Cloudflare billing Worker (PRs #44/#45; on `main` via #47, not in v1.1.0) |
+| [API-AUTO-005](tasks/API-AUTO-005.md) | automation | done | API-AUTO-002 | Discord waiver summaries with vCards (PRs #46/#47, released 2026-10-14) |
+| [API-BILL-001](tasks/API-BILL-001.md) | backend | in_progress | API-AUTO-003, API-AUTO-004 | Custom household billing (`cursor/custom-household-billing`, no PR, 5 ahead / 3 behind `develop`) |
+| [API-OPS-002](tasks/API-OPS-002.md) | deployment | needs_verification | API-AUTO-003 | September 2026 subscription backfill SQL (`chore/subscription-backfill-2026-09`; apply unknown) |
 
-Queue complete: no `ready` successor. Production writes remain unauthorized. Live Stripe webhook registration and production `supabase db push` were not part of API-PAY-001.
+Next candidate: household billing (`API-BILL-001`) on `cursor/custom-household-billing` — in progress, untracked by a PR, 5 commits ahead and 3 behind `develop`. Do not treat it as `ready`. September 2026 backfill SQL (`API-OPS-002`) needs verification (unmerged; not known whether it was applied). Production writes remain unauthorized. Live Stripe webhook registration and production `supabase db push` were not part of API-PAY-001.
