@@ -1,6 +1,6 @@
 # API current state
 
-**Verified:** 2026-09-17 (live production route smoke, read-only); 2026-10-24 (work-queue refresh against git history, PRs #41–#47, tag `v1.1.0`, branches `cursor/custom-household-billing` and `chore/subscription-backfill-2026-09`; Discord waiver summaries released to `main`; Discord digest **live cron needs verification**); 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
+**Verified:** 2026-10-27 (live production route smoke, read-only; same gates as 2026-09-17); 2026-10-24 (work-queue refresh against git history, PRs #41–#47, tag `v1.1.0`, branches `cursor/custom-household-billing` and `chore/subscription-backfill-2026-09`; Discord waiver summaries released to `main`; Discord digest **live cron needs verification**); 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
 **Repository:** `palthol/TU-api`  
 **Production database:** Supabase `jhxzecxkccqlgyazhsnb`  
 **Deployed API:** Render — `https://api.templeunderground.com` (see [deployment.md](./deployment.md))
@@ -12,8 +12,8 @@ response contracts and `api-schema-audit.md` for detailed schema evidence.
 
 | Domain | Status | Evidence | Qualification |
 | --- | --- | --- | --- |
-| Deployment / health | verified | Live `/health` `{ok:true}` and `/health/deep` `{ok:true,db:true}` on both public hosts (2026-09-17) | Render dashboard service ID not readable via MCP |
-| Public/admin route gates | verified (live) | 85 cases × 2 hosts: public validation 400s; all `/api/admin/*` and PDF 401 without/wrong key | Authenticated admin success bodies not fetched (no production admin key in the smoke environment) |
+| Deployment / health | verified | Live `/health` `{ok:true}` and `/health/deep` `{ok:true,db:true}` on both public hosts (2026-10-27, unchanged since 2026-09-17) | Render dashboard service ID not readable via MCP |
+| Public/admin route gates | verified (live) | 80 cases × 2 hosts: public validation 400s; 67 admin/cron/PDF probes (61 no-key routes + 6 wrong-key) all `401 unauthorized` | Authenticated admin success bodies not fetched (no production admin key in the smoke environment) |
 | Waiver submission | verified | 32 participants and 36 waivers in production | Only workflow proven by production usage |
 | Schema | verified | Production `list_migrations` checked 2026-09-24 | Applied: `0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`, `20260914202053`, `20260916174649`, `20260916225225`, `20260921185003`, `20260921221500`. No known migration from that repository set remains pending production application. |
 | Public/admin routes | implemented | Routes mounted; API suite passes 18/18 | Most business routes lack integration tests |
@@ -32,17 +32,19 @@ Read-only production inspection on 2026-09-24 returned: participants 32; waivers
 No production writes were performed. Deployed Express host is **Render** at
 `https://api.templeunderground.com` (also
 `https://temple-underground-signup.onrender.com`). Both hosts returned identical
-status and error keys on the 2026-09-17 read-only smoke (85 cases each).
+status and error keys on the 2026-10-27 read-only smoke (80 cases each).
 
-Live checks (2026-09-17): `GET /health` → `{ok:true}`; `GET /health/deep` →
-`{ok:true,db:true}`; CORS `Access-Control-Allow-Origin: *` (including `OPTIONS`
-on `/api/lead` and `/api/admin/waivers`); invalid `POST /api/lead` and
-`POST /api/waivers/submit` → `400` with documented machine keys (no insert);
-unauthenticated and wrong-key admin/cron/PDF → `401 unauthorized`;
-`POST /api/webhooks/stripe` → `500 stripe_webhook_not_configured`;
-`GET /api/viewer/waiver-documents` → `503 viewer_access_not_configured`.
-Env **names** only are listed in [deployment.md](./deployment.md) and
-`services/api/.env.example`.
+Live checks (2026-10-27, same outcomes as 2026-09-17): `GET /health` → `{ok:true}`;
+`GET /health/deep` → `{ok:true,db:true}`; CORS still `Access-Control-Allow-Origin: *`
+(including `OPTIONS` on `/api/lead` and `/api/admin/waivers`); invalid
+`POST /api/lead` and `POST /api/waivers/submit` → `400` with documented machine
+keys (no insert); unauthenticated and wrong-key admin/cron/PDF →
+`401 unauthorized`; `POST /api/webhooks/stripe` →
+`500 stripe_webhook_not_configured` (`STRIPE_WEBHOOK_SECRET` still unset);
+`GET /api/viewer/waiver-documents` → `503 viewer_access_not_configured`
+(`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` still unset; response also includes a
+`hint` naming those env names). Env **names** only are listed in
+[deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Known gaps and risks
 
@@ -65,9 +67,9 @@ Env **names** only are listed in [deployment.md](./deployment.md) and
   `owner` / `front_desk` / `finance` (API-AUTH-001 / API-ADR-005). The shared
   `ADMIN_API_KEY` remains an owner compatibility actor (`legacy_shared_key`)
   until operators rotate. Migration `20260914185843` is applied in production; there are currently no `staff_users` rows, so the shared compatibility key may still be operationally relevant.
-- CORS defaults to `*` when `ALLOWED_ORIGIN` is absent; production currently reflects `*`.
-- Live `POST /api/webhooks/stripe` returns `500 stripe_webhook_not_configured` — `STRIPE_WEBHOOK_SECRET` is unset on the Render service (route is mounted; Stripe Dashboard endpoint still not registered).
-- Live `GET /api/viewer/waiver-documents` returns `503 viewer_access_not_configured` — `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are unset on the Render service.
+- CORS defaults to `*` when `ALLOWED_ORIGIN` is absent; production still reflects `*` (re-checked 2026-10-27; unchanged since 2026-09-17).
+- Live `POST /api/webhooks/stripe` still returns `500 stripe_webhook_not_configured` — `STRIPE_WEBHOOK_SECRET` remains unset on the Render service (route is mounted; Stripe Dashboard endpoint still not registered). Unchanged since 2026-09-17.
+- Live `GET /api/viewer/waiver-documents` still returns `503 viewer_access_not_configured` — `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` remain unset on the Render service. Unchanged since 2026-09-17.
 
 ## Verification baseline
 
@@ -75,7 +77,7 @@ Env **names** only are listed in [deployment.md](./deployment.md) and
 - Billing database lifecycle: 50/50 pgTAP assertions pass after a fresh native PostgreSQL migration replay + `supabase/seed.sql`. Local Supabase CLI could not start in the Cloud VM because no Docker daemon was available; PostgreSQL 16 + pgTAP was used as the isolated local fallback. No production connection or write occurred.
 - `npm run guard:waiver-schema`: passing.
 - Documentation refreshed against production `list_migrations`, production row counts, current billing RPC behavior, and scheduler decisions on 2026-09-24. Historical audit documents are explicitly labeled as historical. Cloudflare Worker source and deployment runbook were added in PR #44; deployment remains gated on billing-anchor and recurring discount fixes.
-- Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05). Live route smoke 2026-09-17: 85 cases on each host; no production writes; authenticated admin GETs skipped (no production admin key in the smoke environment).
+- Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05). Live route smoke 2026-10-27 (repeat of 2026-09-17): 80 cases on each host; no production writes; authenticated admin GETs skipped (no production admin key in the smoke environment). CORS `*`, unset `STRIPE_WEBHOOK_SECRET`, and unset Cloudflare Access env names are unchanged.
 - Discord cron runbook (API-AUTO-002): auth header `x-cron-secret` / env `CRON_SECRET`; digest `POST /api/admin/notifications/discord/daily-digest` at `0 13 * * *` UTC; `payment-reminders` not scheduled. Failure keys: `401 unauthorized`, `500 discord_webhook_not_configured`, `502 discord_*`. 2026-09-14 finding: live Render cron not created. 2026-10-24: cannot re-confirm Dashboard state (Render MCP unavailable).
 - Validation environment (API-GATE-001): seed/cleanup procedure in [validation-environment.md](./validation-environment.md). Production project `jhxzecxkccqlgyazhsnb` and `https://api.templeunderground.com` are out of bounds for VAL writes.
 - Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `20260914150818` is applied. Migration `20260914150818` (formerly `0022`) is applied in production.

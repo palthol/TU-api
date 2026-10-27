@@ -1,7 +1,7 @@
 # API deployment inventory
 
-**Verified:** 2026-09-17 (live route smoke, read-only); 2026-09-05 (API-OPS-001 host inventory)  
-**Task:** API-OPS-001 (inventory); 2026-09-17 smoke was read-only production inspection  
+**Verified:** 2026-10-27 (live route smoke, read-only; same gates as 2026-09-17); 2026-09-05 (API-OPS-001 host inventory)  
+**Task:** API-OPS-001 (inventory); 2026-10-27 smoke was read-only production inspection  
 **No production writes. No env values set or recorded.**
 
 ## Platform and public host
@@ -35,26 +35,32 @@ this Express service. Do not treat those Vercel URLs as the API host.
 | `GET /health` | `{ "ok": true }` | Liveness only; no DB |
 | `GET /health/deep` | `{ "ok": true, "db": true }` | Hits Supabase `participants` head select; `500` with `db: false` if Supabase missing/unreachable |
 
-Live check (2026-09-17, same as 2026-09-05): both paths returned HTTP 200 on
-`https://api.templeunderground.com` and
+Live check (2026-10-27, same as 2026-09-17 and 2026-09-05): both paths returned
+HTTP 200 on `https://api.templeunderground.com` and
 `https://temple-underground-signup.onrender.com`. Deep health body
 `{ "ok": true, "db": true }`.
 
 Root `GET /` is not a health route (Express `Cannot GET /`).
 
-## Live route smoke (2026-09-17)
+## Live route smoke (2026-10-27)
 
-Read-only. 85 cases on each host; status and error keys matched. No valid
-lead, waiver, billing, scheduling, Discord, or Stripe money-in payloads.
+Read-only. 80 cases on each host; status and error keys matched. Same areas as
+the 2026-09-17 matrix (67 admin/cron/PDF probes: 61 unauthenticated routes
+including all 19 reporting slugs, plus 6 wrong-key samples). No valid lead,
+waiver, billing, scheduling, Discord, or Stripe money-in payloads.
 
 | Area | Live result |
 | --- | --- |
 | Public lead `POST /api/lead` (invalid bodies) | `400` `invalid_first_name` / `invalid_goals` / `email_or_phone_required` / `invalid_email` |
 | Public waiver `POST /api/waivers/submit` (empty/incomplete) | `400` `{ ok:false, errors: [...] }` |
-| Admin, cron, on-demand PDF (no key or wrong `x-admin-key` / `x-cron-secret`) | `401` `{ ok:false, error:"unauthorized" }` — 67 routes including all 19 reporting slugs, staff, billing, scheduling, Discord, generate-monthly-charges |
-| Stripe `POST /api/webhooks/stripe` | Route mounted. `500` `{ ok:false, error:"stripe_webhook_not_configured" }` — `STRIPE_WEBHOOK_SECRET` unset. `x-admin-key` does not authenticate this route |
-| Viewer `GET /api/viewer/waiver-documents` | `503` `{ ok:false, error:"viewer_access_not_configured" }` — Cloudflare Access env names unset |
+| Admin, cron, on-demand PDF (no key or wrong `x-admin-key` / `x-cron-secret`) | `401` `{ ok:false, error:"unauthorized" }` — 67 probes including all 19 reporting slugs, staff, billing, scheduling, Discord, generate-monthly-charges |
+| Stripe `POST /api/webhooks/stripe` | Route mounted. `500` `{ ok:false, error:"stripe_webhook_not_configured" }` — `STRIPE_WEBHOOK_SECRET` still unset. `x-admin-key` does not authenticate this route |
+| Viewer `GET /api/viewer/waiver-documents` | `503` `{ ok:false, error:"viewer_access_not_configured" }` — Cloudflare Access env names still unset. Body also includes a `hint` naming `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` |
 | CORS | `access-control-allow-origin: *`. `OPTIONS /api/lead` and `OPTIONS /api/admin/waivers` → `204` |
+
+**Unchanged since 2026-09-17:** CORS `*`, `STRIPE_WEBHOOK_SECRET` unset,
+`CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` unset, health/deep-health 200, public
+validation 400s, admin/cron/PDF 401s. Both public hosts still match.
 
 Authenticated admin success bodies were **not** fetched (no production admin key
 in the smoke environment). Set `STRIPE_WEBHOOK_SECRET` on the Render web service
@@ -76,10 +82,11 @@ Code (`services/api/src/index.js`):
   (`cors()` with no origin restriction).
 - If `ALLOWED_ORIGIN` is set to a concrete origin → `cors({ origin: thatValue })`.
 
-Live observation (2026-09-17, same as 2026-09-05): responses include
-`access-control-allow-origin: *` (including preflight `OPTIONS` on `/api/lead`
-and `/api/admin/waivers`). That matches either unset `ALLOWED_ORIGIN` or an
-explicit `*`. **Do not change production CORS from this task.**
+Live observation (2026-10-27, same as 2026-09-17 and 2026-09-05): responses
+include `access-control-allow-origin: *` (including preflight `OPTIONS` on
+`/api/lead` and `/api/admin/waivers`). That matches either unset
+`ALLOWED_ORIGIN` or an explicit `*`. **Do not change production CORS from this
+task.**
 
 ## Environment variable names (no values)
 
@@ -95,8 +102,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `CRON_SECRET` | Shared secret for Discord cron routes (`x-cron-secret`). Optional until a scheduler is enabled; required on **both** the API web service and the cron job once Discord cron is live |
 | `DISCORD_WEBHOOK_URL` | Optional Discord webhook (read by the **API** service, not the cron job) |
 | `SLACK_WEBHOOK_URL` | Optional Slack webhook |
-| `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (viewer) |
-| `CF_ACCESS_AUD` | Cloudflare Access audience (viewer) |
+| `CF_ACCESS_TEAM_DOMAIN` | Cloudflare Access team domain (viewer). Live 2026-10-27 (same as 2026-09-17): unset (`viewer_access_not_configured`) |
+| `CF_ACCESS_AUD` | Cloudflare Access audience (viewer). Live 2026-10-27 (same as 2026-09-17): unset (`viewer_access_not_configured`) |
 | `WAIVER_VIEWER_DEV_BYPASS` | Dev-only viewer auth bypass |
 | `WAIVER_VIEWER_ALLOWED_EMAILS` | Viewer email allowlist |
 | `SIGNATURES_BUCKET` | Storage bucket (default `signatures`) |
@@ -105,7 +112,7 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `PDF_ORG_TAGLINE` | PDF letterhead tagline |
 | `PDF_ORG_ADDRESS` | PDF letterhead address |
 | `API_EXPOSE_DB_ERRORS` | Expose DB errors (non-production debugging only) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe-Signature verify for `POST /api/webhooks/stripe`. Live 2026-09-17: unset (`stripe_webhook_not_configured`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe-Signature verify for `POST /api/webhooks/stripe`. Live 2026-10-27 (same as 2026-09-17): unset (`stripe_webhook_not_configured`) |
 
 Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 
