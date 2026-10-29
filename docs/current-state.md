@@ -70,7 +70,7 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Verification baseline
 
-- `npm --workspace services/api test`: **191/191 passing**, 20 files (2026-10-01).
+- `npm --workspace services/api test`: **222/222 passing**, 21 files (2026-10-29, after merging `origin/develop`). Historical: 191/191, 20 files (2026-10-01, obligation branch before Discord waiver tests).
 - `npm run supabase:start` and `npm run test:billing-db`: local stack startup blocked by unavailable Docker/Podman; the CLI suite then reports connection refused at `127.0.0.1:54322`. No production connection was attempted.
 - `TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz node scripts/test-billing-pglite.mjs`: **165/165 pgTAP assertions passing** (37 legacy, 84 obligation, 44 reporting/integration). All repository migrations and catalog seed replay in a fresh in-memory PostgreSQL instance; the follow-up migration also reapplies successfully, and synthetic pre-existing subscriptions, charges, payments, and allocations survive both obligation migrations unchanged. RLS, private RPC grants, and service-role operations are exercised. See [reproduction instructions](validation-environment.md#isolated-postgresql-fallback-without-docker).
 - `npm run guard:waiver-schema`: passing. `git diff --check`: passing.
