@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "repository": "palthol/TU-api",
-  "updated": "2026-09-16",
+  "updated": "2026-10-24",
   "base_branch": "develop",
   "production_write_default": false,
   "task_dir": "work-queue/tasks",
@@ -145,6 +145,46 @@
         "services/api/src/",
         "supabase/migrations/"
       ]
+    },
+    {
+      "id": "API-AUTO-003",
+      "lane": "automation",
+      "status": "done",
+      "depends_on": ["API-AUTO-001", "API-VAL-001"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-AUTO-003.md"
+    },
+    {
+      "id": "API-AUTO-004",
+      "lane": "automation",
+      "status": "done",
+      "depends_on": ["API-AUTO-003"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-AUTO-004.md"
+    },
+    {
+      "id": "API-AUTO-005",
+      "lane": "automation",
+      "status": "done",
+      "depends_on": ["API-AUTO-002"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-AUTO-005.md"
+    },
+    {
+      "id": "API-BILL-001",
+      "lane": "backend",
+      "status": "in_progress",
+      "depends_on": ["API-AUTO-003", "API-AUTO-004"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-BILL-001.md"
+    },
+    {
+      "id": "API-OPS-002",
+      "lane": "deployment",
+      "status": "needs_verification",
+      "depends_on": ["API-AUTO-003"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-OPS-002.md"
     }
   ]
 }

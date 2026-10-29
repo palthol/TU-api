@@ -33,5 +33,13 @@
     "dotenv": "^16.4.5",
     "pg": "8.16.3",
     "supabase": "^2.75.5"
+  },
+  "overrides": {
+    "vite": "7.3.7",
+    "source-map-js": "1.2.2",
+    "vitest": "4.1.12",
+    "@vitest/coverage-v8": "4.1.12",
+    "@vitest/ui": "4.1.12",
+    "@vitest/mocker": "4.1.12"
   }
 }

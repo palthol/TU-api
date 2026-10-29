@@ -12,7 +12,7 @@ import {
 const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z2wAAAABJRU5ErkJggg==';
 
-function createIsolatedSupabase({ seed = {} } = {}) {
+function createIsolatedSupabase({ seed = {}, failInsertTable } = {}) {
   const tables = {};
   for (const [name, rows] of Object.entries(seed)) {
     tables[name] = rows.map((row) => ({ ...row }));
@@ -31,6 +31,7 @@ function createIsolatedSupabase({ seed = {} } = {}) {
       if (!tables[state.table]) tables[state.table] = [];
 
       if (state.action === 'insert') {
+        if (state.table === failInsertTable) return { data: null, error: { code: 'XX000', message: 'fixture insert failure' } };
         const payload = state.payload && typeof state.payload === 'object' ? state.payload : {};
         if (state.table === 'waivers' && payload.idempotency_key) {
           const dup = tables.waivers.find((row) => row.idempotency_key === payload.idempotency_key);
@@ -199,6 +200,46 @@ describe('waiver submit idempotency key helpers', () => {
 });
 
 describe('POST /api/waivers/submit', () => {
+  it('passes only persisted contact and medical data after related writes complete', async () => {
+    const { supabase, tables } = createIsolatedSupabase();
+    const emergency = { name: 'Jane Person', relationship: 'Mother', phone: '5559876543' };
+    const medical = { had_recent_injury: 'yes', injury_details: 'TU-TEST synthetic injury' };
+    const notify = vi.fn(async (input) => {
+      expect(tables.waivers).toHaveLength(1);
+      expect(tables.audit_trails).toHaveLength(1);
+      expect(tables.emergency_contacts).toHaveLength(1);
+      expect(tables.waiver_medical_histories).toHaveLength(1);
+      expect(input.emergencyContacts).toEqual([emergency]);
+      expect(input.medicalInformation).toEqual(medical);
+    });
+    const app = createSubmitApp({ supabase, notify });
+    const res = await request(app).post('/api/waivers/submit').send(validSubmitBody({ emergency_contact: emergency, medical_information: medical }));
+    expect(res.status).toBe(200);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['waivers', 'audit_trails'])('never notifies when %s persistence fails', async failInsertTable => {
+    const { supabase } = createIsolatedSupabase({ failInsertTable });
+    const notify = vi.fn(async () => []);
+    const res = await request(createSubmitApp({ supabase, notify })).post('/api/waivers/submit').send(validSubmitBody());
+    expect(res.status).toBe(500);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it.each(['emergency_contacts', 'waiver_medical_histories'])('omits unpersisted details when %s insert fails without changing existing success behavior', async failInsertTable => {
+    const { supabase } = createIsolatedSupabase({ failInsertTable });
+    const notify = vi.fn(async () => []);
+    const res = await request(createSubmitApp({ supabase, notify })).post('/api/waivers/submit').send(validSubmitBody({
+      emergency_contact: { name: 'Jane Person', relationship: 'Mother' },
+      medical_information: { had_recent_injury: 'yes' },
+    }));
+    expect(res.status).toBe(200);
+    expect(notify).toHaveBeenCalledTimes(1);
+    const input = notify.mock.calls[0][0];
+    if (failInsertTable === 'emergency_contacts') expect(input.emergencyContacts).toEqual([]);
+    else expect(input.medicalInformation).toBeUndefined();
+  });
+
   it('creates participant, account bind, and waiver on first submit', async () => {
     const { supabase, tables } = createIsolatedSupabase();
     const notify = vi.fn(async () => [{ provider: 'discord', ok: true }]);
@@ -289,7 +330,8 @@ describe('POST /api/waivers/submit', () => {
 
   it('leaves validation failures unchanged', async () => {
     const { supabase, tables } = createIsolatedSupabase();
-    const app = createSubmitApp({ supabase });
+    const notify = vi.fn(async () => []);
+    const app = createSubmitApp({ supabase, notify });
 
     const res = await request(app).post('/api/waivers/submit').send({
       participant: { full_name: 'X', date_of_birth: '', email: '', phone: '' },
@@ -308,6 +350,7 @@ describe('POST /api/waivers/submit', () => {
     expect(fields).toContain('legal_confirmation.accepted_terms');
     expect(fields).toContain('signature');
     expect(tables.waivers || []).toHaveLength(0);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('returns 409 when a client idempotency_key is reused for a different participant', async () => {
