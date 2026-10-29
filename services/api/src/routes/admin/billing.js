@@ -5,6 +5,8 @@
  * matches Discord notification auth (x-admin-key or x-cron-secret).
  */
 
+import { registerBillingObligationRoutes } from './billing-obligations.js';
+
 import { BillingService } from '../../services/billing/BillingService.js';
 
 const PAYMENT_METHODS = new Set(['cash', 'card', 'cashapp', 'venmo', 'paypal', 'zelle', 'other']);
@@ -74,6 +76,7 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
+  registerBillingObligationRoutes(router, { supabase });
   const billingService = supabase ? new BillingService(supabase) : null;
 
   router.post('/billing/external-counterparty-accounts', async (req, res) => {

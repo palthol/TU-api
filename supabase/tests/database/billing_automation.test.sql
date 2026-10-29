@@ -3,7 +3,7 @@ begin;
 create schema if not exists extensions;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(50);
+select no_plan();
 
 insert into public.participants (id, full_name, date_of_birth, email)
 select
@@ -247,293 +247,21 @@ select is(
   'a free monthly plan leaves automatic monetary billing disabled'
 );
 
--- Paid plans with an initial charge and the free plan are not part of the
--- explicit-false regression below. Leave the opted-out subscription active.
-update public.subscriptions
-set status = 'paused'
-where id in (
-  select (result->>'subscription_id')::uuid
-  from initial_results
-  where plan_name not like '%disabled'
-  union all
-  select (result->>'subscription_id')::uuid from free_result
-);
-
-create temp table opted_out_same_period as
-select * from private.generate_monthly_charges_as_of(current_date);
-select is(
-  (select count(*) from opted_out_same_period),
-  0::bigint,
-  'create_initial_charge false remains uncharged during the current period'
-);
-
-create temp table opted_out_next_period as
-select *
-from private.generate_monthly_charges_as_of(
-  (date_trunc('month', current_date::timestamp) + interval '1 month')::date
-);
-select is(
-  (select count(*) from opted_out_next_period),
-  1::bigint,
-  'create_initial_charge false generates exactly one charge in the next period'
-);
-select is(
-  (
-    select coverage_start
-    from opted_out_next_period
-  ),
-  (date_trunc('month', current_date::timestamp) + interval '1 month')::date,
-  'opted-out subscription first recurring charge starts at its persisted baseline'
-);
-
-update public.subscriptions
-set status = 'paused'
-where id = (
-  select (result->>'subscription_id')::uuid
-  from initial_results
-  where plan_name like '%disabled'
-);
-
-insert into public.subscriptions (
-  id,
-  account_id,
-  participant_id,
-  plan_definition_id,
-  status,
-  starts_at,
-  ends_at,
-  automatic_billing_starts_at,
-  notes
-)
-values
-  (
-    '40000000-0000-4000-8000-000000000001',
-    '20000000-0000-4000-8000-000000000006',
-    '10000000-0000-4000-8000-000000000006',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'active',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'historical bootstrap baseline'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000002',
-    '20000000-0000-4000-8000-000000000007',
-    '10000000-0000-4000-8000-000000000007',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'cancelled',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'cancelled'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000003',
-    '20000000-0000-4000-8000-000000000008',
-    '10000000-0000-4000-8000-000000000008',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'paused',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'paused'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000004',
-    '20000000-0000-4000-8000-000000000009',
-    '10000000-0000-4000-8000-000000000009',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'expired',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'expired'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000005',
-    '20000000-0000-4000-8000-000000000010',
-    '10000000-0000-4000-8000-000000000010',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'active',
-    date '2026-01-15',
-    date '2026-06-09',
-    date '2026-01-15',
-    'ended before billing date'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000006',
-    '20000000-0000-4000-8000-000000000011',
-    '10000000-0000-4000-8000-000000000011',
-    (select id from public.plan_definitions where name = 'Jennifer Hill Unlimited Plan'),
-    'active',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'non-monthly'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000007',
-    '20000000-0000-4000-8000-000000000012',
-    '10000000-0000-4000-8000-000000000012',
-    '30000000-0000-4000-8000-000000000001',
-    'active',
-    date '2026-01-15',
-    null,
-    date '2026-01-15',
-    'free monthly'
-  ),
-  (
-    '40000000-0000-4000-8000-000000000008',
-    '20000000-0000-4000-8000-000000000013',
-    '10000000-0000-4000-8000-000000000013',
-    (select id from public.plan_definitions where name = 'Basic Group Plan'),
-    'active',
-    date '2026-01-15',
-    null,
-    null,
-    'existing subscription without an operator-approved automation baseline'
-  );
-
-create temp table first_run as
-select * from private.generate_monthly_charges_as_of(date '2026-06-10');
-
-select is((select count(*) from first_run), 1::bigint, 'first eligible execution creates one due charge');
-select is(
-  (select subscription_id from first_run),
-  '40000000-0000-4000-8000-000000000001'::uuid,
-  'the first run only charges the active paid monthly subscription'
-);
-select is(
-  (select coverage_start from first_run),
-  date '2026-06-10',
-  'historical subscription begins at the current bootstrap baseline, not its old start date'
-);
-select is(
-  (select coverage_end from first_run),
-  date '2026-06-30',
-  'historical bootstrap charge covers only the remaining current month'
-);
-select is(
-  (
-    select count(*)
-    from first_run
-    where amount_cents = 10000 and due_at = date '2026-06-10'
-  ),
-  1::bigint,
-  'generated charge has the expected amount and due date'
-);
-
-create temp table second_run as
-select * from private.generate_monthly_charges_as_of(date '2026-06-10');
-select is((select count(*) from second_run), 0::bigint, 'second same-day execution creates nothing');
-
-create temp table third_run as
-select * from private.generate_monthly_charges_as_of(date '2026-06-10');
-select is((select count(*) from third_run), 0::bigint, 'repeated same-day execution remains safe');
-
-create temp table future_run as
-select * from private.generate_monthly_charges_as_of(date '2026-07-01');
-select is((select count(*) from future_run), 1::bigint, 'future billing period creates exactly one new charge');
-select is(
-  (
-    select count(*)
-    from future_run
-    where coverage_start = date '2026-07-01'
-      and coverage_end = date '2026-07-31'
-      and due_at = date '2026-07-01'
-  ),
-  1::bigint,
-  'future charge has the correct coverage and due dates'
-);
-select is(
-  (
-    select count(*)
-    from public.charges
-    where subscription_id = '40000000-0000-4000-8000-000000000001'
-  ),
-  2::bigint,
-  'eligible subscription has exactly one charge for each tested period'
-);
-select is(
-  (
-    select count(*)
-    from public.charges
-    where subscription_id in (
-      '40000000-0000-4000-8000-000000000002',
-      '40000000-0000-4000-8000-000000000003',
-      '40000000-0000-4000-8000-000000000004',
-      '40000000-0000-4000-8000-000000000005',
-      '40000000-0000-4000-8000-000000000006',
-      '40000000-0000-4000-8000-000000000007',
-      '40000000-0000-4000-8000-000000000008'
-    )
-  ),
-  0::bigint,
-  'cancelled, paused, expired, ended, non-monthly, free, and unanchored subscriptions create no charges'
-);
-select is(
-  (
-    select charge_kind
-    from public.charges
-    where subscription_id = '40000000-0000-4000-8000-000000000001'
-      and coverage_start = date '2026-07-01'
-  ),
-  'monthly_period',
-  'generated recurring charges are classified as monthly period charges'
-);
+-- The obligation generator must ignore legacy enrollment automation flags.
+select is((select count(*) from private.generate_monthly_charges_as_of(current_date)),
+  0::bigint, 'legacy subscriptions without obligations create no recurring charges');
+select is((select count(*) from private.generate_monthly_charges_as_of((current_date + interval '1 month')::date)),
+  0::bigint, 'legacy subscriptions remain unbilled next month without obligations');
 select throws_ok(
-  $$
-    insert into public.charges (
-      account_id,
-      subscription_id,
-      amount_cents,
-      coverage_start,
-      coverage_end,
-      due_at,
-      status,
-      charge_kind
-    )
-    values (
-      '20000000-0000-4000-8000-000000000006',
-      '40000000-0000-4000-8000-000000000001',
-      10000,
-      date '2026-07-01',
-      date '2026-07-31',
-      date '2026-07-01',
-      'open',
-      'monthly_period'
-    )
-  $$,
-  '23505',
-  null,
-  'database invariant rejects a duplicate non-void monthly period'
-);
+  $$ insert into public.charges(account_id,subscription_id,amount_cents,coverage_start,coverage_end,due_at,charge_kind)
+     select account_id,subscription_id,amount_cents,coverage_start,coverage_end,due_at,charge_kind
+     from public.charges where account_id = '20000000-0000-4000-8000-000000000001' $$,
+  '23505', null, 'legacy subscription monthly-period uniqueness is preserved');
 select lives_ok(
-  $$
-    insert into public.charges (
-      account_id,
-      subscription_id,
-      amount_cents,
-      coverage_start,
-      coverage_end,
-      due_at,
-      status,
-      charge_kind
-    )
-    values (
-      '20000000-0000-4000-8000-000000000006',
-      '40000000-0000-4000-8000-000000000001',
-      2500,
-      date '2026-07-01',
-      date '2026-07-01',
-      date '2026-07-01',
-      'open',
-      'per_class'
-    )
-  $$,
-  'a per-class charge may share a coverage start with a monthly period charge'
-);
+  $$ insert into public.charges(account_id,subscription_id,amount_cents,coverage_start,coverage_end,due_at,charge_kind)
+     select account_id,subscription_id,100,coverage_start,coverage_end,due_at,'manual'
+     from public.charges where account_id = '20000000-0000-4000-8000-000000000001' $$,
+  'manual charges remain outside legacy monthly-period uniqueness');
 
 insert into public.participants (id, full_name, date_of_birth, email)
 select
@@ -781,8 +509,8 @@ from private.generate_monthly_charges_as_of(
 );
 select is(
   (select count(*) from conversion_next_period),
-  2::bigint,
-  'each converted subscription receives one charge in the next period'
+  0::bigint,
+  'converted subscriptions require explicit obligations for future recurring charges'
 );
 select is(
   (
@@ -792,8 +520,8 @@ select is(
       date_trunc('month', current_date::timestamp) + interval '1 month'
     )::date
   ),
-  2::bigint,
-  'converted recurring charges start at the persisted anchor'
+  0::bigint,
+  'legacy conversion anchors alone do not authorize recurring charges'
 );
 
 create temp table conversion_next_period_repeat as
@@ -812,8 +540,8 @@ select is(
     from public.charges
     where subscription_id = (select new_subscription_id from conversion_with_charge)
   ),
-  2::bigint,
-  'converted subscription with an initial charge gains exactly one later recurring charge'
+  1::bigint,
+  'conversion retains its one-off initial charge only'
 );
 select is(
   (
@@ -821,8 +549,8 @@ select is(
     from public.charges
     where subscription_id = (select new_subscription_id from conversion_without_charge)
   ),
-  1::bigint,
-  'converted subscription without an initial charge gains exactly one recurring charge'
+  0::bigint,
+  'conversion without an initial charge remains unbilled without an obligation'
 );
 
 update public.subscriptions

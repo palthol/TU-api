@@ -1,5 +1,7 @@
 /** Slug -> exact Postgres view name (public schema) */
 export const REPORTING_VIEWS = Object.freeze({
+  'payer-charge-board': 'view_payer_charge_board',
+  'payer-payment-reminders': 'view_payer_payment_reminders',
   'primary-kpis': 'view_analytics_primary_kpis_monthly',
   'payment-board': 'view_member_payment_board',
   'payment-reminders': 'view_member_payment_reminders',
@@ -22,6 +24,14 @@ export const REPORTING_VIEWS = Object.freeze({
 });
 
 export const REPORTING_VIEW_CONFIG = Object.freeze({
+  'payer-charge-board': {
+    dateColumn: 'due_at', defaultSort: 'due_at',
+    sortableColumns: ['due_at', 'payer_name', 'outstanding_cents', 'charge_id', 'billing_obligation_id'],
+  },
+  'payer-payment-reminders': {
+    dateColumn: 'due_at', defaultSort: 'due_at',
+    sortableColumns: ['due_at', 'payer_name', 'outstanding_cents', 'days_late', 'reminder_bucket', 'charge_id'],
+  },
   'primary-kpis': {
     dateColumn: 'month_start',
     defaultSort: 'month_start',
