@@ -1,6 +1,6 @@
 # API current state
 
-**Verified:** 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
+**Verified:** 2026-10-29 (merged `origin/develop` into `cursor/custom-household-billing`; owner-approved deletion of remote `chore/subscription-backfill-2026-09`); 2026-10-24 (work-queue refresh against git history, PRs #41–#47, tag `v1.1.0`; Discord waiver summaries released to `main`; Discord digest **live cron needs verification**); 2026-10-03 (local obligation implementation; 191 API tests and 177 isolated PostgreSQL/pgTAP assertions; no production access); 2026-09-29 (Cloudflare Worker source added; production deployment remains gated); 2026-09-24 (production migration history, production row-count snapshot, billing scheduler decision, subscription-generator limitations); 2026-09-21 (billing uniqueness scope and per-class conversion anchor); 2026-09-16 (Stripe webhook → `record_payment`); 2026-09-14 (Discord cron runbook; staff RBAC; schedule templates); 2026-09-05 (deploy inventory)
 **Repository:** `palthol/TU-api`  
 **Production database:** Supabase `jhxzecxkccqlgyazhsnb`  
 **Deployed API:** Render — `https://api.templeunderground.com` (see [deployment.md](./deployment.md))
@@ -8,19 +8,29 @@
 This is the API repository's status source of truth. Use `admin-api.md` for request and
 response contracts and `api-schema-audit.md` for detailed schema evidence.
 
+**Local verification update — 2026-10-03:** branch `cursor/custom-household-billing`,
+commit `0c97a4cce45cb69bf2c86d690f5152ef1b3a0708` plus uncommitted corrective migration
+`20261003045729`. Real Docker/Supabase PostgreSQL 17.6 replayed all 31 migrations;
+191 API unit tests, 177 pgTAP assertions, populated-history preservation/reapplication,
+and 22 live database/HTTP/concurrency scenarios passed. The original mixed-enrollment
+gap was reproduced and fixed with a shared participant lock and overlap rejection.
+The 2026-10-01 Docker/HTTP/concurrency blockers below are historical, not current.
+No production contact, commit/push, deployment, backfill or cron enabling occurred.
+See [the full validation report](obligation-validation-attempt-2026-10-03.md).
+
 ## Status
 
 | Domain | Status | Evidence | Qualification |
 | --- | --- | --- | --- |
 | Deployment / health | verified | Live `/health` and `/health/deep` on public host | Render dashboard service ID not readable via MCP |
 | Waiver submission | verified | 32 participants and 36 waivers in production | Only workflow proven by production usage |
-| Schema | verified | Production `list_migrations` checked 2026-09-24 | Applied: `0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`, `20260914202053`, `20260916174649`, `20260916225225`, `20260921185003`, `20260921221500`. No known migration from that repository set remains pending production application. |
+| Schema | verified for the 2026-09-24 production set; obligation migrations in-repo only | Production `list_migrations` checked 2026-09-24 | Applied: `0001`–`0020`, `20260608191715`, `20260914150818`, `20260914185843`, `20260914202053`, `20260916174649`, `20260916225225`, `20260921185003`, `20260921221500`. **Not applied:** `20260930063526`, `20261001080133`, `20261003045729` (payer obligations, reporting/entitlements, serialized enrollment). Production schema writes remain unauthorized. |
 | Public/admin routes | implemented | Routes mounted; API suite passes 18/18 | Most business routes lack integration tests |
-| Reporting | implemented | All 19 referenced views exist | Most operational source tables are empty |
-| Billing/receipts | schema verified; automation gated | Production migrations for atomic payment recording, processor references, and V1 monthly generation are applied. Production snapshot still has 0 subscriptions, charges, payments, and receipts. | Do not enable recurring billing yet: the current generator ends periods at the calendar-month boundary instead of preserving billing anchors such as the 26th/29th, and recurring family/custom discounts are not persisted as generation policy. Cloudflare Worker is the selected scheduler; source is now in `workers/billing-cron/` but is not deployed/configured. |
-| Subscriptions | verified (non-prod) | Local smoke (API-VAL-002): `POST /api/admin/billing/subscriptions` for TU-TEST participant + Basic Group Plan (`create_subscription`, monthly `create_initial_charge`). Billing pgTAP verifies the $100 Basic, $150 Core, and $200 Unlimited plans create exactly one correct initial charge, explicit disable remains uncharged for the current period and begins next-period automation, free monthly plans create no charge, and paid per-class conversions persist `automatic_billing_starts_at` for the next period. | Production still has 0 subscriptions. API omission defaults initial charging only for paid monthly plans |
+| Reporting | obligation-aware backend validated locally | Real PostgREST payer views, payment balances, both reminder consumers with loopback transport stub; legacy contracts retained | Sibling frontend adoption and operator review pending |
+| Billing/receipts | explicit payer obligations validated locally; deployment gated | 177 real PostgreSQL assertions and 22 live scenarios include generation/lifecycle races, independent payer cycles and atomic payment/reporting flows | No production changes or verification on 2026-10-03. No production obligation backfill/activation. Worker cron list remains empty. Sibling frontend adoption, operator review and explicit rollout approval remain gates. |
+| Subscriptions | legacy one-off behavior retained; recurring terms separated | Enrollment/conversion/proration/per-class regressions pass; `automatic_billing_starts_at` stays in responses but is ignored by the new generator | No automatic obligation inference. Explicit `/billing/obligations/:id/entitlements` enrolls/changes covered monthly access without debt; paid upgrade APIs still mean an explicit one-off charge. Production counts below are the historical snapshot, not a fresh query. |
 | Scheduling | schema applied; production data empty | `20260914202053` (`generate_sessions`) is applied; local route/RPC tests cover template/session flows | Production still has 0 sessions and attendance rows. **Entitlement:** default `enforce_entitlement: true` blocks when `can_attend_group_session` is false; `enforce_entitlement: false` bypasses that check. |
-| Notifications | schedule documented; live cron not enabled | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md) | Digest once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled (same overdue / due-soon list as digest). Render MCP unauthorized; no live job created |
+| Notifications | needs verification | Discord routes exist; Render cron runbook in [deployment.md](./deployment.md); no in-repo scheduler (`render.yaml` absent). 2026-10-24: Render MCP tool discovery failed; Render CLI not installed; cannot list Dashboard cron jobs. Last documented check 2026-09-14: MCP unauthorized and no live job created from API-AUTO-002. | Digest remains documented as once daily (`0 13 * * *` UTC). Dedicated `payment-reminders` cron **not** scheduled in the runbook (same overdue / due-soon list as digest). Do not treat “live cron not enabled” as re-confirmed. |
 | On-demand waiver PDF | implemented, unwired | Renderer/route tests pass | Active admin UI uses stored signed PDF URLs |
 | Non-prod validation env | documented | [validation-environment.md](./validation-environment.md) | Local Supabase + local API only; production `jhxzecxkccqlgyazhsnb` is out of bounds |
 
@@ -44,13 +54,13 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
   extra waivers or accounts (API-HARD-002). Storage + DB remain non-atomic:
   orphan signature/PDF objects and missing related rows are still possible if
   the first attempt dies mid-flow.
-- `npm ci` fails because the lockfile omits platform packages required by the declared
-  Supabase CLI version.
-- Dependency audit reported 3 moderate findings on 2026-09-03.
-- No route-level suites cover the main billing, subscription, scheduling, or reporting
-  workflows.
-- Monthly-charge generation migrations are applied, but automation is intentionally gated. The current generator uses calendar-month period ends, so a member billed on September 26 would receive September 26–30 instead of September 26–October 25. It also has no persistent recurring family/custom discount policy. Fix those semantics before setting `automatic_billing_starts_at` or deploying the selected Cloudflare Worker scheduler. Worker source and its deployment runbook are in `workers/billing-cron/`.
-- Discord notifications: operator Render cron runbook is in [deployment.md](./deployment.md) (API-AUTO-002). Live cron was **not** enabled (Render MCP unauthorized; avoid silent production Discord posts). Digest is the only recommended scheduled job; `payment-reminders` stays on-demand because it repeats digest’s overdue / due-soon list. Handlers have no last-run marker, so a manual Trigger Run plus the scheduled tick can still double-post.
+- `npm ci` succeeds after develop’s 2026-10-24 lockfile/security merge (`vite` 7.3.7, `vitest` 4.1.12 overrides). `npm audit` reports 0 vulnerabilities (2026-10-29).
+- Historical note: 2026-09-03 dependency audit had 3 moderate findings; those were patched on develop (PR #49) without major bumps.
+- Route-level billing, subscription, scheduling, and obligation suites pass using in-process fixtures; they do not prove production integration.
+- Production's historical generator remains unchanged by this work. Locally, `20260930063526_account_billing_obligations.sql` implements explicit payer amounts, multiple obligations per account, stable anchored periods, and obligation-period uniqueness including voids. No legacy subscription is automatically charged by the new generator. See [design and lifecycle rules](recurring-billing-obligations.md).
+- Worker deployment remains disabled (`triggers.crons = []`). Before approval, complete non-production Supabase/PostgREST/concurrent-run validation and operator agreement review. The in-memory PostgreSQL fallback ran real migrations and pgTAP, but does not validate multiple database connections or the Supabase HTTP layer.
+- Additive payer reports now expose one row per charge with canonical outstanding debt and nested participant coverage; both Discord handlers consume payer reminders. Legacy member reports retain their old contracts. Sibling frontend adoption and operator review remain gates. Today-only covered entitlement changes create no charges; legacy paid upgrades are unchanged. Replacement cutovers require a shared boundary and cannot precede the predecessor billing start; unmatched anchor changes and missed periods/proration require explicit operator handling.
+- Discord notifications: operator Render cron runbook is in [deployment.md](./deployment.md) (API-AUTO-002). **Live cron enablement needs verification** (2026-10-24): no `render.yaml`, Render MCP unavailable, last written check 2026-09-14 said no live job was created. Digest is the only recommended scheduled job; `payment-reminders` stays on-demand because it repeats digest’s overdue / due-soon list. Handlers have no last-run marker, so a manual Trigger Run plus the scheduled tick can still double-post.
 - Schedule-template CRUD and recurring-session generation exist in-repo (API-SCHED-001); migration `20260914202053` is applied in production.
 - Staff authorization is per-person hashed `x-admin-key` values with roles
   `owner` / `front_desk` / `finance` (API-AUTH-001 / API-ADR-005). The shared
@@ -60,12 +70,13 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 
 ## Verification baseline
 
-- `npm --workspace services/api test`: 140/140 passing.
-- Billing database lifecycle: 50/50 pgTAP assertions pass after a fresh native PostgreSQL migration replay + `supabase/seed.sql`. Local Supabase CLI could not start in the Cloud VM because no Docker daemon was available; PostgreSQL 16 + pgTAP was used as the isolated local fallback. No production connection or write occurred.
-- `npm run guard:waiver-schema`: passing.
-- Documentation refreshed against production `list_migrations`, production row counts, current billing RPC behavior, and scheduler decisions on 2026-09-24. Historical audit documents are explicitly labeled as historical. Cloudflare Worker source and deployment runbook were added in PR #44; deployment remains gated on billing-anchor and recurring discount fixes.
+- `npm --workspace services/api test`: **222/222 passing**, 21 files (2026-10-29, after merging `origin/develop`). Historical: 191/191, 20 files (2026-10-01, obligation branch before Discord waiver tests).
+- `npm run supabase:start` and `npm run test:billing-db`: local stack startup blocked by unavailable Docker/Podman; the CLI suite then reports connection refused at `127.0.0.1:54322`. No production connection was attempted.
+- `TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz node scripts/test-billing-pglite.mjs`: **165/165 pgTAP assertions passing** (37 legacy, 84 obligation, 44 reporting/integration). All repository migrations and catalog seed replay in a fresh in-memory PostgreSQL instance; the follow-up migration also reapplies successfully, and synthetic pre-existing subscriptions, charges, payments, and allocations survive both obligation migrations unchanged. RLS, private RPC grants, and service-role operations are exercised. See [reproduction instructions](validation-environment.md#isolated-postgresql-fallback-without-docker).
+- `npm run guard:waiver-schema`: passing. `git diff --check`: passing.
+- No production access, migration, seed, obligation activation, Worker deployment, queue modification, push, or merge occurred. Production evidence in the snapshot above remains dated 2026-09-24.
 - Deploy inventory (API-OPS-001): public host + health documented in [deployment.md](./deployment.md) (2026-09-05).
-- Discord cron runbook (API-AUTO-002): auth header `x-cron-secret` / env `CRON_SECRET`; digest `POST /api/admin/notifications/discord/daily-digest` at `0 13 * * *` UTC; `payment-reminders` not scheduled. Failure keys: `401 unauthorized`, `500 discord_webhook_not_configured`, `502 discord_*`. Live Render cron not created.
+- Discord cron runbook (API-AUTO-002): auth header `x-cron-secret` / env `CRON_SECRET`; digest `POST /api/admin/notifications/discord/daily-digest` at `0 13 * * *` UTC; `payment-reminders` not scheduled. Failure keys: `401 unauthorized`, `500 discord_webhook_not_configured`, `502 discord_*`. 2026-09-14 finding: live Render cron not created. 2026-10-24: cannot re-confirm Dashboard state (Render MCP unavailable).
 - Validation environment (API-GATE-001): seed/cleanup procedure in [validation-environment.md](./validation-environment.md). Production project `jhxzecxkccqlgyazhsnb` and `https://api.templeunderground.com` are out of bounds for VAL writes.
 - Waiver submit idempotency (API-HARD-002): Vitest covers first submit, duplicate replay, notification throw, unchanged validation errors, and a missing-column fallback so live submits still work before `20260914150818` is applied. Migration `20260914150818` (formerly `0022`) is applied in production.
 - Staff RBAC (API-AUTH-001): Vitest covers missing/wrong key (`401 unauthorized`), shared-key owner compatibility, personal staff keys, finance/front_desk `403 forbidden`, cron `x-cron-secret` actor, and owner staff CRUD. Migration `20260914185843` (formerly `0023`) is applied in production.
@@ -73,6 +84,24 @@ in [deployment.md](./deployment.md) and `services/api/.env.example`.
 - Atomic record-payment (API-HARD-001): Vitest covers RPC success, RPC failure with no leftover rows, idempotent retry, idempotency-key conflict, and missing-function sequential fallback. Migration `20260916174649` is applied in production.
 - Stripe webhook (API-PAY-001): Vitest covers signature accept/reject, `payment_intent.succeeded` → `record_payment` (`method=card`, `issued_by=stripe_webhook`, `idempotency_key=stripe:pi_…`), duplicate event replay with one payment, unmatched metadata `400 unmatched_payment`, missing RPC `503` with no sequential inserts, ignored `charge.succeeded`, `refund.created` → `record_payment_refund`, and refund-before-payment `400 payment_not_found`. Migration `20260916225225` is applied in production. Env name `STRIPE_WEBHOOK_SECRET` only.
 
-## Discord waiver contact feature (implementation, not production verification)
+## Follow-up review evidence (2026-10-01)
 
-Feature branch adds two Discord messages per newly persisted waiver: operator summary and separate vCard attachments. Medical wording is withheld because Discord channel permissions/consent are not established. Existing Slack layout, persistence and other notification workflows remain unchanged. API suite: 170/170 passed; waiver guard passed; independent synthetic vCard parser validation passed. Device import, real Discord attachment UI, and durable delivery remain unverified. Delivery receipts are process-local, not an outbox. See [discord-waiver-notifications.md](./discord-waiver-notifications.md) for actual guardian/medical mappings and limitations. No production data or infrastructure changes were made.
+Starting commit `da021cfd63b87a868947d03cb2f3e15d70488666`, same branch. New
+migration `20261001080133_obligation_reporting_entitlements.sql` rejects chained
+replacement cutovers before the predecessor's start, adds invoker payer reports,
+and exposes a service-only no-charge entitlement RPC. API adds one owner/finance
+route, two report slugs, and switches Discord handlers to issued-charge debt.
+No production access, real notification sends, queue edits, push, merge, or deploy.
+Worker `triggers.crons` remains empty. No rollout action is authorized by these repository changes.
+
+Populated replay compares the complete original subscription, charge (excluding
+the added null obligation column), payment and allocation JSON before/after both
+obligation migrations and follow-up reapplication. It also verifies that the
+migrations create no obligations and legacy automation creates no debt.
+Single-session SQL tests and mocked API tests do not establish multiple-connection
+serialization, PostgREST schema discovery/authentication, or Supabase integration.
+Full commands and blockers are in `validation-environment.md`.
+
+## Discord waiver contact feature (released 2026-10-14)
+
+Released to `main` on 2026-10-14 via [PR #47](https://github.com/palthol/TU-api/pull/47); merged to `develop` the same day via [PR #46](https://github.com/palthol/TU-api/pull/46). Two Discord messages per newly persisted waiver: operator summary and separate vCard attachments. Medical wording is withheld because Discord channel permissions/consent are not established. Existing Slack layout, persistence and other notification workflows remain unchanged. Device import, real Discord attachment UI, and durable delivery remain unverified. Delivery receipts are process-local, not an outbox. See [discord-waiver-notifications.md](./discord-waiver-notifications.md) for actual guardian/medical mappings and limitations. PR #47 left “Production deploy after merge (Render)” unchecked; this refresh records the git release, not a verified Render deploy. No production data was read or written during this 2026-10-24 docs check.
