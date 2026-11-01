@@ -5,6 +5,7 @@
  * matches Discord notification auth (x-admin-key or x-cron-secret).
  */
 
+import { parsePagination } from '../../lib/adminRequestValidation.js';
 import { mapDatabaseError, sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { registerBillingObligationRoutes } from './billing-obligations.js';
 
@@ -123,7 +124,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
       const chargeId = typeof req.query.charge_id === 'string' ? req.query.charge_id.trim() : '';
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       if (!chargeId) {
         return res.status(400).json({ ok: false, error: 'charge_id_required' });
       }
@@ -737,7 +740,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/marketing-leads', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const { data, error } = await supabase
         .from('marketing_leads')
         .select('*')
@@ -754,7 +759,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/operating-expenses', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const { data, error } = await supabase
         .from('operating_expenses')
         .select('*')
@@ -881,7 +888,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/personal-finance-entries', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const kind = typeof req.query.entry_kind === 'string' ? req.query.entry_kind.trim() : '';
       let q = supabase.from('personal_finance_entries').select('*').order('created_at', { ascending: false }).limit(limit);
       if (kind === 'cash_received' || kind === 'invoice') {

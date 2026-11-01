@@ -8,6 +8,8 @@ import {
   parseAttendanceRecordsBody,
   parseIsoDate,
   parseIsoDateTime,
+  parseOptionalNullableString,
+  parsePagination,
   parseUuid,
 } from '../../lib/adminRequestValidation.js';
 import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
@@ -78,8 +80,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
 
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
-      const offset = Math.max(Number.parseInt(String(req.query.offset || ''), 10) || 0, 0);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit, offset } = page;
       const includeInactive = req.query.include_inactive === 'true';
 
       let q = supabase
@@ -303,8 +306,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
 
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
-      const offset = Math.max(Number.parseInt(String(req.query.offset || ''), 10) || 0, 0);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit, offset } = page;
       const startDate = typeof req.query.start === 'string' ? parseIsoDate(req.query.start) : null;
       const endDate = typeof req.query.end === 'string' ? parseIsoDate(req.query.end) : null;
       const includeCancelled = req.query.include_cancelled === 'true';
@@ -412,18 +416,23 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'invalid_schedule_template_id' });
       }
 
-      const label =
-        typeof session_label === 'string' && session_label.trim() ? session_label.trim() : null;
-      const sessionNotes = typeof notes === 'string' && notes.trim() ? notes.trim() : null;
+      const label = parseOptionalNullableString(session_label);
+      if (!label.omitted && !label.ok) {
+        return res.status(400).json({ ok: false, error: 'invalid_session_label' });
+      }
+      const sessionNotes = parseOptionalNullableString(notes);
+      if (!sessionNotes.omitted && !sessionNotes.ok) {
+        return res.status(400).json({ ok: false, error: 'invalid_notes' });
+      }
 
       const { data, error } = await supabase
         .from('sessions')
         .insert({
           starts_at: startsAt,
           ends_at: endsAt,
-          session_label: label,
+          session_label: label.omitted ? null : label.value,
           schedule_template_id: templateId,
-          notes: sessionNotes,
+          notes: sessionNotes.omitted ? null : sessionNotes.value,
         })
         .select(
           'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
@@ -469,10 +478,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         patch.ends_at = endsAt;
       }
       if (body.session_label !== undefined) {
-        patch.session_label =
-          typeof body.session_label === 'string' && body.session_label.trim()
-            ? body.session_label.trim()
-            : null;
+        const label = parseOptionalNullableString(body.session_label);
+        if (!label.ok) return res.status(400).json({ ok: false, error: 'invalid_session_label' });
+        patch.session_label = label.value;
       }
       if (body.schedule_template_id !== undefined) {
         if (body.schedule_template_id === null || body.schedule_template_id === '') {
@@ -484,12 +492,15 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         }
       }
       if (body.notes !== undefined) {
-        patch.notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
+        const sessionNotes = parseOptionalNullableString(body.notes);
+        if (!sessionNotes.ok) return res.status(400).json({ ok: false, error: 'invalid_notes' });
+        patch.notes = sessionNotes.value;
       }
-      if (body.cancel === true) {
-        patch.cancelled_at = new Date().toISOString();
-      } else if (body.cancel === false) {
-        patch.cancelled_at = null;
+      if (body.cancel !== undefined) {
+        if (typeof body.cancel !== 'boolean') {
+          return res.status(400).json({ ok: false, error: 'invalid_cancel' });
+        }
+        patch.cancelled_at = body.cancel ? new Date().toISOString() : null;
       }
 
       const nextStarts = patch.starts_at ?? existing.starts_at;
