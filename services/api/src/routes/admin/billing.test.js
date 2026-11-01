@@ -684,6 +684,28 @@ describe('admin billing/receipt routes', () => {
     });
   });
 
+  it('rejects invalid pagination on charge-discounts list', async () => {
+    const { supabase } = createIsolatedSupabase({
+      seed: { charge_discounts: [{ id: 'disc-1', charge_id: CHARGE_ID }] },
+    });
+    const app = createBillingApp(supabase);
+
+    const bad = await authed(request(app).get('/api/admin/billing/charge-discounts')).query({
+      charge_id: CHARGE_ID,
+      limit: 'abc',
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body).toEqual({ ok: false, error: 'invalid_pagination' });
+
+    const ok = await authed(request(app).get('/api/admin/billing/charge-discounts')).query({
+      charge_id: CHARGE_ID,
+      limit: '1000',
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.body.ok).toBe(true);
+    expect(ok.body.rows).toHaveLength(1);
+  });
+
   it('returns supabase_not_configured when the client is missing', async () => {
     const app = createBillingApp(null);
     const res = await authed(request(app).post('/api/admin/billing/record-payment')).send(validPaymentBody());

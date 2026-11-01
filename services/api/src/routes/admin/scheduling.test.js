@@ -432,6 +432,27 @@ describe('admin scheduling routes', () => {
   });
 
   describe('list sessions', () => {
+    it('rejects invalid pagination and clamps oversize limits', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedSession();
+      const app = createApp(fixture.supabase);
+
+      for (const query of [{ limit: '-5' }, { limit: '0' }, { limit: 'abc' }, { offset: '-1' }]) {
+        const res = await auth(request(app).get('/api/admin/scheduling/sessions').query(query));
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ ok: false, error: 'invalid_pagination' });
+      }
+
+      const clamped = await auth(
+        request(app).get('/api/admin/scheduling/sessions').query({ limit: '1000' }),
+      );
+      expect(clamped.status).toBe(200);
+      expect(clamped.body.ok).toBe(true);
+      expect(clamped.body.limit).toBe(200);
+      expect(clamped.body.offset).toBe(0);
+      expect(clamped.body.rowCount).toBe(1);
+    });
+
     it('rejects invalid start and end dates', async () => {
       const { supabase } = createSchedulingFixture();
       const app = createApp(supabase);
@@ -558,6 +579,30 @@ describe('admin scheduling routes', () => {
       );
       expect(inverted.status).toBe(400);
       expect(inverted.body).toEqual({ ok: false, error: 'ends_at_must_be_after_starts_at' });
+
+      const notesObject = await auth(
+        request(app)
+          .post('/api/admin/scheduling/sessions')
+          .send({
+            starts_at: '2026-06-01T19:00:00.000Z',
+            ends_at: '2026-06-01T20:00:00.000Z',
+            notes: { text: 'nope' },
+          }),
+      );
+      expect(notesObject.status).toBe(400);
+      expect(notesObject.body).toEqual({ ok: false, error: 'invalid_notes' });
+
+      const badLabel = await auth(
+        request(app)
+          .post('/api/admin/scheduling/sessions')
+          .send({
+            starts_at: '2026-06-01T19:00:00.000Z',
+            ends_at: '2026-06-01T20:00:00.000Z',
+            session_label: 12,
+          }),
+      );
+      expect(badLabel.status).toBe(400);
+      expect(badLabel.body).toEqual({ ok: false, error: 'invalid_session_label' });
     });
 
     it('rejects invalid schedule_template_id', async () => {
@@ -645,6 +690,18 @@ describe('admin scheduling routes', () => {
       );
       expect(missing.status).toBe(404);
       expect(missing.body).toEqual({ ok: false, error: 'session_not_found' });
+
+      const notesObject = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ notes: ['nope'] }),
+      );
+      expect(notesObject.status).toBe(400);
+      expect(notesObject.body).toEqual({ ok: false, error: 'invalid_notes' });
+
+      const badCancel = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ cancel: 'true' }),
+      );
+      expect(badCancel.status).toBe(400);
+      expect(badCancel.body).toEqual({ ok: false, error: 'invalid_cancel' });
     });
   });
 
@@ -827,6 +884,30 @@ describe('admin scheduling routes', () => {
       expect(all.body.rowCount).toBe(2);
     });
 
+    it('rejects invalid pagination on list', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate();
+      const app = createApp(fixture.supabase);
+
+      const badLimit = await auth(
+        request(app).get('/api/admin/scheduling/templates').query({ limit: 'abc' }),
+      );
+      expect(badLimit.status).toBe(400);
+      expect(badLimit.body).toEqual({ ok: false, error: 'invalid_pagination' });
+
+      const badOffset = await auth(
+        request(app).get('/api/admin/scheduling/templates').query({ offset: '-1' }),
+      );
+      expect(badOffset.status).toBe(400);
+      expect(badOffset.body).toEqual({ ok: false, error: 'invalid_pagination' });
+
+      const clamped = await auth(
+        request(app).get('/api/admin/scheduling/templates').query({ limit: '1000' }),
+      );
+      expect(clamped.status).toBe(200);
+      expect(clamped.body.limit).toBe(200);
+    });
+
     it('rejects validation errors on create and update', async () => {
       const fixture = createSchedulingFixture();
       fixture.seedTemplate();
@@ -857,6 +938,24 @@ describe('admin scheduling routes', () => {
       );
       expect(badDuration.status).toBe(400);
       expect(badDuration.body).toEqual({ ok: false, error: 'invalid_duration_minutes' });
+
+      const notesObject = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, notes: { text: 'nope' } }),
+      );
+      expect(notesObject.status).toBe(400);
+      expect(notesObject.body).toEqual({ ok: false, error: 'invalid_notes' });
+
+      const badActive = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, is_active: 'true' }),
+      );
+      expect(badActive.status).toBe(400);
+      expect(badActive.body).toEqual({ ok: false, error: 'invalid_is_active' });
+
+      const sunday = await auth(
+        request(app).post('/api/admin/scheduling/templates').send({ ...validTemplate, day_of_week: 8 }),
+      );
+      expect(sunday.status).toBe(400);
+      expect(sunday.body).toEqual({ ok: false, error: 'invalid_day_of_week' });
 
       const emptyPatch = await auth(
         request(app).patch(`/api/admin/scheduling/templates/${TEMPLATE_ID}`).send({}),
