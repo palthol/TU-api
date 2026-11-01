@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
@@ -18,15 +20,41 @@ import { createSupabaseAuditWriter } from './lib/staffAuth.js';
 import { registerStaffAuthRoutes } from './lib/staffRoutes.js';
 import { registerAdminSchedulingRoutes } from './routes/admin/scheduling.js';
 import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
+import { createAdminSchedulingV2Router } from './routes/scheduling/index.js';
+import { createMemberRouter } from './routes/member/index.js';
+import { createCalendarRouter } from './routes/calendar/index.js';
 
 const app = express();
-// CORS: allow configured origin or all in dev
-const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
-if (allowedOrigin === '*') {
-  app.use(cors());
-} else {
-  app.use(cors({ origin: allowedOrigin }));
+
+export function parseAllowedOriginsEnv(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || raw === '*') return { mode: 'any' };
+  const origins = raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (origins.length === 0 || origins.includes('*')) return { mode: 'any' };
+  return { mode: 'list', origins };
 }
+
+function applyCors(appInstance) {
+  const parsed = parseAllowedOriginsEnv(process.env.ALLOWED_ORIGIN);
+  if (parsed.mode === 'any') {
+    appInstance.use(cors());
+    return;
+  }
+  const allowed = new Set(parsed.origins);
+  appInstance.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        return callback(null, allowed.has(origin));
+      },
+    }),
+  );
+}
+
+applyCors(app);
 
 const PORT = process.env.PORT || 3001;
 
@@ -216,6 +244,7 @@ registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminSchedulingRoutes(adminBillingRouter, { supabase });
+adminBillingRouter.use('/scheduling-v2', createAdminSchedulingV2Router());
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
@@ -224,6 +253,15 @@ viewerRouter.use(createRequireViewerAccess());
 registerViewerWaiverRoutes(viewerRouter, { supabase });
 app.use('/api/viewer', viewerRouter);
 
-app.listen(PORT, () => {
-  console.log(`API listening on :${PORT}`);
-});
+app.use('/api/member', createMemberRouter());
+app.use('/api/calendar', createCalendarRouter());
+
+export function startServer() {
+  app.listen(PORT, () => {
+    console.log(`API listening on :${PORT}`);
+  });
+}
+
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  startServer();
+}

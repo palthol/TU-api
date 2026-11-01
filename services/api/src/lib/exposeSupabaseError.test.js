@@ -118,6 +118,25 @@ describe('mapDatabaseError', () => {
     });
   });
 
+  it.each([
+    ['class_type_not_found', 404],
+    ['instructor_not_found', 404],
+    ['session_not_found', 404],
+    ['unauthorized_member', 401],
+    ['session_full', 409],
+    ['booking_closed', 409],
+    ['no_credit', 409],
+    ['late_cancel', 409],
+    ['already_booked', 409],
+    ['not_booked', 409],
+  ])('pre-registers %s with status %s', (key, status) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(mapDatabaseError({ message: key }, { log: false })).toEqual({
+      status,
+      body: { ok: false, error: key },
+    });
+  });
+
   it('maps unknown SQL text to 500 internal_error', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const mapped = mapDatabaseError(

@@ -63,5 +63,6 @@ match that task's `status` in `queue.json`.
 | [API-AUTO-005](tasks/API-AUTO-005.md) | automation | done | API-AUTO-002 | Discord waiver summaries with vCards (PRs #46/#47, released 2026-10-14) |
 | [API-BILL-001](tasks/API-BILL-001.md) | backend | in_progress | API-AUTO-003, API-AUTO-004 | Custom household billing (`cursor/custom-household-billing`, no PR, 5 ahead / 3 behind `develop`) |
 | [API-OPS-002](tasks/API-OPS-002.md) | deployment | needs_verification | API-AUTO-003 | September 2026 subscription backfill SQL (`chore/subscription-backfill-2026-09`; apply unknown) |
+| [API-SCHED-A0](tasks/API-SCHED-A0.md) | backend | done | API-AUTH-001, API-SCHED-001 | Scheduling v2 plan scaffolding (routers, time helpers, CORS parsing, tests) |
 
 Next candidate: household billing (`API-BILL-001`) on `cursor/custom-household-billing` — in progress, untracked by a PR, 5 commits ahead and 3 behind `develop`. Do not treat it as `ready`. September 2026 backfill SQL (`API-OPS-002`) needs verification (unmerged; not known whether it was applied). Production writes remain unauthorized. Live Stripe webhook registration and production `supabase db push` were not part of API-PAY-001.
