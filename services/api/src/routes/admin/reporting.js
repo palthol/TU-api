@@ -1,3 +1,4 @@
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { queryReportingView } from '../../lib/reportingViewQuery.js';
 
 export { REPORTING_VIEWS, REPORTING_VIEW_CONFIG } from './reportingViews.js';
@@ -42,8 +43,7 @@ export function registerAdminReportingRoutes(router, { supabase }) {
         .limit(1)
         .maybeSingle();
       if (revErr) {
-        console.error('finance monthly summary revenue select', revErr);
-        return res.status(400).json({ ok: false, error: revErr.message });
+        return sendDatabaseError(res, revErr, { context: 'reporting.monthly_summary.revenue' });
       }
 
       const { data: expenseRows, error: expenseErr } = await supabase
@@ -52,8 +52,7 @@ export function registerAdminReportingRoutes(router, { supabase }) {
         .gte('expense_date', monthStart)
         .lte('expense_date', monthEndIso);
       if (expenseErr) {
-        console.error('finance monthly summary expense select', expenseErr);
-        return res.status(400).json({ ok: false, error: expenseErr.message });
+        return sendDatabaseError(res, expenseErr, { context: 'reporting.monthly_summary.expenses' });
       }
 
       const revenue = Number(revRow?.net_cash_collected_cents || 0);
@@ -109,8 +108,7 @@ export function registerAdminReportingRoutes(router, { supabase }) {
         .maybeSingle();
 
       if (error) {
-        console.error('primary kpi summary select', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'reporting.primary_kpis' });
       }
 
       const monthStartDate = new Date(`${monthStart}T00:00:00.000Z`);

@@ -1,3 +1,4 @@
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { postDiscordWebhook } from '../../services/discord.js';
 
 const fmtMoney = (n) => {
@@ -46,7 +47,7 @@ export function registerAdminNotificationRoutes(router, { supabase }) {
         .from('view_payer_payment_reminders')
         .select('charge_id, payer_name, obligation_label, billing_obligation_id, due_at, days_late, reminder_bucket, outstanding_cents')
         .order('due_at', { ascending: true });
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'notifications.payment_reminders' });
 
       const rows = data ?? [];
       const header = '**Payment reminders** (overdue + due in 3 days)\n';
@@ -76,7 +77,7 @@ export function registerAdminNotificationRoutes(router, { supabase }) {
         .from('view_payer_payment_reminders')
         .select('charge_id, payer_name, obligation_label, billing_obligation_id, due_at, days_late, reminder_bucket, outstanding_cents')
         .order('due_at', { ascending: true });
-      if (remErr) return res.status(400).json({ ok: false, error: remErr.message });
+      if (remErr) return sendDatabaseError(res, remErr, { context: 'notifications.daily_digest' });
 
       const rows = reminderRows ?? [];
       const overdue = rows.filter((r) => r.reminder_bucket === 'overdue');

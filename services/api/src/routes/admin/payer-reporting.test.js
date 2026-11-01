@@ -65,7 +65,9 @@ describe('payer reports and notification integration', () => {
   it('does not send incomplete reminders if report query fails', async () => {
     vi.stubEnv('DISCORD_WEBHOOK_URL', 'https://example.invalid/test-only');
     const { app } = setup([], { message: 'view unavailable' });
-    expect((await request(app).post('/api/admin/notifications/discord/payment-reminders').set('x-admin-key', 'local-key')).status).toBe(400);
+    const res = await request(app).post('/api/admin/notifications/discord/payment-reminders').set('x-admin-key', 'local-key');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'internal_error' });
     expect(postDiscordWebhook).not.toHaveBeenCalled();
   });
 });

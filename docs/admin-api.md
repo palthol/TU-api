@@ -30,6 +30,23 @@ key.
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
 | **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
+| **Errors** | Failures are non-2xx `{ "ok": false, "error": "<machine_key>" }`. Postgres / PostgREST `message`, `details`, and `hint` are never returned. Shared constraint mappings live in the [error keys](#error-keys) list below. Route-specific keys already documented on each endpoint stay the same. |
+
+---
+
+## Error keys
+
+Database failures are mapped by Postgres / PostgREST code before any raw text is considered. Unknown SQL text becomes `internal_error`. RPC / application raises that already use a snake_case machine key keep that key.
+
+| Key | HTTP status | When |
+| --- | --- | --- |
+| `related_record_not_found` | `400` (writes) or `404` (explicit read path) | Foreign-key violation (`23503`) |
+| `already_exists` | `409` | Unique violation (`23505`), unless the route already documents a more specific key such as `email_taken` |
+| `invalid_input` | `400` | Check / not-null / invalid-syntax (`23514`, `23502`, `22P02`) |
+| `not_found` | `404` | PostgREST no-row `PGRST116` |
+| `internal_error` | `500` | Unmapped database or driver error |
+
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, and `last_owner`.
 
 ---
 

@@ -171,17 +171,17 @@ describe('POST /api/admin/billing/generate-monthly-charges', () => {
     expect(supabase.rpc).toHaveBeenNthCalledWith(2, 'generate_monthly_charges');
   });
 
-  it('returns the RPC error message on failure', async () => {
+  it('returns a stable key when the RPC fails with raw database text', async () => {
     const supabase = createSupabase({
       rpcResult: { data: null, error: { message: 'permission denied for function generate_monthly_charges' } },
     });
     const res = await request(createApp(supabase))
       .post('/api/admin/billing/generate-monthly-charges')
       .set('x-admin-key', ADMIN_KEY);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
     expect(res.body).toEqual({
       ok: false,
-      error: 'permission denied for function generate_monthly_charges',
+      error: 'internal_error',
     });
   });
 

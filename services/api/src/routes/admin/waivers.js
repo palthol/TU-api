@@ -1,3 +1,5 @@
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
 
@@ -42,8 +44,7 @@ export function registerAdminWaiverRoutes(router, { supabase }) {
         .range(offset, offset + limit - 1);
 
       if (error) {
-        console.error('admin.waivers.list error', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'admin.waivers.list' });
       }
 
       return res.json({
