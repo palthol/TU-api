@@ -69,7 +69,9 @@ describe('payer obligation routes', () => {
   it('returns conflict for a repeated create ID without retrying with a new ID', async () => {
     const { db, app } = setup('finance', { data: null, error: { code: '23505', message: 'duplicate key' } });
     const res = await request(app).post(path).set('x-admin-key', 'test-personal-key').send(body);
-    expect(res.status).toBe(409); expect(db.rpc).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ ok: false, error: 'already_exists' });
+    expect(db.rpc).toHaveBeenCalledTimes(1);
   });
   it('surfaces atomic replacement failures', async () => {
     const { app } = setup('finance', { data: null, error: { message: 'replacement_overlaps_existing_charge' } });

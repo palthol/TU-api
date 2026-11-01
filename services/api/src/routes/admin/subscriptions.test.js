@@ -120,13 +120,13 @@ describe('POST /api/admin/billing/subscriptions', () => {
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 
-  it('returns the RPC error message on failure', async () => {
+  it('returns a stable key when the RPC fails with raw database text', async () => {
     const supabase = createSupabase({
       rpcResult: { data: null, error: { message: 'participant not found' } },
     });
     const res = await auth(request(createApp(supabase)).post('/api/admin/billing/subscriptions').send(validBody));
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ ok: false, error: 'participant not found' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'internal_error' });
     expect(supabase.rpc).toHaveBeenCalledWith(
       'create_subscription',
       expect.objectContaining({
