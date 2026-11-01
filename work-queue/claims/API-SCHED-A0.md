@@ -29,6 +29,7 @@
 - `npm run guard:waiver-schema` (exit 0): guard passed
 - Production writes: not performed (no migrations, no `supabase db push`, no hosted DB writes)
 - Branch: `noble-6/api-sched-a0-scaffold-50d0`
+- PR: https://github.com/palthol/TU-api/pull/55
 
 ## Handoff or blocker
 
