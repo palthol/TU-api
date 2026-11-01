@@ -31,6 +31,7 @@ key.
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
 | **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
 | **Errors** | Failures are non-2xx `{ "ok": false, "error": "<machine_key>" }`. Postgres / PostgREST `message`, `details`, and `hint` are never returned. Shared constraint mappings live in the [error keys](#error-keys) list below. Route-specific keys already documented on each endpoint stay the same. |
+| **Pagination** | Shared `parsePagination(query)`: omitted/empty `limit` defaults to **50**, `offset` defaults to **0**. Provided values must be integers (`limit` ≥ 1, `offset` ≥ 0); otherwise **`400 invalid_pagination`** — values are not silently coerced. `limit` above the route max is **clamped** (standard max **200**). Some list routes override the default/max (`GET /waivers` max 100; participant search default 8 / max 25; marketing-leads, operating-expenses, and personal-finance-entries default 100 / max 500). Reporting views keep their own silent-fallback parser. |
 
 ---
 
@@ -45,8 +46,9 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `invalid_input` | `400` | Check / not-null / invalid-syntax (`23514`, `23502`, `22P02`) |
 | `not_found` | `404` | PostgREST no-row `PGRST116` |
 | `internal_error` | `500` | Unmapped database or driver error |
+| `invalid_pagination` | `400` | Provided `limit`/`offset` is non-integer, `limit < 1`, or `offset < 0` |
 
-Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, and `last_owner`.
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -216,8 +218,10 @@ Minimal authenticated list of `view_waiver_documents`. The Cloudflare Access vie
 
 **Query:**
 
-- `limit` — optional, default `50`, max `100`
+- `limit` — optional, default `50`, max `100` (clamped)
 - `offset` — optional, default `0`
+
+**Errors:** `400` — `invalid_pagination` when `limit`/`offset` is provided but not a valid integer in range (`limit` ≥ 1, `offset` ≥ 0)
 
 **Response:** `{ "ok": true, "limit": 50, "offset": 0, "rowCount": N, "rows": [...] }`
 
@@ -285,7 +289,7 @@ Insert a **write-off** row (`charge_adjustments`). Reduces **net due** via `view
 
 Lists explicit discount line-items applied to a charge.
 
-**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`)
+**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`, clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -639,7 +643,7 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ### `GET /api/admin/billing/marketing-leads`
 
-**Query:** `limit` — optional, default `100`, max `500`
+**Query:** `limit` — optional, default `100`, max `500` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -647,7 +651,7 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ### `GET /api/admin/billing/operating-expenses`
 
-**Query:** `limit` — optional, default `100`, max `500`
+**Query:** `limit` — optional, default `100`, max `500` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -717,7 +721,7 @@ If `due_at` is omitted, the API defaults to **tomorrow (UTC date)**. `invoice_st
 
 ### `GET /api/admin/billing/personal-finance-entries`
 
-**Query:** `limit` (optional, default `100`, max `500`), `entry_kind` (optional: `cash_received` or `invoice`)
+**Query:** `limit` (optional, default `100`, max `500`, clamped; invalid → `400` `invalid_pagination`), `entry_kind` (optional: `cash_received` or `invoice`)
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -743,11 +747,13 @@ Session and attendance writes for front-desk workflows. Requires migration **002
 
 List schedule templates.
 
-**Query:** `include_inactive=true`, `limit` (default 50, max 200), `offset` (default 0)
+**Query:** `include_inactive=true`, `limit` (default 50, max 200, clamped), `offset` (default 0)
 
 Inactive templates are omitted unless `include_inactive=true`.
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+**Errors:** `400` — `invalid_pagination`
 
 #### `GET /api/admin/scheduling/templates/:templateId`
 
@@ -774,7 +780,7 @@ Inactive templates are omitted unless `include_inactive=true`.
 
 **Response:** `{ "ok": true, "template": { ... } }`
 
-**Errors:** `400` — `name_required`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_is_active`
+**Errors:** `400` — `name_required`, `invalid_day_of_week` (must be integer 1–7), `invalid_start_time` (`HH:MM` or `HH:MM:SS`), `invalid_duration_minutes` (integer > 0), `invalid_is_active` (boolean), `invalid_notes` (string or null). Wrong types are rejected, not coerced.
 
 #### `PATCH /api/admin/scheduling/templates/:templateId`
 
@@ -782,7 +788,7 @@ Partial update. Deactivate with `"is_active": false`. Existing sessions are not 
 
 **Response:** `{ "ok": true, "template": { ... } }`
 
-**Errors:** `400` — `no_updates`, validation errors; `404` — `template_not_found`
+**Errors:** `400` — `no_updates`, same field keys as create; `404` — `template_not_found`
 
 #### `POST /api/admin/scheduling/generate-sessions`
 
@@ -810,9 +816,11 @@ Max span is 366 days (`end - start`).
 
 List sessions with optional filters.
 
-**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200), `offset` (default 0)
+**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200, clamped), `offset` (default 0)
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+**Errors:** `400` — `invalid_start`, `invalid_end`, `invalid_pagination`
 
 #### `GET /api/admin/scheduling/sessions/:sessionId`
 
@@ -836,11 +844,15 @@ Single session plus its `attendance_records`.
 
 **Response:** `{ "ok": true, "session": { ... } }`
 
+**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null). Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
+
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
 Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
 
 **Response:** `{ "ok": true, "session": { ... } }`
+
+**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean); `404` — `session_not_found`; `409` — `already_exists`
 
 #### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
 
@@ -911,8 +923,8 @@ Participant-first lookup for finance and admin operator flows. Searches existing
 
 **Query:**
 
-- `q` — required string, minimum 2 characters
-- `limit` — optional, default `8`, min `1`, max `25`
+- `q` — required string, minimum 2 characters, maximum 80 after trim. Matched **literally** against `full_name`, `email`, `cell_phone`, and `home_phone` (`ILIKE`). PostgREST reserved characters (commas, parentheses, dots, quotes) are quoted; LIKE wildcards `%` and `_` are escaped so they do not match any character.
+- `limit` — optional, default `8`, min `1`, max `25` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:**
 
@@ -941,7 +953,7 @@ Participant-first lookup for finance and admin operator flows. Searches existing
 }
 ```
 
-**Errors:** `400` — `query_min_length_2` (or DB/select errors)
+**Errors:** `400` — `query_min_length_2`, `query_too_long`, `invalid_pagination`
 
 ---
 
