@@ -189,9 +189,160 @@ Env files loaded, in order, without overriding already-set variables:
   `services/api/.env` on disk) would still write to production if someone posted
   to `localhost`. Confirm `npx supabase status` keys are what the API process
   actually loaded.
-- `record-payment` is still non-transactional (API-HARD-001). VAL-001 should
-  expect partial writes on failure paths.
-- Waiver submit is not end-to-end idempotent (API-HARD-002). Duplicate submits
-  can create extra rows until that task lands.
+- With the complete migration history, `record-payment` uses the atomic RPC.
+  The missing-RPC compatibility fallback remains sequential; never mistake that
+  fallback for successful validation of the migrated database.
+- Waiver submit supports idempotent retries, but Storage and database writes are
+  not one atomic transaction; see the current-state qualifications.
 - Cleanup cannot remove `event_ledger` history.
 - There is no hosted preview environment in this repo yet.
+
+## Billing database tests
+
+With local Supabase running, execute **all three** suites:
+
+```bash
+npm run test:billing-db
+```
+
+This resolves to `supabase test db supabase/tests/database --local` and never uses
+a linked production DB. Tests are transactionally rolled back. The legacy suite
+retains enrollment, initial charge, per-class, conversion, and proration coverage;
+the obligation suite uses synthetic agreements (not actual member details).
+
+### Isolated PostgreSQL fallback without Docker
+
+When Docker/Podman is unavailable, the following local-only fallback replays the
+unaltered migrations, catalog seed, and pgTAP suites using PGlite (PostgreSQL in
+WASM). It is additional SQL validation, **not** a replacement for the predeployment
+Supabase/PostgREST and multi-connection concurrency gate. No URL, credential, or
+production connection is accepted by the runner. It uses a fresh in-memory DB
+with minimal `auth.users`/`auth.uid()` scaffolding and Supabase-style roles/grants.
+
+Validated dependency versions: `@electric-sql/pglite@0.5.8`, pgTAP `1.3.2` from
+Ubuntu package `postgresql-16-pgtap_1.3.2-2_all.deb` (pgTAP is SQL-only). No runtime
+dependency or lockfile change to the API is necessary. On Ubuntu, prepare the
+isolated runtime and the extension bundle outside the repository:
+
+```bash
+mkdir -p /tmp/tu-billing-runtime /tmp/tu-billing-pg
+npm --prefix /tmp/tu-billing-runtime install --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.5.8
+(cd /tmp/tu-billing-pg && apt-get -o APT::Sandbox::User=root download postgresql-16-pgtap=1.3.2-2)
+dpkg-deb -x /tmp/tu-billing-pg/postgresql-16-pgtap_1.3.2-2_all.deb /tmp/tu-billing-pg/extracted
+mkdir -p /tmp/tu-billing-pg/bundle/share/postgresql/extension
+cp /tmp/tu-billing-pg/extracted/usr/share/postgresql/16/extension/pgtap* /tmp/tu-billing-pg/bundle/share/postgresql/extension/
+tar -czf /tmp/tu-billing-pg/pgtap.tar.gz -C /tmp/tu-billing-pg/bundle share
+
+# From the repository root:
+TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite \
+TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz \
+node scripts/test-billing-pglite.mjs
+```
+
+The apt sandbox option above was needed in this root-only container to download
+packages; it does not install a database service. An ordinary host can use its
+normal package download command or supply its installed pgTAP SQL/control files.
+The runner never edits the SQL suites, opens a socket, or loads repository env
+files. It exits nonzero on SQL errors, failed TAP assertions, or test-plan errors.
+
+2026-10-01 final rerun: new migration replay and reapply succeeded; **37 legacy + 84
+obligation assertions passed**; RLS and service-role execution checks passed.
+Local Supabase startup and the CLI database test command were blocked because
+Docker/Podman is absent. No production access was used to work around that limit.
+
+Generated obligation history intentionally cannot be deleted. Do not run the
+legacy `tu-test:cleanup` account deletion flow against obligation-test accounts;
+use these rollback-based suites or reset a disposable local database. The
+production prohibition remains unchanged.
+
+
+## Follow-up validation evidence — 2026-10-01
+
+From the repository root, the following commands were executed:
+
+```bash
+npm --workspace services/api test
+# PASS: 191 tests, 20 files. Notification delivery is mocked; no messages sent.
+
+TU_PGLITE_ROOT=/tmp/tu-billing-runtime/node_modules/@electric-sql/pglite \
+TU_PGTAP_BUNDLE=/tmp/tu-billing-pg/pgtap.tar.gz \
+node scripts/test-billing-pglite.mjs
+# PASS: 165 assertions = 37 legacy + 84 obligations + 44 reporting/integration.
+# PASS: ordered migrations, follow-up reapplication, populated financial preservation.
+
+npm run guard:waiver-schema
+# PASS
+
+git diff --check
+# PASS
+
+npm run supabase:start
+# BLOCKED: docker not found; podman not found.
+
+npm run test:billing-db
+# BLOCKED: local 127.0.0.1:54322 connection refused; never used a linked DB.
+```
+
+The fallback now seeds `scripts/fixtures/billing-pre-obligations.sql` after the
+catalog and before `20260930063526`, preserving a synthetic subscription, charge,
+partial payment and allocation. `billing-post-obligations.sql` compares full
+original row JSON after migrations and reapplication (excluding only the new null
+charge column), fails on unexpected obligations/legacy generation, and removes
+only its fixture. These files must only run in a disposable local database; the
+PGlite runner never accepts a connection URL or loads any env file.
+
+New integration assertions verify report cardinality and discount/refund/write-off
+balances, retained ended debt, void/paid exclusion, date thresholds, no-charge
+covered enrollment/replacement, repeated UUIDs, rejected coverage/overlap, immutable
+terms/history, replacement-chain overlap regression, view grants/invoker security,
+and actual `service_role` SQL execution. The separate API tests verify role gates,
+request validation, response shapes, additive report queries, and both reminder
+consumers with the transport mocked.
+
+The following were environment-blocked on 2026-10-01. They are superseded by
+[real local Supabase evidence from 2026-10-03](obligation-validation-attempt-2026-10-03.md)
+(still required before a separately authorized rollout):
+
+1. Local Supabase migration replay/reapplication with real auth schema, default
+   grants and PostgREST; validate the additive view/RPC discovery and service-key
+   versus anon/authenticated HTTP behavior.
+2. Local API → PostgREST exercise of create/list/transition, no-charge enrollment,
+   both report slugs, record-payment, discounts and refunds. Stub Discord transport;
+   do not configure or send a real webhook for this validation.
+3. Independent database connections: simultaneous generator/generator calls and
+   generator races with pause, end, replacement (both lock acquisition orders).
+   Assert one row per obligation/period, unchanged historical charge terms, no
+   partial replacement and no ancestor/descendant overlap. Generation that wins
+   before a pause/end can legitimately issue the current period's full charge;
+   a lifecycle operation that wins first must prevent a new charge.
+4. Concurrent same-UUID create/activation and competing replacement activation;
+   expect create conflict or activation no-op, exactly one accepted replacement.
+   Exercise covered enrollment races and review unsupported mixed legacy/covered
+   enrollment requests before frontend adoption.
+
+No single-session result above is evidence that these multi-connection or HTTP
+checks passed. Worker deployment remains disabled regardless of local results.
+
+## Real local gate — 2026-10-03
+
+Use `scripts/fixtures/obligation-validation.config.toml` in the isolated workdir
+`tmp/obligation-validation-20261003`, not the root project's database. CLI version
+is the lockfile's `2.105.0`; use `node_modules/.bin/supabase`, not the global CLI.
+Start, reset, and test commands must all specify the same `--network-id
+tu_obligation_validation_20261003` and `--workdir`. Exclude `logflare,vector,edge-runtime`
+(this CLI's actual container names). Ports are API 55321, DB 55322, Studio 55323,
+mail 55324. Clients use only literal loopback addresses; Docker itself publishes
+these ports on all host interfaces, so do not expose this development stack on an
+untrusted network. Standard local keys are development-only.
+
+Run pgTAP **before** `npm run test:billing-local`. The live harness leaves committed
+synthetic fixtures and asserts a fresh starting state; mixing those with pgTAP's
+global empty-ledger assumptions creates invalid test results. It captures local
+keys in memory, disables dotenv file loading in the actual API child, uses real
+PostgREST/Auth, and shuts down its temporary API and loopback notification stub.
+It never accepts a remote URL. Do not run legacy account cleanup against these
+immutable obligation histories; stop/reset only this explicitly disposable project.
+
+See the validation report for commands, historical-preservation replay, genuine
+lock-wait race evidence, final results, and remaining rollout gates. No deployment
+or cron authorization is implied by local validation.

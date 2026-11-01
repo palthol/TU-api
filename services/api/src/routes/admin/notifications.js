@@ -15,7 +15,7 @@ const buildReminderLines = (rows) => {
   else {
     for (const r of overdue) {
       lines.push(
-        `• ${r.name} — $${fmtMoney(r.actual_price)} due ${r.next_due_date} (${r.days_late}d late)`,
+        `• ${r.payer_name} — ${r.obligation_label || 'One-off charge'} [${r.charge_id}] — $${fmtMoney(Number(r.outstanding_cents) / 100)} due ${r.due_at} (${r.days_late}d late)`,
       );
     }
   }
@@ -24,7 +24,7 @@ const buildReminderLines = (rows) => {
   if (!dueSoon.length) lines.push('— none');
   else {
     for (const r of dueSoon) {
-      lines.push(`• ${r.name} — $${fmtMoney(r.actual_price)} due ${r.next_due_date}`);
+      lines.push(`• ${r.payer_name} — ${r.obligation_label || 'One-off charge'} [${r.charge_id}] — $${fmtMoney(Number(r.outstanding_cents) / 100)} due ${r.due_at}`);
     }
   }
   return lines.join('\n');
@@ -43,9 +43,9 @@ export function registerAdminNotificationRoutes(router, { supabase }) {
       if (!webhookUrl) return res.status(500).json({ ok: false, error: 'discord_webhook_not_configured' });
 
       const { data, error } = await supabase
-        .from('view_member_payment_reminders')
-        .select('name, next_due_date, days_late, reminder_bucket, actual_price')
-        .order('next_due_date', { ascending: true });
+        .from('view_payer_payment_reminders')
+        .select('charge_id, payer_name, obligation_label, billing_obligation_id, due_at, days_late, reminder_bucket, outstanding_cents')
+        .order('due_at', { ascending: true });
       if (error) return res.status(400).json({ ok: false, error: error.message });
 
       const rows = data ?? [];
@@ -73,9 +73,9 @@ export function registerAdminNotificationRoutes(router, { supabase }) {
       const today = new Date().toISOString().slice(0, 10);
 
       const { data: reminderRows, error: remErr } = await supabase
-        .from('view_member_payment_reminders')
-        .select('name, next_due_date, days_late, reminder_bucket, actual_price')
-        .order('next_due_date', { ascending: true });
+        .from('view_payer_payment_reminders')
+        .select('charge_id, payer_name, obligation_label, billing_obligation_id, due_at, days_late, reminder_bucket, outstanding_cents')
+        .order('due_at', { ascending: true });
       if (remErr) return res.status(400).json({ ok: false, error: remErr.message });
 
       const rows = reminderRows ?? [];

@@ -5,7 +5,7 @@
   "compatibility_date": "2026-09-22",
   "workers_dev": false,
   "triggers": {
-    "crons": ["0 12 * * *"]
+    "crons": []
   },
   "vars": {
     "API_BASE_URL": "https://api.templeunderground.com"

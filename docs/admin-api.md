@@ -370,75 +370,126 @@ monthly plan with `price_cents > 0` creates its first charge transactionally in
 overrides the API default. Even when explicitly enabled, a free monthly plan
 creates no monetary charge row.
 
-For every paid monthly subscription,
-`automatic_billing_starts_at` is persisted as the first day after the current
-billing period. `create_initial_charge: false` therefore suppresses the entire
-current period: daily generation cannot recreate that charge, but recurring
-billing begins in the next period. Migration `20260921185003` is applied in production. Pre-existing subscriptions were left with `NULL` and remain excluded from automation until an operator establishes an approved current baseline.
+`automatic_billing_starts_at` remains in the enrollment response for compatibility,
+but after migration `20260930063526` the recurring generator ignores it. Enrollment
+never configures a payer obligation. For an obligation-covered participant, pass
+`create_initial_charge: false` to avoid a separate catalog-priced one-off charge.
+Recurring billing requires an explicitly activated obligation (below).
 
-**Errors:** `400` — participant/plan not found, inactive plan, no account binding, explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure, or date validation failure (Postgres exception message in `error`).
+Corrective migration `20261003045729` serializes enrollment on the participant
+with the covered-entitlement RPC. It rejects overlap with any existing active
+subscription, including another payer account and future access. `ends_at` is
+inclusive; a nonoverlapping successor starts the following day. Rejection is atomic
+and creates neither access nor an initial charge.
+
+**Errors:** `400` — participant/plan not found, inactive plan, no account binding,
+`overlapping_active_subscription`, explicit `create_initial_charge: true` on a
+non-monthly plan, plan lookup failure, or date validation failure (Postgres exception
+message in `error`).
 
 ---
 
 ### `POST /api/admin/billing/generate-monthly-charges`
 
-Calls RPC `generate_monthly_charges()` (migration **0002**) to insert **open** monthly `charges` for active subscriptions whose plan has `billing_cadence = 'monthly'` and whose next period is due (`due_at` ≤ today).
+Calls the service-role-only `generate_monthly_charges()` RPC. After migration
+`20260930063526`, creates one open charge per **active payer obligation and current
+anchored billing period**, using the obligation's agreed integer-cent amount.
+Legacy subscriptions and plan prices are not inputs. Inactive payer accounts,
+drafts, pauses, endings, and future billing starts do not generate charges.
 
-No request body. The handler does not insert charges itself.
-
-**Auth:** `x-admin-key` (shared owner key or an `owner` / `finance` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API). Same middleware as Discord notification routes (`requireAdminOrCron`). Cron authenticates as actor `cron` and skips the staff role matrix. `front_desk` staff keys receive `403 forbidden`.
-
-**Response:**
+No request body or HTTP as-of-date override. Authentication remains `x-admin-key`
+or `x-cron-secret`. Response keys and RPC result columns are unchanged:
 
 ```json
 {
   "ok": true,
-  "ran_at": "2026-09-21T18:00:00.000Z",
+  "ran_at": "ISO timestamp",
   "created": 1,
   "charge_ids": ["uuid"],
-  "charges": [
-    {
-      "charge_id": "uuid",
-      "account_id": "uuid",
-      "subscription_id": "uuid",
-      "amount_cents": 10000,
-      "coverage_start": "2026-09-21",
-      "coverage_end": "2026-09-30",
-      "due_at": "2026-09-21"
-    }
-  ]
+  "charges": [{
+    "charge_id": "uuid", "account_id": "uuid", "subscription_id": null,
+    "amount_cents": 12345, "coverage_start": "2031-01-31",
+    "coverage_end": "2031-02-27", "due_at": "2031-01-31"
+  }]
 }
 ```
 
-`created` remains backward compatible. A run with nothing due returns
-`created: 0`, `charge_ids: []`, and `charges: []`. The API emits structured
-success/failure logs with `ran_at`, the count, generated charge IDs, or the
-failure message. The existing staff audit writer records the protected POST,
-and charge inserts remain visible in `event_ledger`.
+`subscription_id` is null for an obligation charge; its
+`charges.billing_obligation_id` identifies the source agreement. Success with no
+new charge returns `created: 0`, `charge_ids: []`, `charges: []`. Structured run
+logs and existing charge audit capture remain in place. Failures remain `400`
+with the RPC error, or `500 supabase_not_configured` / `server_error`.
 
-**Idempotency:** migration
-`20260921185003_complete_v1_subscription_charge_generation.sql` serializes
-generator runs. Migration
-`20260921221500_scope_monthly_charge_uniqueness.sql` replaces that migration's
-broad unique index with one non-void `monthly_period` charge per
-`subscription_id + coverage_start`. Per-class attendance charges
-(`charge_kind = per_class`) and prorated upgrade deltas
-(`charge_kind = proration`) may share a coverage start. Direct inserts default
-to `charge_kind = manual` and are outside that unique index. Re-runs of monthly
-generation create nothing, including overlapping invocations. `void` rows do
-not block a deliberate replacement.
+The business date uses America/New_York. Coverage starts at the anchored day,
+clamped to month-end, and ends the day before the next independently computed
+boundary; due date is coverage start. Late runs preserve original period dates.
+Entire missed periods require manual review and are not automatically backfilled.
+A unique obligation ID + period-start index includes voided charges, so retries
+cannot rebill a waived period. The legacy non-void subscription monthly-period
+index remains unchanged. See [obligation design](recurring-billing-obligations.md).
 
-**Historical safety:** the generator never creates a charge with
-`coverage_start` before its run date. If a historical subscription has no
-charge—or has a gap after its last real charge—the operator must first set
-`automatic_billing_starts_at`; the first automated charge then starts no earlier
-than the current run date and covers only the remainder of that month. It does
-not reconstruct undocumented past debt. A `NULL` automation date is a fail-safe
-disabled state.
+**Deployment remains disabled:** Worker `triggers.crons` is empty. See
+`workers/billing-cron/README.md` for remaining validation and operator gates.
 
-The selected daily billing scheduler is implemented at `workers/billing-cron/` but is not yet deployed/configured. See `docs/deployment.md`. No Supabase Cron/`pg_cron` job exists in this repository. Automatic billing should remain disabled until the known calendar-month coverage bug is replaced with anchored billing-period logic.
+### `GET /api/admin/billing/obligations`
 
-**Errors:** `401` `unauthorized`; `403` `forbidden`; `400` — RPC/Postgres message in `error`; `500` `supabase_not_configured` / `server_error`.
+Staff-authenticated; all active staff roles may read. Required query:
+`account_id` UUID. Returns `{ "ok": true, "obligations": [...] }`, newest first.
+Each row contains the obligation fields and
+`billing_obligation_participants: [{ "participant_id": "uuid" }]`.
+
+### `POST /api/admin/billing/obligations`
+
+Owner/finance only; cron and front desk cannot configure obligations. Atomically
+calls `create_billing_obligation`. Every new row is a **draft** (USD only):
+
+```json
+{
+  "id": "caller-generated UUID reused for retries",
+  "account_id": "explicit payer UUID",
+  "label": "Shared training agreement",
+  "amount_cents": 12345,
+  "anchor_date": "2031-01-31",
+  "participant_ids": ["optional participant UUID"],
+  "notes": "optional text",
+  "replaces_obligation_id": "optional predecessor UUID"
+}
+```
+
+`id`, `account_id`, `label` (trimmed, 1–200 characters), positive integer
+`amount_cents` (maximum 2147483647), and a real ISO `anchor_date` are required.
+Participant links never affect the amount and do not imply account membership.
+No email/family matching. Unsupported fields (including `status` and `currency`)
+are rejected. Missing/invalid linked participants roll back the whole create.
+Success: `{ "ok": true, "obligation": { ...stored row... } }`.
+Duplicate ID: `409`; reconcile via GET, do not invent a new ID on retry.
+
+### `POST /api/admin/billing/obligations/:id/transition`
+
+Owner/finance only. Calls `transition_billing_obligation` atomically with:
+
+- `{ "action": "activate", "billing_starts_on": "2031-02-28" }`:
+  draft activation or paused resume, requiring an explicit anchor boundary.
+- `{ "action": "pause" }`: active/paused obligation stops generating immediately.
+- `{ "action": "end" }`: terminal; existing charges stay intact.
+
+Response: `{ "ok": true, "obligation": { ...stored row... } }`.
+Resume requires a current/future boundary and cannot move the baseline backwards.
+Repeated activation with the same baseline is a no-op. Replacements must cut over
+on a boundary shared by both cycles, after all predecessor charge coverage; the
+old exclusive end and new activation commit together. In-place amount/payer/anchor
+changes are unsupported; create a replacement. No automatic refunds or proration.
+
+These routes return `400` with `invalid_*` validation keys,
+`unsupported_obligation_field`, or the database error. Lifecycle keys include
+`billing_start_required`, `billing_start_must_be_anchor_boundary`,
+`active_payer_account_required`, `ended_obligation_is_terminal`,
+`pause_before_changing_billing_start`, `resume_requires_current_or_future_boundary`,
+`billing_start_cannot_move_backwards`, `billing_start_is_after_obligation_end`,
+`replacement_not_available`, `replacement_must_start_at_previous_boundary`,
+`replacement_overlaps_existing_charge`, `only_active_obligation_can_pause`, and
+`billing_obligation_not_found`. Auth failures remain 401/403; missing Supabase is
+500 `supabase_not_configured`; unexpected exceptions are 500 `server_error`.
 
 ---
 
@@ -489,19 +540,11 @@ Rules:
 
 Calls RPC `upgrade_per_class_to_monthly`: ends the active `per_session` subscription as of `effective_date`, creates a monthly subscription, and optionally creates an initial monthly charge.
 
-For a paid monthly target, the new subscription persists
-`automatic_billing_starts_at` as the first day after the current period whether
-or not the initial charge is created. The daily generator therefore does not
-recreate a skipped current period, and it does create the next period's charge.
-A free monthly target leaves the anchor null. The initial charge, when created,
-is `charge_kind = monthly_period`.
-
-Policy:
-- Explicit `conversion_policy` mode:
-  - `no_credit` (default)
-  - `manual_writeoff_allowed` (still no automatic deduction; admin may apply a manual write-off separately)
-
-**Body (JSON):**
+The returned legacy `automatic_billing_starts_at` remains for compatibility but
+is ignored by recurring generation after `20260930063526`. Conversion does not
+create or activate an obligation. Its optional initial charge remains a one-off
+`monthly_period` charge; pass `create_initial_charge: false` when covered by an
+existing agreement. A free monthly target has no initial monetary charge.
 
 ```json
 {
@@ -808,7 +851,7 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### `POST /api/admin/notifications/discord/payment-reminders`
 
-Reads **`view_member_payment_reminders`** (overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
+Reads **`view_payer_payment_reminders`** (one outstanding charge per row; overdue + due within 3 days) and posts a formatted message to **`DISCORD_WEBHOOK_URL`**.
 
 **Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
@@ -1029,3 +1072,89 @@ For all operator apps:
 - Start the API first: `npm run dev:api` (this repo).
 - Set `VITE_API_BASE_URL` if the API is not on `http://localhost:3001`.
 - Paste **x-admin-key** (shared owner key or personal staff key) only in trusted sessions; do not commit keys.
+
+
+## Payer reporting and covered entitlements (local, pending rollout)
+
+Migration `20261001080133_obligation_reporting_entitlements.sql` adds two read-only
+slugs to `GET /api/admin/reporting/views/:slug`:
+
+| Slug | Relation | Row meaning |
+| --- | --- | --- |
+| `payer-charge-board` | `view_payer_charge_board` | Exactly one row per charge, including legacy/manual and obligation charges |
+| `payer-payment-reminders` | `view_payer_payment_reminders` | Outstanding issued charges due on/before New York today + 3 days |
+
+Existing `payment-board` / `payment-reminders` slugs retain their participant row
+contracts. Do not combine their monetary totals with the payer report. New slugs
+use `due_at` for `start`/`end`, support standard pagination, and sort by `due_at`,
+`payer_name`, `outstanding_cents`, or `charge_id`; board additionally supports
+`billing_obligation_id`, reminders support `days_late` / `reminder_bucket`.
+
+Fields: `charge_id`, `account_id`, `payer_name`, `billing_obligation_id`,
+`obligation_label`, `obligation_status`, `agreed_amount_cents`, `anchor_date`,
+`billing_starts_on`, `ends_before`, `subscription_id`, `charge_kind`, `currency`,
+`charge_status`, `coverage_start`, `coverage_end`, `due_at`, `gross_cents`,
+`credit_applied_cents`, `write_off_cents`, `net_due_cents`, `allocated_cents`,
+`outstanding_cents`, and nested `covered_participants: [{participant_id,name}]`.
+Obligation fields are null for legacy/manual debt. Covered participants are
+informational; the report never multiplies debt by the participant count.
+
+Net due comes from `view_charge_net` (including discounts); outstanding is
+`max(0, net_due - allocations)`, or zero for voids. Refunds affect the remaining
+allocations. Paused/ended obligations and inactive accounts retain their unpaid
+charges. Reminders exclude fully settled/void charges, use `overdue` before New
+York today and `due_soon` through today + 3, and add `days_late`.
+They do not forecast charges that have not been issued. Read access remains
+staff-authenticated through the API; new views and RPC have no anon/authenticated
+database grants and views use invoker security.
+
+Both Discord reminder handlers now consume `view_payer_payment_reminders`, show
+payer, agreement label and charge ID, and format outstanding cents as dollars.
+Response envelopes are unchanged; counts now mean unpaid charges, not members.
+No notification was sent or schedule enabled in this change. Deploy this migration
+before the API: missing views fail closed without posting a partial reminder.
+
+### `POST /api/admin/billing/obligations/:id/entitlements`
+
+Owner/finance only. Explicit **no-charge** monthly enrollment or plan change for
+an obligation-linked participant. Body:
+
+```json
+{
+  "id": "stable client-generated subscription UUID",
+  "participant_id": "uuid",
+  "plan_definition_id": "uuid",
+  "replaces_subscription_id": "optional existing subscription UUID"
+}
+```
+
+Calls atomic `enroll_obligation_entitlement(uuid,uuid,uuid,uuid,uuid)`. Requires an
+active, unexpired obligation on an active account, explicit participant coverage
+and membership of that payer account, and an active monthly target plan.
+Effective date is New York today. A replacement predecessor must be active for
+the same participant and payer, started before today, and not already ended.
+It retains its original plan/history and ends yesterday; new access begins today.
+Any other active subscription with an open/current/future end rejects the operation,
+including a future-start subscription. Failure rolls back predecessor changes.
+No charge, proration, obligation activation, or term update occurs.
+
+Success: `{ok:true, subscription_id, account_id, billing_obligation_id,
+participant_id, plan_definition_id, starts_at, replaced_subscription_id,
+initial_charge_id:null}`. New subscription `automatic_billing_starts_at` is null.
+Retry the same UUID: `409 subscription_id_already_exists`; reconcile by subscription
+ID instead of generating a new UUID. Legacy enrollment/paid-upgrade contracts remain
+unchanged and intentionally requested one-off charges remain supported.
+
+Validation errors are `400 invalid_<field>` / `unsupported_entitlement_field`.
+Database errors include `participant_not_found`, `active_obligation_required`,
+`active_payer_account_required`, `participant_not_covered_by_obligation`,
+`participant_not_in_payer_account`, `active_monthly_plan_required`,
+`invalid_entitlement_predecessor`, and `overlapping_active_subscription`.
+Scheduled/backdated changes and replacing an enrollment created today are not
+supported by this deliberately narrow path. Enrollment does not automatically
+end when the billing obligation ends; access and billing lifecycle are separate.
+
+Replacement activation additionally rejects
+`replacement_precedes_previous_billing_start`: a descendant cannot cut over before
+its predecessor begins, even when both anchor days align. The shared generator/
+lifecycle advisory lock and existing unique index remain in place.

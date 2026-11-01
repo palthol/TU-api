@@ -33,6 +33,7 @@ These stay in the live tree because they explain behavior that `admin-api.md` do
 | [application-ownership-and-data-flow.md](./application-ownership-and-data-flow.md) | Repo/app ownership |
 | [architecture-flowcharts.md](./architecture-flowcharts.md) | Request paths |
 | [v1-v2-application-map.md](./v1-v2-application-map.md) | Locked product decisions |
+| [recurring-billing-obligations.md](./recurring-billing-obligations.md) | Payer obligations, cycle rules, lifecycle, validation, and deployment gates |
 | [finance-subsystem-design.md](./finance-subsystem-design.md) | Bookkeeping design |
 | [receipts-app.md](./receipts-app.md) | Receipts workflow from the API side |
 | [event-ledger.md](./event-ledger.md) | How to read `event_ledger` |
