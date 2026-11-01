@@ -51,11 +51,18 @@ npm run dev:api          # same as dev
 npm run start            # production start (workspace: node src/index.js in services/api)
 npm run supabase:push    # apply pending migrations to the linked project
 npm run supabase:pull    # pull schema from the linked project
+npm test                 # API vitest suite (`services/api`)
 ```
 
 There is **no build step** for the API and **no typecheck** (plain JS). Tests: the API's
-own `vitest` suite (`npm --workspace services/api run test`), plus waiver guard/smoke
-scripts at the repo root.
+own `vitest` suite (`npm test` at the repo root, or `npm --workspace services/api run test`),
+plus waiver guard/smoke scripts at the repo root.
+
+**CI** (`.github/workflows/ci.yml`) runs on `pull_request` and on push to `develop` /
+`main`: `npm ci`, `npm test`, and `npm run guard:waiver-schema`. A separate job starts a
+**local** Supabase stack (`supabase start` / `db reset`) and runs pgTAP via
+`supabase test db --local`. CI never uses production secrets or the hosted project.
+The existing waiver/smoke workflow still runs and also triggers on `develop`.
 
 Operator, marketing, and waiver UIs run from sibling repos:
 
