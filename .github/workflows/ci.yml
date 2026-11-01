@@ -57,10 +57,14 @@ jobs:
         with:
           version: 2.105.0
 
+      # CLI 2.105.0 exclude names: edge-runtime, gotrue, imgproxy, kong,
+      # logflare, mailpit, postgres-meta, postgrest, realtime, storage-api,
+      # studio, supavisor, vector. Keep kong + postgrest so the :54321
+      # health check can succeed; pgTAP only needs the local Postgres.
       - name: Start local Supabase
         run: >
           supabase start
-          -x studio,imgproxy,inbucket,realtime,storage,analytics,vector,edge-runtime,functions,meta,kong,rest
+          -x studio,imgproxy,mailpit,realtime,storage-api,logflare,vector,supavisor,edge-runtime,postgres-meta,gotrue
 
       - name: Reset local database
         run: supabase db reset --local
