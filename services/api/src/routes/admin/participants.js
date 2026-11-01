@@ -1,3 +1,5 @@
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+
 /**
  * @param {import('express').Router} router
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
@@ -19,7 +21,7 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
         .or(`full_name.ilike.${like},email.ilike.${like},cell_phone.ilike.${like},home_phone.ilike.${like}`)
         .order('created_at', { ascending: false })
         .limit(limit);
-      if (pErr) return res.status(400).json({ ok: false, error: pErr.message });
+      if (pErr) return sendDatabaseError(res, pErr, { context: 'participants.search' });
 
       const participantIds = (people || []).map((p) => p.id);
       let membershipRows = [];
@@ -29,7 +31,7 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
           .select('participant_id, account_id, role, created_at, accounts(id, status, primary_contact_name)')
           .in('participant_id', participantIds)
           .order('created_at', { ascending: false });
-        if (mErr) return res.status(400).json({ ok: false, error: mErr.message });
+        if (mErr) return sendDatabaseError(res, mErr, { context: 'participants.search.memberships' });
         membershipRows = mRows || [];
       }
 
@@ -83,8 +85,7 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
         p_duplicate_participant_id: duplicate_participant_id,
       });
       if (error) {
-        console.error('merge_participants', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'merge_participants' });
       }
       return res.json({ ok: true });
     } catch (e) {
