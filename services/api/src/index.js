@@ -23,8 +23,15 @@ import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
 import { createAdminSchedulingV2Router } from './routes/scheduling/index.js';
 import { createMemberRouter } from './routes/member/index.js';
 import { createCalendarRouter } from './routes/calendar/index.js';
+import {
+  createPublicPostMiddleware,
+  jsonPayloadTooLargeHandler,
+  parseTrustProxy,
+  readPublicPostLimitsFromEnv,
+} from './lib/publicPostGuard.js';
 
 const app = express();
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
 export function parseAllowedOriginsEnv(value) {
   const raw = typeof value === 'string' ? value.trim() : '';
@@ -65,12 +72,12 @@ if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
 
 // Raw body required for Stripe-Signature verify. Must run before express.json().
 registerStripeWebhookRoute(app, { supabase });
-app.use(express.json({ limit: '10mb' }));
 
 const requireAdmin = createRequireAdminFromSupabase(supabase);
 const requireAdminOrCron = createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) });
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';
+const publicPostLimits = readPublicPostLimitsFromEnv(process.env);
 
 const splitStorageObjectPath = (value) => {
   const [bucket, ...keyParts] = String(value || '').split('/');
@@ -127,22 +134,31 @@ function parseLeadBody(body) {
   };
 }
 
-app.post('/api/lead', async (req, res) => {
-  try {
-    if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-    const parsed = parseLeadBody(req.body);
-    if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
-    const { error } = await supabase.from('marketing_leads').insert(parsed.payload);
-    if (error) {
-      console.error('marketing_leads.insert', error);
-      return res.status(500).json({ ok: false, error: 'db_error' });
+app.post(
+  '/api/lead',
+  ...createPublicPostMiddleware({
+    name: 'lead',
+    jsonLimit: publicPostLimits.leadJsonLimit,
+    windowMs: publicPostLimits.leadWindowMs,
+    max: publicPostLimits.leadMax,
+  }),
+  async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const parsed = parseLeadBody(req.body);
+      if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
+      const { error } = await supabase.from('marketing_leads').insert(parsed.payload);
+      if (error) {
+        console.error('marketing_leads.insert', error);
+        return res.status(500).json({ ok: false, error: 'db_error' });
+      }
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
     }
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ ok: false, error: 'server_error' });
-  }
-});
+  },
+);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/health/deep', async (_req, res) => {
@@ -161,7 +177,15 @@ registerWaiverSubmitRoute(app, {
   supabase,
   signaturesBucket: SIGNATURES_BUCKET,
   waiversBucket: WAIVERS_BUCKET,
+  middleware: createPublicPostMiddleware({
+    name: 'waiver_submit',
+    jsonLimit: publicPostLimits.waiverJsonLimit,
+    windowMs: publicPostLimits.waiverWindowMs,
+    max: publicPostLimits.waiverMax,
+  }),
 });
+
+app.use(express.json({ limit: '10mb' }));
 
 // Admin: fetch waiver metadata and return signed URLs
 app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {
@@ -255,6 +279,8 @@ app.use('/api/viewer', viewerRouter);
 
 app.use('/api/member', createMemberRouter());
 app.use('/api/calendar', createCalendarRouter());
+
+app.use(jsonPayloadTooLargeHandler);
 
 export function startServer() {
   app.listen(PORT, () => {

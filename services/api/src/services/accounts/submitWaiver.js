@@ -734,5 +734,6 @@ export async function handleWaiverSubmit(req, res, deps) {
 }
 
 export function registerWaiverSubmitRoute(app, deps) {
-  app.post('/api/waivers/submit', (req, res) => handleWaiverSubmit(req, res, deps));
+  const middleware = Array.isArray(deps?.middleware) ? deps.middleware : [];
+  app.post('/api/waivers/submit', ...middleware, (req, res) => handleWaiverSubmit(req, res, deps));
 }
