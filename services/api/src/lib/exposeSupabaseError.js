@@ -57,14 +57,23 @@ export function logDatabaseError(context, error) {
 const MACHINE_KEY_STATUS = Object.freeze({
   not_found: 404,
   template_not_found: 404,
+  class_type_not_found: 404,
+  instructor_not_found: 404,
   session_not_found: 404,
   receipt_not_found: 404,
   entry_not_found: 404,
   payment_refund_not_found: 404,
+  unauthorized_member: 401,
   already_exists: 409,
   email_taken: 409,
   last_owner: 409,
   idempotency_key_conflict: 409,
+  session_full: 409,
+  booking_closed: 409,
+  no_credit: 409,
+  late_cancel: 409,
+  already_booked: 409,
+  not_booked: 409,
 });
 
 function statusForMachineKey(key) {
