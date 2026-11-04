@@ -58,6 +58,7 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://waiverviewer.templeunderground.com');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('https://waiverviewer.templeunderground.com');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
   });
 
   it('does not emit Access-Control-Allow-Origin for unlisted origins', async () => {
@@ -67,6 +68,7 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://unlisted.test');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
   it('handles OPTIONS preflight for a listed origin with correct headers', async () => {
@@ -81,6 +83,7 @@ describe('CORS headers', () => {
 
     expect(res.status).toBe(204);
     expect(res.headers['access-control-allow-origin']).toBe('https://allowed.test');
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
     expect(String(res.headers['access-control-allow-methods'] || '')).toMatch(/\bGET\b/);
     expect(String(res.headers['access-control-allow-headers'] || '').toLowerCase()).toContain('content-type');
   });
@@ -106,6 +109,7 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://anything.test');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
   it('treats ALLOWED_ORIGIN that includes * as allow-all', async () => {
@@ -115,6 +119,7 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://anything.test');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
   });
 });
 

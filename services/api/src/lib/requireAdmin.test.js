@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRequireAdmin, requireAdmin } from './requireAdmin.js';
 import { AUTH_METHOD } from './staffAuth.js';
+import { encryptAdminSession } from './adminSession.js';
 
 const ADMIN_KEY = 'test-admin-key-rbac';
 
@@ -41,14 +42,26 @@ function createApp(middleware) {
 
 describe('requireAdmin', () => {
   const originalAdminKey = process.env.ADMIN_API_KEY;
+  const originalSessionSecret = process.env.SESSION_SECRET;
+  const originalAdminEmail = process.env.ADMIN_EMAIL;
+  const originalAllowedOrigin = process.env.ALLOWED_ORIGIN;
 
   beforeEach(() => {
     process.env.ADMIN_API_KEY = ADMIN_KEY;
+    delete process.env.SESSION_SECRET;
+    delete process.env.ADMIN_EMAIL;
+    delete process.env.ALLOWED_ORIGIN;
   });
 
   afterEach(() => {
     if (originalAdminKey === undefined) delete process.env.ADMIN_API_KEY;
     else process.env.ADMIN_API_KEY = originalAdminKey;
+    if (originalSessionSecret === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = originalSessionSecret;
+    if (originalAdminEmail === undefined) delete process.env.ADMIN_EMAIL;
+    else process.env.ADMIN_EMAIL = originalAdminEmail;
+    if (originalAllowedOrigin === undefined) delete process.env.ALLOWED_ORIGIN;
+    else process.env.ALLOWED_ORIGIN = originalAllowedOrigin;
   });
 
   it('rejects missing x-admin-key', async () => {
@@ -162,5 +175,41 @@ describe('requireAdmin', () => {
     const app = createApp(createRequireAdmin({ lookupStaff: async () => deskStaff }));
     const res = await request(app).get('/api/waivers/abc/pdf').set('x-admin-key', 'desk');
     expect(res.status).toBe(200);
+  });
+
+  it('authorizes a valid admin session cookie as an owner actor', async () => {
+    process.env.SESSION_SECRET = 'x'.repeat(32);
+    process.env.ADMIN_EMAIL = 'singh@example.com';
+    process.env.ALLOWED_ORIGIN = 'https://admin.templeunderground.com';
+
+    const token = await encryptAdminSession({ email: 'singh@example.com' });
+    const app = createApp(requireAdmin);
+    const res = await request(app).get('/api/admin/auth/me').set('Cookie', `tu_admin_session=${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe('owner');
+    expect(String(res.body.actor || '')).toContain('session:singh@example.com');
+  });
+
+  it('requires an allowed Origin for mutating requests when authenticated via cookie', async () => {
+    process.env.SESSION_SECRET = 'x'.repeat(32);
+    process.env.ADMIN_EMAIL = 'singh@example.com';
+    process.env.ALLOWED_ORIGIN = 'https://admin.templeunderground.com';
+
+    const token = await encryptAdminSession({ email: 'singh@example.com' });
+    const app = createApp(requireAdmin);
+
+    const missingOrigin = await request(app)
+      .post('/api/admin/billing/record-payment')
+      .set('Cookie', `tu_admin_session=${token}`)
+      .send({});
+    expect(missingOrigin.status).toBe(403);
+    expect(missingOrigin.body.error).toBe('csrf_failed');
+
+    const okOrigin = await request(app)
+      .post('/api/admin/billing/record-payment')
+      .set('Cookie', `tu_admin_session=${token}`)
+      .set('Origin', 'https://admin.templeunderground.com')
+      .send({});
+    expect(okOrigin.status).toBe(200);
   });
 });

@@ -23,6 +23,7 @@ import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
 import { createAdminSchedulingV2Router } from './routes/scheduling/index.js';
 import { createMemberRouter } from './routes/member/index.js';
 import { createCalendarRouter } from './routes/calendar/index.js';
+import { registerAuthRoutes } from './routes/auth/index.js';
 import {
   createPublicPostMiddleware,
   jsonPayloadTooLargeHandler,
@@ -30,29 +31,32 @@ import {
   parseTrustProxy,
   readPublicPostLimitsFromEnv,
 } from './lib/publicPostGuard.js';
+import { parseAllowedOriginsEnv } from './lib/allowedOrigins.js';
 
 const app = express();
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
-export function parseAllowedOriginsEnv(value) {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw || raw === '*') return { mode: 'any' };
-  const origins = raw
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  if (origins.length === 0 || origins.includes('*')) return { mode: 'any' };
-  return { mode: 'list', origins };
-}
+export { parseAllowedOriginsEnv };
 
 export function registerCors(appInstance, allowedOriginsEnvValue = process.env.ALLOWED_ORIGIN) {
   const parsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  const allowAny = cors();
+  const allowlisted = new Map();
+
   const middleware =
     parsed.mode === 'any'
-      ? cors()
-      : cors({
-          origin: parsed.origins,
-        });
+      ? allowAny
+      : (req, res, next) => {
+          const origin = req.header('origin');
+          if (!origin) return next();
+          if (!parsed.origins.includes(origin)) return next();
+          let mw = allowlisted.get(origin);
+          if (!mw) {
+            mw = cors({ origin, credentials: true });
+            allowlisted.set(origin, mw);
+          }
+          return mw(req, res, next);
+        };
   appInstance.use(middleware);
   // Express 5 / path-to-regexp v8: unnamed `*` is invalid. `/{*splat}` is the
   // Express 4 `app.options('*')` equivalent (matches `/` and every subpath).
@@ -184,6 +188,8 @@ registerWaiverSubmitRoute(app, {
 });
 
 app.use(express.json({ limit: '10mb' }));
+
+registerAuthRoutes(app);
 
 // Admin: fetch waiver metadata and return signed URLs
 app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {

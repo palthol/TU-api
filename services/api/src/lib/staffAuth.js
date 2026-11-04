@@ -6,6 +6,7 @@ export const AUTH_METHOD = Object.freeze({
   STAFF_KEY: 'staff_key',
   LEGACY_SHARED_KEY: 'legacy_shared_key',
   CRON_SECRET: 'cron_secret',
+  ADMIN_SESSION: 'admin_session',
 });
 
 const LEGACY_ACTOR_LABEL = 'legacy_shared_key';
@@ -49,6 +50,18 @@ export function legacyOwnerActor() {
     role: 'owner',
     authMethod: AUTH_METHOD.LEGACY_SHARED_KEY,
     actorLabel: LEGACY_ACTOR_LABEL,
+  };
+}
+
+export function adminSessionOwnerActor(email) {
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  return {
+    id: null,
+    email: normalizedEmail || null,
+    displayName: normalizedEmail || 'admin_session',
+    role: 'owner',
+    authMethod: AUTH_METHOD.ADMIN_SESSION,
+    actorLabel: normalizedEmail ? `session:${normalizedEmail}` : 'admin_session',
   };
 }
 
