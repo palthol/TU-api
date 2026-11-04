@@ -10,7 +10,7 @@ import {
   safeEqualString,
 } from './staffAuth.js';
 import { readAdminEmailFromEnv, readAdminSessionFromRequest } from './adminSession.js';
-import { isOriginAllowed, parseAllowedOriginsEnv } from './allowedOrigins.js';
+import { isOriginAllowed, parseAdminAllowedOriginsEnv } from './allowedOrigins.js';
 
 function configuredAdminKey() {
   const key = process.env.ADMIN_API_KEY;
@@ -39,14 +39,20 @@ export function createRequireAdmin(options = {}) {
         } else if (typeof lookupStaff === 'function') {
           staff = await lookupStaff(presented);
         }
-      } else {
+      }
+
+      if (!staff) {
         const adminEmail = readAdminEmailFromEnv(process.env);
-        const session = await readAdminSessionFromRequest(req, process.env);
+        const sessionResult = await readAdminSessionFromRequest(req, process.env);
+        if (!sessionResult.ok && sessionResult.reason === 'duplicate_cookie') {
+          return res.status(401).json({ ok: false, error: 'unauthorized' });
+        }
+        const session = sessionResult.ok ? sessionResult.session : null;
         if (adminEmail.ok && session && String(session.email || '').toLowerCase() === String(adminEmail.email).trim().toLowerCase()) {
           staff = adminSessionOwnerActor(session.email);
           if (isMutatingMethod(req.method)) {
             const origin = req.header('origin');
-            const allowedOrigins = parseAllowedOriginsEnv(process.env.ALLOWED_ORIGIN);
+            const allowedOrigins = parseAdminAllowedOriginsEnv(process.env.ADMIN_ALLOWED_ORIGINS);
             if (!isOriginAllowed(origin, allowedOrigins)) {
               return res.status(403).json({ ok: false, error: 'csrf_failed' });
             }

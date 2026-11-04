@@ -9,15 +9,31 @@ export function parseAllowedOriginsEnv(value) {
   return { mode: 'list', origins };
 }
 
-export function normalizeOrigin(origin) {
+export function parseAdminAllowedOriginsEnv(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw || raw === '*') return { mode: 'none', origins: [] };
+  const parsed = parseAllowedOriginsEnv(raw);
+  if (parsed.mode !== 'list') return { mode: 'none', origins: [] };
+  return parsed;
+}
+
+export function normalizeOriginForCompare(origin) {
   const raw = typeof origin === 'string' ? origin.trim() : '';
-  return raw ? raw.toLowerCase() : '';
+  if (!raw) return null;
+  if (raw.toLowerCase() === 'null') return null;
+  if (raw.endsWith('/')) return null;
+  return raw;
 }
 
 export function isOriginAllowed(origin, parsedAllowedOrigins) {
-  const normalized = normalizeOrigin(origin);
+  const normalized = normalizeOriginForCompare(origin);
   if (!normalized) return false;
   if (!parsedAllowedOrigins || parsedAllowedOrigins.mode !== 'list') return false;
-  return parsedAllowedOrigins.origins.map(normalizeOrigin).includes(normalized);
+  for (const candidate of parsedAllowedOrigins.origins) {
+    const normalizedCandidate = normalizeOriginForCompare(candidate);
+    if (!normalizedCandidate) continue;
+    if (normalizedCandidate === normalized) return true;
+  }
+  return false;
 }
 

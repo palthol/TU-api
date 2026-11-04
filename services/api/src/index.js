@@ -31,31 +31,60 @@ import {
   parseTrustProxy,
   readPublicPostLimitsFromEnv,
 } from './lib/publicPostGuard.js';
-import { parseAllowedOriginsEnv } from './lib/allowedOrigins.js';
+import { isOriginAllowed, parseAdminAllowedOriginsEnv, parseAllowedOriginsEnv } from './lib/allowedOrigins.js';
 
 const app = express();
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.use((_req, res, next) => {
+  res.vary('Origin');
+  return next();
+});
 
 export { parseAllowedOriginsEnv };
 
 export function registerCors(appInstance, allowedOriginsEnvValue = process.env.ALLOWED_ORIGIN) {
-  const parsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
-  const allowAny = cors();
-  const allowlisted = new Map();
+  appInstance.use((_req, res, next) => {
+    res.vary('Origin');
+    return next();
+  });
+
+  const publicParsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  const adminParsed = parseAdminAllowedOriginsEnv(process.env.ADMIN_ALLOWED_ORIGINS);
+
+  const allowAnyPublic = cors();
+  const adminAllowlisted = new Map();
+  const publicAllowlisted = new Map();
 
   const middleware =
-    parsed.mode === 'any'
-      ? allowAny
+    publicParsed.mode === 'any' && adminParsed.mode !== 'list'
+      ? allowAnyPublic
       : (req, res, next) => {
           const origin = req.header('origin');
           if (!origin) return next();
-          if (!parsed.origins.includes(origin)) return next();
-          let mw = allowlisted.get(origin);
-          if (!mw) {
-            mw = cors({ origin, credentials: true });
-            allowlisted.set(origin, mw);
+
+          if (isOriginAllowed(origin, adminParsed)) {
+            let mw = adminAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin, credentials: true });
+              adminAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
           }
-          return mw(req, res, next);
+
+          if (publicParsed.mode === 'any') {
+            return allowAnyPublic(req, res, next);
+          }
+
+          if (isOriginAllowed(origin, publicParsed)) {
+            let mw = publicAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin });
+              publicAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
+          }
+
+          return next();
         };
   appInstance.use(middleware);
   // Express 5 / path-to-regexp v8: unnamed `*` is invalid. `/{*splat}` is the
@@ -187,9 +216,9 @@ registerWaiverSubmitRoute(app, {
   }),
 });
 
-app.use(express.json({ limit: '10mb' }));
-
 registerAuthRoutes(app);
+
+app.use(express.json({ limit: '10mb' }));
 
 // Admin: fetch waiver metadata and return signed URLs
 app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {
