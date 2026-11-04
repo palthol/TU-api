@@ -47,6 +47,9 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `not_found` | `404` | PostgREST no-row `PGRST116` |
 | `internal_error` | `500` | Unmapped database or driver error |
 | `invalid_pagination` | `400` | Provided `limit`/`offset` is non-integer, `limit < 1`, or `offset < 0` |
+| `rate_limited` | `429` | Public `POST /api/lead` or `POST /api/waivers/submit` exceeded the per-IP window |
+| `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
+| `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
 
 Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
@@ -110,7 +113,21 @@ Checks that the service-role client can reach `participants`. **Response:** `{ "
 
 ### `POST /api/lead` (public)
 
-Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Rate-limit at the edge in production if needed.
+Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key.
+
+Per-IP rate limit (default **10 / 15 minutes**, env `LEAD_RATE_LIMIT_MAX` /
+`LEAD_RATE_LIMIT_WINDOW_MS`). JSON body limit default **16kb** (`LEAD_JSON_LIMIT`).
+Over-limit bodies return `413 { "ok": false, "error": "payload_too_large" }`.
+Rate-limited requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Honeypot:** leave `website` omitted or blank. A filled value is treated as a bot
+and returns `200 { "ok": true }` with **no insert**.
+
+**Turnstile:** when `TURNSTILE_SECRET_KEY` is set, send `turnstileToken` (or
+`cf-turnstile-response`) in the JSON body. The API siteverifies before the DB
+write. Missing/invalid tokens return `400 { "ok": false, "error": "turnstile_failed" }`.
+When the secret is unset, the API logs a warning and accepts the request so
+existing lead forms keep working until they send tokens.
 
 **Body (JSON)** — align with marketing lead forms (`firstName`, `lastName`, `goals`, `preferredTime`; at least one of `email` or `phone`):
 
@@ -122,7 +139,9 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
   "phone": "",
   "goals": "first-class",
   "preferredTime": "Evenings after 6pm",
-  "notes": "Optional"
+  "notes": "Optional",
+  "website": "",
+  "turnstileToken": "<cloudflare-turnstile-token>"
 }
 ```
 
@@ -130,11 +149,29 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
 
 **Response:** `{ "ok": true }`
 
-**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, `turnstile_failed`, etc. `413` `payload_too_large`. `429` `rate_limited`.
 
 ---
 
 ### `POST /api/waivers/submit` (public)
+
+Per-IP rate limit (default **5 / 15 minutes**, env `WAIVER_SUBMIT_RATE_LIMIT_MAX` /
+`WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS`). JSON body limit default **512kb**
+(`WAIVER_SUBMIT_JSON_LIMIT`) — enough for a signature-pad PNG data URL plus
+`vectorJson`, far below the previous global 10MB parser. Over-limit bodies
+return `413 { "ok": false, "error": "payload_too_large" }`. Rate-limited
+requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Honeypot:** leave `website` omitted or blank. A filled value returns
+`200 { "ok": true }` with no Storage, PDF, DB, or Discord/Slack side effects
+(and no `waiverId`).
+
+**Turnstile:** when `TURNSTILE_SECRET_KEY` is set, send `turnstileToken` (or
+`cf-turnstile-response`) in the JSON body. Siteverify runs **before** Storage
+uploads, PDF generation, or Discord/Slack. Missing/invalid tokens return
+`400 { "ok": false, "error": "turnstile_failed" }`. When the secret is unset,
+the API logs a warning and accepts the request so current TU-Signup clients
+keep working until they send tokens.
 
 Stores the waiver submission and then records a **`waiver.submitted`** event in `event_ledger`. After persistence, the API sends a notification to each configured webhook provider:
 

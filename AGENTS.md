@@ -160,5 +160,9 @@ For real Supabase access set `SUPABASE_URL`,
 `ALLOWED_ORIGIN` (defaults to `*`), `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`,
 `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS` /
 `WAIVER_VIEWER_ALLOWED_EMAILS`, `SIGNATURES_BUCKET`, `WAIVERS_BUCKET`, `PDF_ORG_*`,
-and `API_EXPOSE_DB_ERRORS`. Project ref: `jhxzecxkccqlgyazhsnb`. Never commit secret
+`API_EXPOSE_DB_ERRORS`, `TRUST_PROXY` (default `1` for Render), public POST rate-limit
+and JSON-limit names (`LEAD_RATE_LIMIT_*`, `WAIVER_SUBMIT_RATE_LIMIT_*`,
+`LEAD_JSON_LIMIT`, `WAIVER_SUBMIT_JSON_LIMIT`), and `TURNSTILE_SECRET_KEY` (when set,
+`POST /api/lead` and `POST /api/waivers/submit` siteverify a token before side effects).
+Project ref: `jhxzecxkccqlgyazhsnb`. Never commit secret
 values or tokenized webhook URLs.
