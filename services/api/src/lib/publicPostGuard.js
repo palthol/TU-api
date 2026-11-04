@@ -56,9 +56,21 @@ export function readPublicPostLimitsFromEnv(env = process.env) {
   };
 }
 
-export function clientIp(req) {
-  const cf = req.headers?.['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+export function trustCfConnectingIp(env = process.env) {
+  const raw = String(env.TRUST_CF_CONNECTING_IP || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+/**
+ * Rate-limit key IP. Defaults to Express `req.ip` (honors `TRUST_PROXY`).
+ * `cf-connecting-ip` is only used when TRUST_CF_CONNECTING_IP is set, which
+ * must mean the origin is locked to Cloudflare so clients cannot spoof it.
+ */
+export function clientIp(req, env = process.env) {
+  if (trustCfConnectingIp(env)) {
+    const cf = req.headers?.['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  }
   if (typeof req.ip === 'string' && req.ip.trim()) return req.ip.trim();
   return '';
 }

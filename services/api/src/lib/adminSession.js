@@ -42,10 +42,10 @@ function deriveJweKeyFromSecret(secret) {
 export function readSessionsValidAfterFromEnv(env = process.env) {
   const raw = typeof env.SESSIONS_VALID_AFTER === 'string' ? env.SESSIONS_VALID_AFTER : '';
   const trimmed = raw.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return { ok: true, epochSec: null };
   const parsedMs = Date.parse(trimmed);
-  if (!Number.isFinite(parsedMs)) return null;
-  return Math.floor(parsedMs / 1000);
+  if (!Number.isFinite(parsedMs)) return { ok: false, reason: 'invalid' };
+  return { ok: true, epochSec: Math.floor(parsedMs / 1000) };
 }
 
 export function adminSessionCookieOptions(env = process.env) {
@@ -122,6 +122,10 @@ export async function decryptAdminSession(token, env = process.env, nowMs = Date
   if (typeof token !== 'string' || !token.length) return null;
   const nowSec = Math.floor(nowMs / 1000);
   const validAfter = readSessionsValidAfterFromEnv(env);
+  if (!validAfter.ok) {
+    console.warn('SESSIONS_VALID_AFTER is set but unparseable; rejecting all sessions');
+    return null;
+  }
 
   try {
     const keys = [];
@@ -133,7 +137,7 @@ export async function decryptAdminSession(token, env = process.env, nowMs = Date
       try {
         const session = await decryptWithKey(token, key, nowSec);
         if (!session) continue;
-        if (validAfter != null && session.authTime < validAfter) return null;
+        if (validAfter.epochSec != null && session.authTime < validAfter.epochSec) return null;
         return session;
       } catch {
         // try next key

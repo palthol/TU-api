@@ -92,7 +92,18 @@ describe('/api/auth', () => {
     expect(cookie).not.toMatch(/Domain=/i);
     expect(cookie).toMatch(/\bMax-Age=604800\b/);
     expect(extractCookieValue(res).split('.')).toHaveLength(5);
-    expect(client.auth.signOut).toHaveBeenCalled();
+    expect(client.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+
+  it('signs out of Supabase with local scope only', async () => {
+    const env = baseEnv();
+    const signOut = vi.fn(async () => ({ error: null }));
+    const app = createApp({ env, supabaseAuthClient: mockClient({ signOut }) });
+    const res = await request(app).post('/api/auth/login').send({ email: 'singh@example.com', password: 'pw' });
+    expect(res.status).toBe(200);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(signOut.mock.calls[0][0]).not.toEqual(expect.objectContaining({ scope: 'global' }));
   });
 
   it('accepts mixed-case emails against ADMIN_EMAIL', async () => {
@@ -189,6 +200,20 @@ describe('/api/auth', () => {
     expect(res.body.error).toBe('invalid_json');
   });
 
+  it('maps a Supabase 429 to JSON rate_limited', async () => {
+    const env = baseEnv();
+    const client = mockClient({
+      signInWithPassword: vi.fn(async () => ({
+        data: null,
+        error: { message: 'Too many requests', status: 429 },
+      })),
+    });
+    const app = createApp({ env, supabaseAuthClient: client });
+    const res = await request(app).post('/api/auth/login').send({ email: 'singh@example.com', password: 'pw' });
+    expect(res.status).toBe(429);
+    expect(res.body).toEqual({ error: 'rate_limited' });
+  });
+
   it('returns 429 JSON after repeated failed logins', async () => {
     const env = baseEnv();
     const client = mockClient({
@@ -201,6 +226,47 @@ describe('/api/auth', () => {
     let last;
     for (let i = 0; i < 11; i += 1) {
       last = await request(app).post('/api/auth/login').send({ email: 'singh@example.com', password: 'wrong' });
+    }
+    expect(last.status).toBe(429);
+    expect(last.body).toEqual({ error: 'rate_limited' });
+  });
+
+  it('applies the global failed-login cap across distinct client IPs', async () => {
+    const env = baseEnv();
+    const client = mockClient({
+      signInWithPassword: vi.fn(async () => ({
+        data: null,
+        error: { message: 'Invalid login credentials', status: 400 },
+      })),
+    });
+    const app = createApp({ env, supabaseAuthClient: client });
+    let last;
+    for (let i = 0; i < 31; i += 1) {
+      last = await request(app)
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', `203.0.113.${i}`)
+        .send({ email: 'singh@example.com', password: 'wrong' });
+      if (i < 30) expect(last.status).toBe(401);
+    }
+    expect(last.status).toBe(429);
+    expect(last.body).toEqual({ error: 'rate_limited' });
+  });
+
+  it('ignores a spoofed cf-connecting-ip when keying the login limiter', async () => {
+    const env = baseEnv();
+    const client = mockClient({
+      signInWithPassword: vi.fn(async () => ({
+        data: null,
+        error: { message: 'Invalid login credentials', status: 400 },
+      })),
+    });
+    const app = createApp({ env, supabaseAuthClient: client });
+    let last;
+    for (let i = 0; i < 11; i += 1) {
+      last = await request(app)
+        .post('/api/auth/login')
+        .set('CF-Connecting-IP', `198.51.100.${i}`)
+        .send({ email: 'singh@example.com', password: 'wrong' });
     }
     expect(last.status).toBe(429);
     expect(last.body).toEqual({ error: 'rate_limited' });
@@ -220,6 +286,24 @@ describe('/api/auth', () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(401);
     expect(res.headers['cache-control']).toMatch(/no-store/i);
+  });
+
+  it('/me returns 401 when the cookie email does not match ADMIN_EMAIL', async () => {
+    const env = baseEnv();
+    const token = await encryptAdminSession({ email: 'other@example.com' }, env);
+    const app = createApp({ env, supabaseAuthClient: mockClient() });
+    const res = await request(app).get('/api/auth/me').set('Cookie', `${ADMIN_SESSION_COOKIE_NAME}=${token}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('unauthorized');
+  });
+
+  it('/me accepts a mixed-case email in the session cookie', async () => {
+    const env = baseEnv();
+    const token = await encryptAdminSession({ email: 'SINGH@EXAMPLE.COM' }, env);
+    const app = createApp({ env, supabaseAuthClient: mockClient() });
+    const res = await request(app).get('/api/auth/me').set('Cookie', `${ADMIN_SESSION_COOKIE_NAME}=${token}`);
+    expect(res.status).toBe(200);
+    expect(String(res.body.email).toLowerCase()).toBe(ADMIN_EMAIL);
   });
 
   it('/me rolls the cookie (re-issues it) when a session is valid', async () => {
@@ -263,5 +347,24 @@ describe('/api/auth', () => {
     expect(cleared).toContain(`${ADMIN_SESSION_COOKIE_NAME}=`);
     expect(cleared).toContain(`${LEGACY_ADMIN_SESSION_COOKIE_NAME}=`);
     expect(cleared.toLowerCase()).toContain('expires=');
+  });
+
+  it('rejects an oversized auth JSON body before the global 10MB parser', async () => {
+    const env = baseEnv();
+    const app = express();
+    app.set('trust proxy', 1);
+    registerAuthRoutes(app, {
+      env,
+      supabaseUrl: env.SUPABASE_URL,
+      supabaseAnonKey: env.SUPABASE_ANON_KEY,
+      createSupabaseAuthClient: () => mockClient(),
+    });
+    app.use(express.json({ limit: '10mb' }));
+    app.post('/wide', (req, res) => res.json({ ok: true, size: JSON.stringify(req.body || {}).length }));
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'singh@example.com', password: 'p'.repeat(20_000) });
+    expect([400, 413]).toContain(res.status);
   });
 });

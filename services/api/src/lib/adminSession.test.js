@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EncryptJWT } from 'jose';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_SESSION_ABSOLUTE_MAX_AGE_SECONDS,
   ADMIN_SESSION_AUDIENCE,
@@ -127,6 +127,21 @@ describe('admin session crypto', () => {
     });
     const session = await decryptAdminSession(token, { SESSION_SECRET: SECRET }, nowSec * 1000);
     expect(session).toBeNull();
+  });
+
+  it('rejects every session when SESSIONS_VALID_AFTER is set but unparseable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const token = await encryptAdminSession({ email: EMAIL }, { SESSION_SECRET: SECRET });
+    const session = await decryptAdminSession(token, {
+      SESSION_SECRET: SECRET,
+      SESSIONS_VALID_AFTER: 'not-a-timestamp',
+    });
+    expect(session).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    const logged = warn.mock.calls.flat().map(String).join(' ');
+    expect(logged).toMatch(/SESSIONS_VALID_AFTER/);
+    expect(logged).not.toContain(SECRET);
+    warn.mockRestore();
   });
 
   it('rejects duplicate cookies with the session name', () => {

@@ -12,7 +12,6 @@ import {
   clearLegacyAdminSessionCookie,
 } from '../../lib/adminSession.js';
 import { isOriginAllowed, parseAdminAllowedOriginsEnv } from '../../lib/allowedOrigins.js';
-import { clientIp } from '../../lib/publicPostGuard.js';
 
 function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -41,8 +40,11 @@ function isConfirmedUser(user) {
   return typeof emailConfirmedAt === 'string' && emailConfirmedAt.trim().length > 0;
 }
 
-function jsonSyntaxErrorHandler(err, _req, res, next) {
+function jsonBodyErrorHandler(err, _req, res, next) {
   const status = err?.status || err?.statusCode;
+  if (err?.type === 'entity.too.large' || status === 413) {
+    return res.status(413).json({ error: 'payload_too_large' });
+  }
   if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && status === 400)) {
     return res.status(400).json({ error: 'invalid_json' });
   }
@@ -98,7 +100,7 @@ export function registerAuthRoutes(appInstance, options = {}) {
     skipSuccessfulRequests: true,
     identifier: 'admin_login_ip',
     keyGenerator(req) {
-      return ipKeyGenerator(clientIp(req) || req.ip || '0.0.0.0');
+      return ipKeyGenerator(req.ip || '0.0.0.0');
     },
     handler(_req, res) {
       rateLimited(res);
@@ -122,7 +124,7 @@ export function registerAuthRoutes(appInstance, options = {}) {
 
   const json = express.json({ limit: '10kb' });
 
-  router.post('/login', loginGlobalLimiter, loginPerIpLimiter, json, jsonSyntaxErrorHandler, async (req, res) => {
+  router.post('/login', loginGlobalLimiter, loginPerIpLimiter, json, jsonBodyErrorHandler, async (req, res) => {
     const supabaseAuthClient = createSupabaseAuthClient();
     try {
       const email = normalizeEmail(req?.body?.email);
@@ -133,6 +135,8 @@ export function registerAuthRoutes(appInstance, options = {}) {
       try {
         signInResult = await supabaseAuthClient.auth.signInWithPassword({ email, password });
       } catch (error) {
+        const status = Number(error?.status || 0);
+        if (status === 429) return rateLimited(res);
         const message = error instanceof Error ? error.message : String(error);
         console.error('auth.login.supabase_unreachable', { message });
         return serviceUnavailable(res);
@@ -141,6 +145,7 @@ export function registerAuthRoutes(appInstance, options = {}) {
       const { data, error } = signInResult || {};
       if (error) {
         const status = Number(error.status || 0);
+        if (status === 429) return rateLimited(res);
         if (status >= 500) return serviceUnavailable(res);
         return invalidCredentials(res);
       }
@@ -160,7 +165,7 @@ export function registerAuthRoutes(appInstance, options = {}) {
       return serviceUnavailable(res);
     } finally {
       try {
-        await supabaseAuthClient.auth.signOut();
+        await supabaseAuthClient.auth.signOut({ scope: 'local' });
       } catch {
         // ignore
       }
@@ -195,7 +200,7 @@ export function registerAuthRoutes(appInstance, options = {}) {
     return res.status(204).end();
   });
 
-  router.use(jsonSyntaxErrorHandler);
+  router.use(jsonBodyErrorHandler);
 
   appInstance.use('/api/auth', router);
   return true;
