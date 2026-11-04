@@ -23,6 +23,7 @@ import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
 import { createAdminSchedulingV2Router } from './routes/scheduling/index.js';
 import { createMemberRouter } from './routes/member/index.js';
 import { createCalendarRouter } from './routes/calendar/index.js';
+import { registerAuthRoutes } from './routes/auth/index.js';
 import {
   createPublicPostMiddleware,
   jsonPayloadTooLargeHandler,
@@ -30,29 +31,61 @@ import {
   parseTrustProxy,
   readPublicPostLimitsFromEnv,
 } from './lib/publicPostGuard.js';
+import { isOriginAllowed, parseAdminAllowedOriginsEnv, parseAllowedOriginsEnv } from './lib/allowedOrigins.js';
 
 const app = express();
 app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.use((_req, res, next) => {
+  res.vary('Origin');
+  return next();
+});
 
-export function parseAllowedOriginsEnv(value) {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw || raw === '*') return { mode: 'any' };
-  const origins = raw
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  if (origins.length === 0 || origins.includes('*')) return { mode: 'any' };
-  return { mode: 'list', origins };
-}
+export { parseAllowedOriginsEnv };
 
 export function registerCors(appInstance, allowedOriginsEnvValue = process.env.ALLOWED_ORIGIN) {
-  const parsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  appInstance.use((_req, res, next) => {
+    res.vary('Origin');
+    return next();
+  });
+
+  const publicParsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  const adminParsed = parseAdminAllowedOriginsEnv(process.env.ADMIN_ALLOWED_ORIGINS);
+
+  const allowAnyPublic = cors();
+  const adminAllowlisted = new Map();
+  const publicAllowlisted = new Map();
+
   const middleware =
-    parsed.mode === 'any'
-      ? cors()
-      : cors({
-          origin: parsed.origins,
-        });
+    publicParsed.mode === 'any' && adminParsed.mode !== 'list'
+      ? allowAnyPublic
+      : (req, res, next) => {
+          const origin = req.header('origin');
+          if (!origin) return next();
+
+          if (isOriginAllowed(origin, adminParsed)) {
+            let mw = adminAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin, credentials: true });
+              adminAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
+          }
+
+          if (publicParsed.mode === 'any') {
+            return allowAnyPublic(req, res, next);
+          }
+
+          if (isOriginAllowed(origin, publicParsed)) {
+            let mw = publicAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin });
+              publicAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
+          }
+
+          return next();
+        };
   appInstance.use(middleware);
   // Express 5 / path-to-regexp v8: unnamed `*` is invalid. `/{*splat}` is the
   // Express 4 `app.options('*')` equivalent (matches `/` and every subpath).
@@ -182,6 +215,8 @@ registerWaiverSubmitRoute(app, {
     max: publicPostLimits.waiverMax,
   }),
 });
+
+registerAuthRoutes(app);
 
 app.use(express.json({ limit: '10mb' }));
 

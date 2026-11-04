@@ -121,27 +121,51 @@ describe('public POST rate limit', () => {
     expect(b1.status).toBe(200);
   });
 
-  it('prefers CF-Connecting-IP when Cloudflare is in front of Render', async () => {
-    const app = createTestApp({ max: 1, name: `cf-${randomUUID()}` });
-    const sharedForwarded = '198.51.100.9, 10.0.0.1';
+  it('ignores a spoofed CF-Connecting-IP and keys on req.ip', async () => {
+    const app = createTestApp({ max: 1, name: `cf-ignore-${randomUUID()}` });
+    const sharedForwarded = '198.51.100.9';
     const first = await request(app)
       .post('/submit')
       .set('X-Forwarded-For', sharedForwarded)
       .set('CF-Connecting-IP', '203.0.113.20')
       .send({});
-    const sameClient = await request(app)
-      .post('/submit')
-      .set('X-Forwarded-For', sharedForwarded)
-      .set('CF-Connecting-IP', '203.0.113.20')
-      .send({});
-    const otherClient = await request(app)
+    const spoofed = await request(app)
       .post('/submit')
       .set('X-Forwarded-For', sharedForwarded)
       .set('CF-Connecting-IP', '203.0.113.21')
       .send({});
     expect(first.status).toBe(200);
-    expect(sameClient.status).toBe(429);
-    expect(otherClient.status).toBe(200);
+    expect(spoofed.status).toBe(429);
+  });
+
+  it('uses CF-Connecting-IP only when TRUST_CF_CONNECTING_IP is set', async () => {
+    const previous = process.env.TRUST_CF_CONNECTING_IP;
+    process.env.TRUST_CF_CONNECTING_IP = 'true';
+    try {
+      const app = createTestApp({ max: 1, name: `cf-${randomUUID()}` });
+      const sharedForwarded = '198.51.100.9, 10.0.0.1';
+      const first = await request(app)
+        .post('/submit')
+        .set('X-Forwarded-For', sharedForwarded)
+        .set('CF-Connecting-IP', '203.0.113.20')
+        .send({});
+      const sameClient = await request(app)
+        .post('/submit')
+        .set('X-Forwarded-For', sharedForwarded)
+        .set('CF-Connecting-IP', '203.0.113.20')
+        .send({});
+      const otherClient = await request(app)
+        .post('/submit')
+        .set('X-Forwarded-For', sharedForwarded)
+        .set('CF-Connecting-IP', '203.0.113.21')
+        .send({});
+      expect(first.status).toBe(200);
+      expect(sameClient.status).toBe(429);
+      expect(otherClient.status).toBe(200);
+    } finally {
+      if (previous === undefined) delete process.env.TRUST_CF_CONNECTING_IP;
+      else process.env.TRUST_CF_CONNECTING_IP = previous;
+    }
   });
 });
 
