@@ -44,24 +44,19 @@ export function parseAllowedOriginsEnv(value) {
   return { mode: 'list', origins };
 }
 
-function applyCors(appInstance) {
-  const parsed = parseAllowedOriginsEnv(process.env.ALLOWED_ORIGIN);
-  if (parsed.mode === 'any') {
-    appInstance.use(cors());
-    return;
-  }
-  const allowed = new Set(parsed.origins);
-  appInstance.use(
-    cors({
-      origin(origin, callback) {
-        if (!origin) return callback(null, true);
-        return callback(null, allowed.has(origin));
-      },
-    }),
-  );
+export function registerCors(appInstance, allowedOriginsEnvValue = process.env.ALLOWED_ORIGIN) {
+  const parsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  const middleware =
+    parsed.mode === 'any'
+      ? cors()
+      : cors({
+          origin: parsed.origins,
+        });
+  appInstance.use(middleware);
+  appInstance.options('*', middleware);
 }
 
-applyCors(app);
+registerCors(app);
 
 const PORT = process.env.PORT || 3001;
 
