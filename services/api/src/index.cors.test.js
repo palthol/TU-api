@@ -85,6 +85,21 @@ describe('CORS headers', () => {
     expect(String(res.headers['access-control-allow-headers'] || '').toLowerCase()).toContain('content-type');
   });
 
+  it('handles OPTIONS preflight on nested paths after the Express 5 splat syntax change', async () => {
+    process.env.ALLOWED_ORIGIN = 'https://allowed.test';
+    const app = createAppWithCors();
+
+    const res = await request(app)
+      .options('/api/admin/billing/record-payment')
+      .set('Origin', 'https://allowed.test')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type,x-admin-key');
+
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe('https://allowed.test');
+    expect(String(res.headers['access-control-allow-methods'] || '')).toMatch(/\bPOST\b/);
+  });
+
   it('treats missing/empty ALLOWED_ORIGIN as allow-all', async () => {
     const app = createAppWithCors();
 
@@ -100,6 +115,17 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://anything.test');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('*');
+  });
+});
+
+describe('Express 5 query parser default', () => {
+  it('keeps nested qs keys as literal strings under the simple parser', async () => {
+    const app = express();
+    app.get('/search', (req, res) => res.json({ query: req.query }));
+
+    const res = await request(app).get('/search').query({ 'a[b]': '1', c: '2' });
+    expect(res.status).toBe(200);
+    expect(res.body.query).toEqual({ 'a[b]': '1', c: '2' });
   });
 });
 

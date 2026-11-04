@@ -41,6 +41,7 @@
     "vitest": "4.1.12",
     "@vitest/coverage-v8": "4.1.12",
     "@vitest/ui": "4.1.12",
-    "@vitest/mocker": "4.1.12"
+    "@vitest/mocker": "4.1.12",
+    "express": "5.3.0"
   }
 }

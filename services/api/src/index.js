@@ -26,6 +26,7 @@ import { createCalendarRouter } from './routes/calendar/index.js';
 import {
   createPublicPostMiddleware,
   jsonPayloadTooLargeHandler,
+  jsonUnhandledErrorHandler,
   parseTrustProxy,
   readPublicPostLimitsFromEnv,
 } from './lib/publicPostGuard.js';
@@ -53,7 +54,9 @@ export function registerCors(appInstance, allowedOriginsEnvValue = process.env.A
           origin: parsed.origins,
         });
   appInstance.use(middleware);
-  appInstance.options('*', middleware);
+  // Express 5 / path-to-regexp v8: unnamed `*` is invalid. `/{*splat}` is the
+  // Express 4 `app.options('*')` equivalent (matches `/` and every subpath).
+  appInstance.options('/{*splat}', middleware);
 }
 
 registerCors(app);
@@ -276,9 +279,14 @@ app.use('/api/member', createMemberRouter());
 app.use('/api/calendar', createCalendarRouter());
 
 app.use(jsonPayloadTooLargeHandler);
+app.use(jsonUnhandledErrorHandler);
 
 export function startServer() {
-  app.listen(PORT, () => {
+  return app.listen(PORT, (error) => {
+    if (error) {
+      console.error(error);
+      throw error;
+    }
     console.log(`API listening on :${PORT}`);
   });
 }

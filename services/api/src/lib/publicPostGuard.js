@@ -94,6 +94,16 @@ export function jsonPayloadTooLargeHandler(err, _req, res, next) {
   return next(err);
 }
 
+/**
+ * Express 5 forwards rejected promises from async handlers here. Keep the
+ * JSON `{ ok:false }` envelope instead of the default HTML error page.
+ */
+export function jsonUnhandledErrorHandler(err, _req, res, next) {
+  if (res.headersSent) return next(err);
+  console.error(err);
+  return res.status(500).json({ ok: false, error: 'server_error' });
+}
+
 export function createTurnstileMiddleware({
   getSecret = () => process.env.TURNSTILE_SECRET_KEY,
   fetchImpl = globalThis.fetch.bind(globalThis),
