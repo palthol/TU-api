@@ -32,15 +32,20 @@ describe('CORS allowed origin parsing', () => {
 
 describe('CORS headers', () => {
   let previousAllowedOrigin;
+  let previousAdminAllowedOrigins;
 
   beforeEach(() => {
     previousAllowedOrigin = process.env.ALLOWED_ORIGIN;
+    previousAdminAllowedOrigins = process.env.ADMIN_ALLOWED_ORIGINS;
     delete process.env.ALLOWED_ORIGIN;
+    delete process.env.ADMIN_ALLOWED_ORIGINS;
   });
 
   afterEach(() => {
     if (previousAllowedOrigin === undefined) delete process.env.ALLOWED_ORIGIN;
     else process.env.ALLOWED_ORIGIN = previousAllowedOrigin;
+    if (previousAdminAllowedOrigins === undefined) delete process.env.ADMIN_ALLOWED_ORIGINS;
+    else process.env.ADMIN_ALLOWED_ORIGINS = previousAdminAllowedOrigins;
   });
 
   function createAppWithCors() {
@@ -58,7 +63,30 @@ describe('CORS headers', () => {
     const res = await request(app).get('/ping').set('Origin', 'https://waiverviewer.templeunderground.com');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('https://waiverviewer.templeunderground.com');
-    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+    expect(String(res.headers.vary || '')).toMatch(/Origin/i);
+  });
+
+  it('sends credentials only for ADMIN_ALLOWED_ORIGINS, not public ALLOWED_ORIGIN sites', async () => {
+    process.env.ALLOWED_ORIGIN = 'https://waiver.templeunderground.com,https://admin.templeunderground.com';
+    process.env.ADMIN_ALLOWED_ORIGINS = 'https://admin.templeunderground.com';
+    const app = createAppWithCors();
+
+    const admin = await request(app).get('/ping').set('Origin', 'https://admin.templeunderground.com');
+    expect(admin.headers['access-control-allow-origin']).toBe('https://admin.templeunderground.com');
+    expect(admin.headers['access-control-allow-credentials']).toBe('true');
+
+    const publicSite = await request(app).get('/ping').set('Origin', 'https://waiver.templeunderground.com');
+    expect(publicSite.headers['access-control-allow-origin']).toBe('https://waiver.templeunderground.com');
+    expect(publicSite.headers['access-control-allow-credentials']).toBeUndefined();
+  });
+
+  it('does not send credentials when ADMIN_ALLOWED_ORIGINS is unset', async () => {
+    process.env.ALLOWED_ORIGIN = 'https://admin.templeunderground.com';
+    const app = createAppWithCors();
+    const res = await request(app).get('/ping').set('Origin', 'https://admin.templeunderground.com');
+    expect(res.headers['access-control-allow-origin']).toBe('https://admin.templeunderground.com');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
   it('does not emit Access-Control-Allow-Origin for unlisted origins', async () => {
@@ -83,7 +111,7 @@ describe('CORS headers', () => {
 
     expect(res.status).toBe(204);
     expect(res.headers['access-control-allow-origin']).toBe('https://allowed.test');
-    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(res.headers['access-control-allow-credentials']).toBeUndefined();
     expect(String(res.headers['access-control-allow-methods'] || '')).toMatch(/\bGET\b/);
     expect(String(res.headers['access-control-allow-headers'] || '').toLowerCase()).toContain('content-type');
   });

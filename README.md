@@ -15,12 +15,21 @@ API listens on `:3001`. Env **names** only live in `services/api/.env.example` a
 The API supports cookie-based admin sessions for the admin UI while preserving existing `x-admin-key` scripts.
 
 - **Routes**: `POST /api/auth/login` → `{ email }`, `GET /api/auth/me` → `{ email }` (rolling cookie), `POST /api/auth/logout` → `204`.
+- **Cookie**: `__Host-tu_admin_session` (host-only; `HttpOnly; Secure; Path=/; SameSite=Strict`; no `Domain`).
 - **Required env names** (see `services/api/.env.example`):
   - `SESSION_SECRET` (>= 32 chars)
-  - `ADMIN_EMAIL` (only this email may log in)
+  - `ADMIN_EMAIL` and `ADMIN_USER_ID` (Singh's confirmed Supabase Auth user)
+  - `ADMIN_ALLOWED_ORIGINS` (admin UI origins; credentialed CORS + cookie CSRF allowlist)
   - `SUPABASE_ANON_KEY` (used for Supabase Auth password sign-in)
-  - `COOKIE_DOMAIN` (optional)
-- **CORS/CSRF note**: credentialed CORS is enabled only when `ALLOWED_ORIGIN` is an explicit allowlist (never `*`). Cookie-authenticated mutating requests require an `Origin` header that matches the allowlist.
+- **Optional**: `SESSION_SECRET_PREVIOUS` (decrypt-only during rotation), `SESSIONS_VALID_AFTER` (ISO timestamp; reject older `auth_time`).
+- **CORS/CSRF**: `ALLOWED_ORIGIN` remains the public CORS list and never gets credentials. Only `ADMIN_ALLOWED_ORIGINS` get `Access-Control-Allow-Credentials: true` and pass cookie-auth CSRF. If `ADMIN_ALLOWED_ORIGINS` is unset, mutating cookie-auth requests return `403`.
+- **Trust proxy**: `TRUST_PROXY` is the Render hop count (default `1`). Do not set `true`.
+
+### Singh setup (production)
+
+1. In the production Supabase project, disable public sign-ups.
+2. Create Singh's Auth user, confirm the email, and copy the user id into `ADMIN_USER_ID`.
+3. Set Render env vars: `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_USER_ID`, `ADMIN_ALLOWED_ORIGINS`, `SUPABASE_ANON_KEY` (plus optional `SESSION_SECRET_PREVIOUS` / `SESSIONS_VALID_AFTER`). Do not rotate keys from this change.
 
 ## Public POST hardening
 
