@@ -14,6 +14,7 @@ import {
   TURNSTILE_UNSET_WARNING,
   createPublicPostMiddleware,
   jsonPayloadTooLargeHandler,
+  jsonUnhandledErrorHandler,
   parseJsonLimit,
   parsePositiveInt,
   parseTrustProxy,
@@ -51,6 +52,7 @@ function createTestApp({
     handler,
   );
   app.use(jsonPayloadTooLargeHandler);
+  app.use(jsonUnhandledErrorHandler);
   return app;
 }
 
@@ -140,6 +142,32 @@ describe('public POST rate limit', () => {
     expect(first.status).toBe(200);
     expect(sameClient.status).toBe(429);
     expect(otherClient.status).toBe(200);
+  });
+});
+
+describe('Express 5 body parser and async errors', () => {
+  it('treats a JSON POST with no body as handled (req.body may be undefined)', async () => {
+    const handler = vi.fn((req, res) => {
+      expect(req.body === undefined || req.body === null || typeof req.body === 'object').toBe(true);
+      return res.json({ ok: true, handled: true, hasBody: req.body != null });
+    });
+    const app = createTestApp({ handler, name: `nobody-${randomUUID()}` });
+    const res = await request(app).post('/submit').set('Content-Type', 'application/json');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('forwards rejected async handlers to the JSON error envelope', async () => {
+    const app = createTestApp({
+      name: `async-err-${randomUUID()}`,
+      handler: async () => {
+        throw new Error('boom');
+      },
+    });
+    const res = await request(app).post('/submit').send({ firstName: 'Jane' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'server_error' });
   });
 });
 
