@@ -148,5 +148,56 @@ export function nyWallClockToUtc({ date, time, disambiguation } = {}) {
   );
 }
 
-export { NY_TZ };
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+export function formatIsoDate({ year, month, day }) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+export function nyZonedParts(date = new Date()) {
+  return readZonedParts(date, NY_TZ);
+}
+
+export function nyCalendarDate(date = new Date()) {
+  return formatIsoDate(readZonedParts(date, NY_TZ));
+}
+
+export function addDaysToIsoDate(value, days) {
+  const parsed = parseIsoDate(value);
+  if (!parsed) throw new TypeError('invalid_date');
+  const n = Number(days);
+  if (!Number.isInteger(n)) throw new TypeError('invalid_day_count');
+  const next = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + n));
+  return formatIsoDate({
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  });
+}
+
+/** ISO-8601 weekday: 1 = Monday … 7 = Sunday. */
+export function isoWeekdayFromIsoDate(value) {
+  const parsed = parseIsoDate(value);
+  if (!parsed) throw new TypeError('invalid_date');
+  const jsDay = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
+  return jsDay === 0 ? 7 : jsDay;
+}
+
+export function listIsoDatesInclusive(start, end) {
+  const startParsed = parseIsoDate(start);
+  const endParsed = parseIsoDate(end);
+  if (!startParsed || !endParsed) throw new TypeError('invalid_date');
+  if (start > end) return [];
+  const dates = [];
+  let current = start;
+  while (current <= end) {
+    dates.push(current);
+    current = addDaysToIsoDate(current, 1);
+  }
+  return dates;
+}
+
+export { NY_TZ, parseIsoDate, parseWallClockTime };
 

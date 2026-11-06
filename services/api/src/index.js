@@ -301,7 +301,7 @@ registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminSchedulingRoutes(adminBillingRouter, { supabase });
-adminBillingRouter.use('/scheduling-v2', createAdminSchedulingV2Router());
+adminBillingRouter.use('/scheduling-v2', createAdminSchedulingV2Router({ supabase }));
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
@@ -311,7 +311,7 @@ registerViewerWaiverRoutes(viewerRouter, { supabase });
 app.use('/api/viewer', viewerRouter);
 
 app.use('/api/member', createMemberRouter());
-app.use('/api/calendar', createCalendarRouter());
+app.use('/api/calendar', createCalendarRouter({ supabase }));
 
 app.use(jsonPayloadTooLargeHandler);
 app.use(jsonUnhandledErrorHandler);
