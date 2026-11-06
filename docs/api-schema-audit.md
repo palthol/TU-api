@@ -13,7 +13,7 @@ columns, check constraints) cross-checked against every route in
 > This is the authoritative API repo. The `admin/` repo's `services/api` scaffold was
 > retired in favor of this service — do not re-introduce a second backend.
 >
-> **Status note (2026-09-24):** migration-state statements below are historical evidence from the audit date. Production now has all repository migrations through `20260921221500` applied. Use `current-state.md` for current operational status.
+> **Status note (2026-09-24):** migration-state statements below are historical evidence from the audit date. Production now has all repository migrations through `20260921221500` applied. Use `current-state.md` for current operational status. In-repo scheduling v2 `classes` (`20261101100000`) is **not** production-applied.
 
 ---
 
