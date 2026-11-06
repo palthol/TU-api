@@ -4,6 +4,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 export const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 export const DEFAULT_LEAD_RATE_LIMIT_MAX = 10;
 export const DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX = 10;
+export const DEFAULT_CALENDAR_OCCURRENCES_RATE_LIMIT_MAX = 60;
 export const DEFAULT_LEAD_JSON_LIMIT = '16kb';
 export const DEFAULT_WAIVER_SUBMIT_JSON_LIMIT = '512kb';
 export const HONEYPOT_FIELD = 'website';
@@ -53,6 +54,19 @@ export function readPublicPostLimitsFromEnv(env = process.env) {
     waiverWindowMs: parsePositiveInt(env.WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS, FIFTEEN_MINUTES_MS),
     leadMax: parsePositiveInt(env.LEAD_RATE_LIMIT_MAX, DEFAULT_LEAD_RATE_LIMIT_MAX),
     waiverMax: parsePositiveInt(env.WAIVER_SUBMIT_RATE_LIMIT_MAX, DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX),
+  };
+}
+
+export function readCalendarLimitsFromEnv(env = process.env) {
+  return {
+    occurrencesWindowMs: parsePositiveInt(
+      env.CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS,
+      FIFTEEN_MINUTES_MS,
+    ),
+    occurrencesMax: parsePositiveInt(
+      env.CALENDAR_OCCURRENCES_RATE_LIMIT_MAX,
+      DEFAULT_CALENDAR_OCCURRENCES_RATE_LIMIT_MAX,
+    ),
   };
 }
 

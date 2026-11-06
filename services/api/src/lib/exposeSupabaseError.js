@@ -58,6 +58,7 @@ const MACHINE_KEY_STATUS = Object.freeze({
   not_found: 404,
   template_not_found: 404,
   class_type_not_found: 404,
+  class_not_found: 404,
   instructor_not_found: 404,
   session_not_found: 404,
   receipt_not_found: 404,
