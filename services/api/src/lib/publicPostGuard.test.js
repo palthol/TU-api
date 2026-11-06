@@ -12,12 +12,14 @@ import {
   HONEYPOT_FIELD,
   TURNSTILE_SITEVERIFY_URL,
   TURNSTILE_UNSET_WARNING,
+  DEFAULT_CALENDAR_OCCURRENCES_RATE_LIMIT_MAX,
   createPublicPostMiddleware,
   jsonPayloadTooLargeHandler,
   jsonUnhandledErrorHandler,
   parseJsonLimit,
   parsePositiveInt,
   parseTrustProxy,
+  readCalendarLimitsFromEnv,
   readPublicPostLimitsFromEnv,
   resetTurnstileUnsetWarning,
 } from './publicPostGuard.js';
@@ -79,6 +81,16 @@ describe('parseTrustProxy / env defaults', () => {
       leadMax: DEFAULT_LEAD_RATE_LIMIT_MAX,
       waiverMax: DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX,
     });
+    expect(readCalendarLimitsFromEnv({})).toEqual({
+      occurrencesWindowMs: FIFTEEN_MINUTES_MS,
+      occurrencesMax: DEFAULT_CALENDAR_OCCURRENCES_RATE_LIMIT_MAX,
+    });
+    expect(
+      readCalendarLimitsFromEnv({
+        CALENDAR_OCCURRENCES_RATE_LIMIT_MAX: '12',
+        CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS: '60000',
+      }),
+    ).toEqual({ occurrencesWindowMs: 60_000, occurrencesMax: 12 });
     expect(
       readPublicPostLimitsFromEnv({
         LEAD_JSON_LIMIT: '32kb',
