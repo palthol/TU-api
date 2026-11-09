@@ -4,14 +4,14 @@ set local search_path = public, extensions;
 select no_plan();
 
 select has_table('public', 'classes', 'classes table exists');
-select col_not_null('public', 'classes', 'name');
-select col_not_null('public', 'classes', 'instructor');
-select col_not_null('public', 'classes', 'day_of_week');
-select col_not_null('public', 'classes', 'recurrence');
-select col_not_null('public', 'classes', 'start_time');
-select col_not_null('public', 'classes', 'duration_minutes');
-select col_not_null('public', 'classes', 'capacity');
-select col_not_null('public', 'classes', 'is_active');
+select col_not_null('public', 'classes', 'name', 'classes.name is not null');
+select col_not_null('public', 'classes', 'instructor', 'classes.instructor is not null');
+select col_not_null('public', 'classes', 'day_of_week', 'classes.day_of_week is not null');
+select col_not_null('public', 'classes', 'recurrence', 'classes.recurrence is not null');
+select col_not_null('public', 'classes', 'start_time', 'classes.start_time is not null');
+select col_not_null('public', 'classes', 'duration_minutes', 'classes.duration_minutes is not null');
+select col_not_null('public', 'classes', 'capacity', 'classes.capacity is not null');
+select col_not_null('public', 'classes', 'is_active', 'classes.is_active is not null');
 
 select ok(
   (select relrowsecurity from pg_class where oid = 'public.classes'::regclass),
