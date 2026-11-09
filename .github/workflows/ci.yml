@@ -13,6 +13,7 @@ on:
 # This workflow must never link to or reach the production Supabase project.
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   api-test:
@@ -44,8 +45,52 @@ jobs:
       - name: Run waiver schema guard
         run: npm run guard:waiver-schema
 
+  # Job-level filter (not workflow on.<event>.paths): the workflow always
+  # starts, so a required "pgTAP (local Supabase)" check still reports.
+  # GitHub treats a skipped job as success, so PRs that only touch API code
+  # are not blocked. Workflow-level paths would skip the whole workflow and
+  # leave that required check pending.
+  changes:
+    name: Detect database changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      database: ${{ steps.filter.outputs.database }}
+    steps:
+      # Push events diff with git against the previous commit on this branch
+      # and need history. pull_request events use the GitHub API instead.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Filter database paths
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # Same-branch compare on push to develop/main (only this push).
+          # Ignored on pull_request; those compare against the PR base.
+          # Default would be `main`, which would treat every develop push
+          # as changing supabase files.
+          base: ${{ github.ref }}
+          list-files: json
+          filters: |
+            database:
+              - 'supabase/**'
+              - '.github/workflows/ci.yml'
+
+      - name: Database path filter result
+        env:
+          DATABASE_CHANGED: ${{ steps.filter.outputs.database }}
+          DATABASE_FILES: ${{ steps.filter.outputs.database_files }}
+        run: |
+          echo "database changed: $DATABASE_CHANGED"
+          echo "matching files: $DATABASE_FILES"
+
   pgtap:
     name: pgTAP (local Supabase)
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.database == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
