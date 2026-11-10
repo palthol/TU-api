@@ -68,6 +68,9 @@ describe('parseTrustProxy / env defaults', () => {
   });
 
   it('reads public POST limits from env with sensible fallbacks', () => {
+    expect(DEFAULT_LEAD_RATE_LIMIT_MAX).toBe(10);
+    expect(DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX).toBe(10);
+    expect(FIFTEEN_MINUTES_MS).toBe(15 * 60 * 1000);
     expect(parsePositiveInt('0', 9)).toBe(9);
     expect(parsePositiveInt('3', 9)).toBe(3);
     expect(parseJsonLimit('  ', '16kb')).toBe('16kb');

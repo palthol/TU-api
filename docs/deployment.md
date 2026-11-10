@@ -71,7 +71,7 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `TRUST_PROXY` | Express `trust proxy` hop count. Default **`1`** (Render). Do not set `true`. |
 | `LEAD_RATE_LIMIT_MAX` | Max `POST /api/lead` requests per IP per window (default `10`) |
 | `LEAD_RATE_LIMIT_WINDOW_MS` | Lead rate-limit window (default `900000` = 15 minutes) |
-| `WAIVER_SUBMIT_RATE_LIMIT_MAX` | Max `POST /api/waivers/submit` requests per IP per window (default `5`) |
+| `WAIVER_SUBMIT_RATE_LIMIT_MAX` | Max `POST /api/waivers/submit` requests per IP per window (default `10`) |
 | `WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS` | Waiver submit rate-limit window (default `900000` = 15 minutes) |
 | `LEAD_JSON_LIMIT` | JSON body limit for `POST /api/lead` (default `16kb`) |
 | `WAIVER_SUBMIT_JSON_LIMIT` | JSON body limit for `POST /api/waivers/submit` (default `512kb`) |

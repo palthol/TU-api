@@ -33,7 +33,7 @@ The API supports cookie-based admin sessions for the admin UI while preserving e
 
 ## Public POST hardening
 
-`POST /api/lead` and `POST /api/waivers/submit` are rate-limited per client IP (`express-rate-limit`). Defaults: **10 leads / 15 minutes**, **5 waiver submits / 15 minutes**. JSON body limits: **16kb** (lead) and **512kb** (waiver, sized for signature-pad PNG + `vectorJson`). `TRUST_PROXY` defaults to `1` for Render (do not set `true`).
+`POST /api/lead` and `POST /api/waivers/submit` are rate-limited per client IP (`express-rate-limit`). Defaults: **10 leads / 15 minutes**, **10 waiver submits / 15 minutes**. JSON body limits: **16kb** (lead) and **512kb** (waiver, sized for signature-pad PNG + `vectorJson`). `TRUST_PROXY` defaults to `1` for Render (do not set `true`).
 
 Optional env names (defaults shown in `.env.example`):
 

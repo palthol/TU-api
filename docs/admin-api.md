@@ -155,7 +155,7 @@ existing lead forms keep working until they send tokens.
 
 ### `POST /api/waivers/submit` (public)
 
-Per-IP rate limit (default **5 / 15 minutes**, env `WAIVER_SUBMIT_RATE_LIMIT_MAX` /
+Per-IP rate limit (default **10 / 15 minutes**, env `WAIVER_SUBMIT_RATE_LIMIT_MAX` /
 `WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS`). JSON body limit default **512kb**
 (`WAIVER_SUBMIT_JSON_LIMIT`) — enough for a signature-pad PNG data URL plus
 `vectorJson`, far below the previous global 10MB parser. Over-limit bodies

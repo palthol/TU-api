@@ -3,7 +3,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 export const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 export const DEFAULT_LEAD_RATE_LIMIT_MAX = 10;
-export const DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX = 5;
+export const DEFAULT_WAIVER_SUBMIT_RATE_LIMIT_MAX = 10;
 export const DEFAULT_LEAD_JSON_LIMIT = '16kb';
 export const DEFAULT_WAIVER_SUBMIT_JSON_LIMIT = '512kb';
 export const HONEYPOT_FIELD = 'website';
