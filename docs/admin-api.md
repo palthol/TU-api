@@ -782,9 +782,9 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`), replaced for Eastern-time conversion and idempotent cancel by **`20261101100500_scheduling_v2_eastern_time_and_cancel_idempotency.sql`** (in-repo until applied). Soft-cancel remains the only session delete.
 
-`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is America/New_York wall-clock on each matching calendar date. `generate_sessions` converts it to UTC the same way as `gymTime`: the earlier instant when the civil time repeats, and no session when the civil time does not exist.
 
 #### `GET /api/admin/scheduling/templates`
 
@@ -835,9 +835,11 @@ Partial update. Deactivate with `"is_active": false`. Existing sessions are not 
 
 #### `POST /api/admin/scheduling/generate-sessions`
 
-Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **20260914202053**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+Expands **active** templates into `sessions` for an inclusive calendar-date range via RPC `generate_sessions` (`service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`. `starts_at` is template `start_time` interpreted as **America/New_York** wall-clock and stored in UTC. `ends_at` is that instant plus `duration_minutes`.
 
-Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
+Examples: `2026-06-01 19:00` → `2026-06-01T23:00:00Z` (EDT); `2026-01-05 19:00` → `2026-01-06T00:00:00Z` (EST); `2026-11-01 01:30` → `2026-11-01T05:30:00Z` (earlier fall-back instant). `2027-03-14 02:30` is omitted: `created_count` and `skipped_count` do not include it.
+
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences. Response keys are unchanged.
 
 **Body (JSON):**
 
@@ -891,9 +893,9 @@ Single session plus its `attendance_records`.
 
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
-Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
+Partial update. Set `"cancel": true` to soft-cancel via RPC `cancel_session`. The first cancel sets `cancelled_at` and appends one `event_ledger` row (`session.cancelled`, category `system`, reason `manual_cancellation`). Cancelling an already-cancelled session returns **200** with the original session: `cancelled_at` and `updated_at` stay put, and no second event is written. `"cancel": false` clears `cancelled_at`. Reschedule with `starts_at` / `ends_at`. A notes edit on an already-cancelled session still applies and does not move `cancelled_at`.
 
-**Response:** `{ "ok": true, "session": { ... } }`
+**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before)
 
 **Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean); `404` — `session_not_found`; `409` — `already_exists`
 
@@ -927,7 +929,7 @@ First slice of class scheduling. Migration **`20261101100000_scheduling_v2_class
 
 Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
 
-`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York** (unlike v1 `schedule_templates`, which store UTC wall-clock). `recurrence` is `weekly` only.
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York**, the same clock as v1 `schedule_templates.start_time`. `recurrence` is `weekly` only. v2 occurrences are still expanded in the API and are not rows in `sessions`.
 
 Class-types, instructors, and v2 session stubs remain `501 not_implemented`.
 
