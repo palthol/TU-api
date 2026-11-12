@@ -158,9 +158,9 @@ Inventory: [`docs/deployment.md`](docs/deployment.md).
 ## Secrets
 
 `services/api/.env` is git-ignored. Copy `services/api/.env.example` as a starting point.
+Admin login also needs `SUPABASE_PUBLISHABLE_KEY` (`SUPABASE_ANON_KEY` is the legacy fallback).
 For real Supabase access set `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` is the legacy fallback),
-`SUPABASE_PUBLISHABLE_KEY` for admin login (`SUPABASE_ANON_KEY` is the legacy fallback), and `ADMIN_API_KEY`. Optional: `PORT`, `CRON_SECRET`,
+`SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` is the legacy fallback), and `ADMIN_API_KEY`. Optional: `PORT`, `CRON_SECRET`,
 `ALLOWED_ORIGIN` (defaults to `*`), `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`,
 `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS` /
 `WAIVER_VIEWER_ALLOWED_EMAILS`, `SIGNATURES_BUCKET`, `WAIVERS_BUCKET`, `PDF_ORG_*`,
