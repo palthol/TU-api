@@ -13,7 +13,7 @@ This repository owns the **backend** for scheduling. Front-ends live in sibling 
 - **A0 (scaffolding only)**: mount new routers once, add `gymTime` NY-time helpers, expand stable error key status map, accept comma-separated CORS origins, add stub routers + tests. No migrations. Shipped in PR #55.
 - **A1 (first slice, this PR)**: combined `classes` table (name, instructor, ISO weekday, weekly recurrence, America/New_York start time, duration, capacity, active flag) with admin CRUD and a public 14-day occurrence listing. No booking. Separate `class_types` / `instructors` tables remain future work; those stub routes stay `501`.
 - **A2 (landed)**: Eastern-time correctness in `generate_sessions` (America/New_York wall-clock → UTC with DST) and idempotent session cancel. No repair SOP: production has no generated sessions. See the A2 contract below.
-- **A3**: `session_content` (notes + HTTPS video link + visibility: staff/members/public; default staff).
+- **A3 (landed)**: `session_content` (staff notes + HTTPS video link + visibility: staff/members/public; default staff) attached to `sessions`. See the A3 contract below.
 - **A4**: member login via Terpsichora Supabase magic-link JWT (separate Supabase project from TU-api). Verify against Terpsichora JWKS/issuer configured by env.
 - **A5–A10**: follow-on lanes per the scheduling plan (defined in their task briefs).
 
@@ -41,6 +41,18 @@ Full HTTP shapes: [admin-api.md](../admin-api.md) § Scheduling v2.
 - HTTP shape is unchanged. `PATCH /api/admin/scheduling/sessions/:sessionId` with `{ "cancel": true }` calls `cancel_session` on the first cancel and returns the existing row on a repeat. Response remains `{ "ok": true, "session": { ... } }`.
 - No stored-session repair. Apply this migration before deploying the API revision that calls `cancel_session`.
 
+## A3 contract (landed)
+
+- Migration `20261101101000_scheduling_v2_session_content.sql` (in-repo only; **not** applied to production by this work).
+- One `session_content` row per `sessions` row (`on delete cascade`). Columns: `notes` (staff-authored, distinct from `sessions.notes`), `video_url` (absolute `https` URL or null), `visibility` (`staff` | `members` | `public`, default `staff`).
+- RLS is enabled. Table privileges are `service_role` only, matching `classes`. An authenticated admin policy is present and does not grant `anon` or `authenticated`.
+- `http`, other schemes, whitespace, and URLs with userinfo fail the check constraint. The API normalizes a leading `HTTPS://` to `https://` and returns `invalid_video_url` before insert.
+- Admin (existing `requireAdmin` gate and scheduling RBAC): `GET /api/admin/scheduling-v2/session-content`, `GET/POST/PATCH/DELETE /api/admin/scheduling-v2/sessions/:sessionId/content`. v2 session stubs (`/sessions`, cancel) stay `501`.
+- Missing session → `session_not_found`. Missing content on a real session → `content_not_found`. A second create → `already_exists`.
+- `members` is stored and returned to staff. It is not served on any member route (A4). The public calendar reads `visibility = public` only.
+- `GET /api/calendar/occurrences` adds `content` (`notes`, `video_url`, `visibility: "public"`) when exactly one non-cancelled session shares that occurrence's UTC `starts_at` and its `session_label` equals the class `name`. Staff content, members content, cancelled sessions, and ambiguous matches are omitted (no `content` key). Optional Bearer auth does not unlock `members`.
+- Apply this migration before deploying the API revision that reads `session_content`. The public occurrence list queries that table.
+
 ## Stable error keys (reserved)
 
 These keys are pre-registered in the API error mapper with explicit HTTP statuses so
@@ -50,6 +62,7 @@ front-ends can rely on stable behavior:
 - `class_not_found`
 - `instructor_not_found`
 - `session_not_found`
+- `content_not_found`
 - `session_full`
 - `booking_closed`
 - `no_credit`
@@ -65,7 +78,7 @@ PRs do not collide. All timestamps are **after** `20261003045729`.
 
 - **A1**: `20261101100000_scheduling_v2_classes.sql` (landed; originally reserved as `class_types_instructors`)
 - **A2**: `20261101100500_scheduling_v2_eastern_time_and_cancel_idempotency.sql` (landed)
-- **A3**: `20261101101000_scheduling_v2_session_content.sql`
+- **A3**: `20261101101000_scheduling_v2_session_content.sql` (landed)
 - **A4**: `20261101101500_scheduling_v2_member_auth_projection.sql`
 - **A5**: `20261101102000_scheduling_v2_lane_a5.sql`
 - **A6**: `20261101102500_scheduling_v2_lane_a6.sql`
