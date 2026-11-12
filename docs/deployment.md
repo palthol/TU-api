@@ -77,6 +77,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `WAIVER_SUBMIT_JSON_LIMIT` | JSON body limit for `POST /api/waivers/submit` (default `512kb`) |
 | `TURNSTILE_SECRET_KEY` | Optional Turnstile secret. When set, public POSTs siteverify a token before side effects. When unset, those routes warn and allow the request. |
 | `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase Auth password sign-in for `/api/auth/login`. Prefer the `sb_publishable_` key. Not the server secret. |
+| `SUPABASE_ANON_KEY` | Legacy anon JWT for `/api/auth/login`. Read only when `SUPABASE_PUBLISHABLE_KEY` is unset or blank. |
 | `SUPABASE_SECRET_KEY` | Server-only Supabase secret. Prefer the `sb_secret_` key. A legacy service_role JWT is also accepted here. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy service_role JWT. Read only when `SUPABASE_SECRET_KEY` is unset or blank. |
 | `ADMIN_API_KEY` | `x-admin-key` for `/api/admin/*` and admin PDF |

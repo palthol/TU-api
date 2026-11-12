@@ -367,4 +367,53 @@ describe('/api/auth', () => {
       .send({ email: 'singh@example.com', password: 'p'.repeat(20_000) });
     expect([400, 413]).toContain(res.status);
   });
+
+  it('enables login from SUPABASE_PUBLISHABLE_KEY when SUPABASE_ANON_KEY is unset', async () => {
+    const env = baseEnv({
+      SUPABASE_ANON_KEY: undefined,
+      SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_preferred',
+    });
+    const app = express();
+    app.set('trust proxy', 1);
+    const enabled = registerAuthRoutes(app, {
+      env,
+      supabaseUrl: env.SUPABASE_URL,
+      createSupabaseAuthClient: () => mockClient(),
+    });
+    expect(enabled).toBe(true);
+    const res = await request(app).post('/api/auth/login').send({ email: ADMIN_EMAIL, password: 'pw' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ email: ADMIN_EMAIL });
+  });
+
+  it('keeps login enabled from legacy SUPABASE_ANON_KEY when the new name is blank', async () => {
+    const env = baseEnv({ SUPABASE_PUBLISHABLE_KEY: '   ' });
+    const app = express();
+    app.set('trust proxy', 1);
+    const enabled = registerAuthRoutes(app, {
+      env,
+      createSupabaseAuthClient: () => mockClient(),
+    });
+    expect(enabled).toBe(true);
+    const res = await request(app).post('/api/auth/login').send({ email: ADMIN_EMAIL, password: 'pw' });
+    expect(res.status).toBe(200);
+  });
+
+  it('does not register auth routes when both publishable key names are unset', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const env = baseEnv({ SUPABASE_ANON_KEY: '   ', SUPABASE_PUBLISHABLE_KEY: undefined });
+      const app = express();
+      app.set('trust proxy', 1);
+      const enabled = registerAuthRoutes(app, { env, supabaseUrl: env.SUPABASE_URL });
+      expect(enabled).toBe(false);
+      const res = await request(app).post('/api/auth/login').send({ email: ADMIN_EMAIL, password: 'pw' });
+      expect(res.status).toBe(404);
+      const text = warn.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(text).toContain('SUPABASE_PUBLISHABLE_KEY');
+      expect(text).toContain('SUPABASE_ANON_KEY');
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });

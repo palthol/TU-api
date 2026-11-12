@@ -12,6 +12,7 @@ import {
   clearLegacyAdminSessionCookie,
 } from '../../lib/adminSession.js';
 import { isOriginAllowed, parseAdminAllowedOriginsEnv } from '../../lib/allowedOrigins.js';
+import { readSupabasePublishableKey } from '../../lib/readSupabasePublishableKey.js';
 
 function normalizeEmail(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -71,9 +72,13 @@ export function registerAuthRoutes(appInstance, options = {}) {
   }
 
   const supabaseUrl = options.supabaseUrl || env.SUPABASE_URL;
-  const supabaseAnonKey = options.supabaseAnonKey || env.SUPABASE_ANON_KEY;
+  // options.supabaseAnonKey is an explicit test override. Production reads env.
+  const injectedPublishableKey = typeof options.supabaseAnonKey === 'string' ? options.supabaseAnonKey.trim() : '';
+  const supabaseAnonKey = injectedPublishableKey || readSupabasePublishableKey(env);
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('Auth routes disabled: SUPABASE_URL or SUPABASE_ANON_KEY missing');
+    console.warn(
+      'Auth routes disabled: SUPABASE_URL missing, or both SUPABASE_PUBLISHABLE_KEY and SUPABASE_ANON_KEY are unset',
+    );
     return false;
   }
 

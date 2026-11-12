@@ -20,7 +20,7 @@ The API supports cookie-based admin sessions for the admin UI while preserving e
   - `SESSION_SECRET` (>= 32 chars; generate with `openssl rand -base64 48`)
   - `ADMIN_EMAIL` and `ADMIN_USER_ID` (Singh's confirmed Supabase Auth user)
   - `ADMIN_ALLOWED_ORIGINS` (admin UI origins; credentialed CORS + cookie CSRF allowlist)
-  - `SUPABASE_ANON_KEY` (used for Supabase Auth password sign-in)
+  - `SUPABASE_PUBLISHABLE_KEY` (Supabase Auth password sign-in; `sb_publishable_`. `SUPABASE_ANON_KEY` is used only when the new name is unset)
 - **Optional**: `SESSION_SECRET_PREVIOUS` (decrypt-only during rotation), `SESSIONS_VALID_AFTER` (ISO timestamp; reject older `auth_time`).
 - **CORS/CSRF**: `ALLOWED_ORIGIN` remains the public CORS list and never gets credentials. Only `ADMIN_ALLOWED_ORIGINS` get `Access-Control-Allow-Credentials: true` and pass cookie-auth CSRF. If `ADMIN_ALLOWED_ORIGINS` is unset, mutating cookie-auth requests return `403`.
 - **Trust proxy**: `TRUST_PROXY` is the Render hop count (default `1`). Do not set `true`.
@@ -29,7 +29,7 @@ The API supports cookie-based admin sessions for the admin UI while preserving e
 
 1. In the production Supabase project, disable public sign-ups.
 2. Create Singh's Auth user, confirm the email, and copy the user id into `ADMIN_USER_ID`.
-3. Generate `SESSION_SECRET` with `openssl rand -base64 48`. Set Render env vars: `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_USER_ID`, `ADMIN_ALLOWED_ORIGINS`, `SUPABASE_ANON_KEY` (plus optional `SESSION_SECRET_PREVIOUS` / `SESSIONS_VALID_AFTER`). Do not rotate keys from this change.
+3. Generate `SESSION_SECRET` with `openssl rand -base64 48`. Set Render env vars: `SESSION_SECRET`, `ADMIN_EMAIL`, `ADMIN_USER_ID`, `ADMIN_ALLOWED_ORIGINS`, `SUPABASE_PUBLISHABLE_KEY` (legacy `SUPABASE_ANON_KEY` still enables login when the new name is unset) (plus optional `SESSION_SECRET_PREVIOUS` / `SESSIONS_VALID_AFTER`). Do not rotate keys from this change.
 
 ## Public POST hardening
 
