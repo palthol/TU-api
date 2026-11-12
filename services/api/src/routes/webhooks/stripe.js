@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import { mapDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { verifyStripeSignature } from '../../lib/stripeWebhookSignature.js';
 
 const PROVIDER = 'stripe';
@@ -52,17 +53,16 @@ function parseRpcDetail(error) {
   }
 }
 
-function recordPaymentErrorPayload(error) {
-  const key = String(error?.message || '').trim() || 'record_payment_failed';
+function recordPaymentErrorResponse(error) {
   const extra = parseRpcDetail(error);
-  const body = { ok: false, error: key };
-  if (RECORD_PAYMENT_CHARGE_ERRORS.has(key) && extra.charge_id) {
-    body.charge_id = extra.charge_id;
+  const mapped = mapDatabaseError(error, { context: 'stripe.record_payment', extra: {} });
+  if (RECORD_PAYMENT_CHARGE_ERRORS.has(mapped.body.error) && extra.charge_id) {
+    mapped.body.charge_id = extra.charge_id;
   }
-  if (key === 'allocation_exceeds_net_due' && extra.allocatable_cents != null) {
-    body.allocatable_cents = extra.allocatable_cents;
+  if (mapped.body.error === 'allocation_exceeds_net_due' && extra.allocatable_cents != null) {
+    mapped.body.allocatable_cents = extra.allocatable_cents;
   }
-  return body;
+  return mapped;
 }
 
 function recordPaymentResult(data) {
@@ -233,9 +233,7 @@ async function handlePaymentIntentSucceeded(event, supabase) {
     if (isMissingRecordPaymentFunction(error)) {
       return { status: 503, body: { ok: false, error: 'record_payment_unavailable' } };
     }
-    const key = String(error.message || '').trim();
-    const status = key === 'idempotency_key_conflict' ? 409 : 400;
-    return { status, body: recordPaymentErrorPayload(error) };
+    return recordPaymentErrorResponse(error);
   }
 
   const body = recordPaymentResult(data);
@@ -311,8 +309,7 @@ async function handleRefundCreated(event, supabase) {
     p_idempotency_key: `stripe:${refund.id}`.slice(0, 200),
   });
   if (error) {
-    console.error('record_payment_refund', error);
-    return { status: 400, body: { ok: false, error: error.message || 'record_payment_refund_failed' } };
+    return mapDatabaseError(error, { context: 'stripe.record_payment_refund' });
   }
 
   const refundId = data;

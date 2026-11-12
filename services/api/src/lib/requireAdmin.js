@@ -2,11 +2,15 @@ import {
   canonicalAdminPath,
   createSupabaseAuditWriter,
   createSupabaseStaffLookup,
+  adminSessionOwnerActor,
   legacyOwnerActor,
   queuePrivilegedWriteAudit,
+  isMutatingMethod,
   roleAllowsRequest,
   safeEqualString,
 } from './staffAuth.js';
+import { readAdminEmailFromEnv, readAdminSessionFromRequest } from './adminSession.js';
+import { isOriginAllowed, parseAdminAllowedOriginsEnv } from './allowedOrigins.js';
 
 function configuredAdminKey() {
   const key = process.env.ADMIN_API_KEY;
@@ -25,16 +29,35 @@ export function createRequireAdmin(options = {}) {
   return async function requireAdmin(req, res, next) {
     try {
       const presented = req.header('x-admin-key');
-      if (typeof presented !== 'string' || !presented.length) {
-        return res.status(401).json({ ok: false, error: 'unauthorized' });
+      const hasKeyHeader = typeof presented === 'string' && presented.length;
+
+      let staff = null;
+      if (hasKeyHeader) {
+        const sharedKey = configuredAdminKey();
+        if (sharedKey && safeEqualString(presented, sharedKey)) {
+          staff = legacyOwnerActor();
+        } else if (typeof lookupStaff === 'function') {
+          staff = await lookupStaff(presented);
+        }
       }
 
-      const sharedKey = configuredAdminKey();
-      let staff = null;
-      if (sharedKey && safeEqualString(presented, sharedKey)) {
-        staff = legacyOwnerActor();
-      } else if (typeof lookupStaff === 'function') {
-        staff = await lookupStaff(presented);
+      if (!staff) {
+        const adminEmail = readAdminEmailFromEnv(process.env);
+        const sessionResult = await readAdminSessionFromRequest(req, process.env);
+        if (!sessionResult.ok && sessionResult.reason === 'duplicate_cookie') {
+          return res.status(401).json({ ok: false, error: 'unauthorized' });
+        }
+        const session = sessionResult.ok ? sessionResult.session : null;
+        if (adminEmail.ok && session && String(session.email || '').toLowerCase() === String(adminEmail.email).trim().toLowerCase()) {
+          staff = adminSessionOwnerActor(session.email);
+          if (isMutatingMethod(req.method)) {
+            const origin = req.header('origin');
+            const allowedOrigins = parseAdminAllowedOriginsEnv(process.env.ADMIN_ALLOWED_ORIGINS);
+            if (!isOriginAllowed(origin, allowedOrigins)) {
+              return res.status(403).json({ ok: false, error: 'csrf_failed' });
+            }
+          }
+        }
       }
 
       if (!staff) {

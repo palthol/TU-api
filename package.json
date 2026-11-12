@@ -15,6 +15,7 @@
     "start": "npm --workspace services/api run start",
     "typecheck": "echo 'no types yet'",
     "lint": "echo 'no linter yet'",
+    "test": "npm --workspace services/api run test",
     "supabase": "supabase",
     "supabase:link": "supabase link",
     "supabase:push": "supabase db push",
@@ -40,6 +41,7 @@
     "vitest": "4.1.12",
     "@vitest/coverage-v8": "4.1.12",
     "@vitest/ui": "4.1.12",
-    "@vitest/mocker": "4.1.12"
+    "@vitest/mocker": "4.1.12",
+    "express": "5.3.0"
   }
 }

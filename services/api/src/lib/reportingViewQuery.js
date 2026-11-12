@@ -1,3 +1,4 @@
+import { mapDatabaseError } from './exposeSupabaseError.js';
 import { REPORTING_VIEWS, REPORTING_VIEW_CONFIG } from '../routes/admin/reportingViews.js';
 
 const MAX_LIMIT = 500;
@@ -123,8 +124,7 @@ export async function queryReportingView(supabase, slug, query) {
 
   const { data, error } = await dbQuery;
   if (error) {
-    console.error('reporting view select', viewName, error);
-    return { status: 400, body: { ok: false, error: error.message, view: viewName } };
+    return mapDatabaseError(error, { context: `reporting.view.${viewName}`, extra: { view: viewName } });
   }
 
   const responseOrder = order || (sort ? 'desc' : null);

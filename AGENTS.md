@@ -51,11 +51,21 @@ npm run dev:api          # same as dev
 npm run start            # production start (workspace: node src/index.js in services/api)
 npm run supabase:push    # apply pending migrations to the linked project
 npm run supabase:pull    # pull schema from the linked project
+npm test                 # API vitest suite (`services/api`)
 ```
 
 There is **no build step** for the API and **no typecheck** (plain JS). Tests: the API's
-own `vitest` suite (`npm --workspace services/api run test`), plus waiver guard/smoke
-scripts at the repo root.
+own `vitest` suite (`npm test` at the repo root, or `npm --workspace services/api run test`),
+plus waiver guard/smoke scripts at the repo root.
+
+**CI** (`.github/workflows/ci.yml`) runs on `pull_request` and on push to `develop` /
+`main`: `npm ci`, `npm test`, and `npm run guard:waiver-schema` on every run. A separate
+job starts a **local** Supabase stack (`supabase start` / `db reset`) and runs pgTAP via
+`supabase test db --local` only when `supabase/**` or `.github/workflows/ci.yml` change
+(job-level `dorny/paths-filter`; skipped pgTAP still reports success if it is a required
+check). Manual `workflow_dispatch` always runs pgTAP. CI never uses production secrets
+or the hosted project. The existing waiver/smoke workflow still runs and also triggers
+on `develop`.
 
 Operator, marketing, and waiver UIs run from sibling repos:
 
@@ -148,10 +158,15 @@ Inventory: [`docs/deployment.md`](docs/deployment.md).
 ## Secrets
 
 `services/api/.env` is git-ignored. Copy `services/api/.env.example` as a starting point.
+Admin login also needs `SUPABASE_PUBLISHABLE_KEY` (`SUPABASE_ANON_KEY` is the legacy fallback).
 For real Supabase access set `SUPABASE_URL`,
 `SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` is the legacy fallback), and `ADMIN_API_KEY`. Optional: `PORT`, `CRON_SECRET`,
 `ALLOWED_ORIGIN` (defaults to `*`), `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`,
 `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS` /
 `WAIVER_VIEWER_ALLOWED_EMAILS`, `SIGNATURES_BUCKET`, `WAIVERS_BUCKET`, `PDF_ORG_*`,
-and `API_EXPOSE_DB_ERRORS`. Project ref: `jhxzecxkccqlgyazhsnb`. Never commit secret
+`API_EXPOSE_DB_ERRORS`, `TRUST_PROXY` (default `1` for Render), public POST rate-limit
+and JSON-limit names (`LEAD_RATE_LIMIT_*`, `WAIVER_SUBMIT_RATE_LIMIT_*`,
+`LEAD_JSON_LIMIT`, `WAIVER_SUBMIT_JSON_LIMIT`), and `TURNSTILE_SECRET_KEY` (when set,
+`POST /api/lead` and `POST /api/waivers/submit` siteverify a token before side effects).
+Project ref: `jhxzecxkccqlgyazhsnb`. Never commit secret
 values or tokenized webhook URLs.

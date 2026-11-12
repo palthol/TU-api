@@ -8,8 +8,11 @@ import {
   parseAttendanceRecordsBody,
   parseIsoDate,
   parseIsoDateTime,
+  parseOptionalNullableString,
+  parsePagination,
   parseUuid,
 } from '../../lib/adminRequestValidation.js';
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 
 const TEMPLATE_COLUMNS =
   'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
@@ -77,8 +80,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
 
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
-      const offset = Math.max(Number.parseInt(String(req.query.offset || ''), 10) || 0, 0);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit, offset } = page;
       const includeInactive = req.query.include_inactive === 'true';
 
       let q = supabase
@@ -92,7 +96,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
       }
 
       const { data, error } = await q;
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'scheduling.templates.list' });
 
       return res.json({
         ok: true,
@@ -118,7 +122,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select(TEMPLATE_COLUMNS)
         .eq('id', templateId)
         .maybeSingle();
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'scheduling.templates.get' });
       if (!data) return res.status(404).json({ ok: false, error: 'template_not_found' });
 
       return res.json({ ok: true, template: data });
@@ -167,8 +171,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .single();
 
       if (error) {
-        console.error('schedule_templates.insert', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'schedule_templates.insert' });
       }
 
       return res.json({ ok: true, template: data });
@@ -189,7 +192,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select('id')
         .eq('id', templateId)
         .maybeSingle();
-      if (findErr) return res.status(400).json({ ok: false, error: findErr.message });
+      if (findErr) return sendDatabaseError(res, findErr, { context: 'schedule_templates.lookup' });
       if (!existing) return res.status(404).json({ ok: false, error: 'template_not_found' });
 
       const body = req.body || {};
@@ -242,8 +245,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .single();
 
       if (error) {
-        console.error('schedule_templates.update', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'schedule_templates.update' });
       }
 
       return res.json({ ok: true, template: data });
@@ -282,9 +284,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
       });
 
       if (error) {
-        const key = error.message || 'generate_sessions_failed';
-        const status = key === 'template_not_found' ? 404 : 400;
-        return res.status(status).json({ ok: false, error: key });
+        return sendDatabaseError(res, error, { context: 'generate_sessions' });
       }
 
       const created = Array.isArray(data?.created) ? data.created : [];
@@ -306,8 +306,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
 
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
-      const offset = Math.max(Number.parseInt(String(req.query.offset || ''), 10) || 0, 0);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit, offset } = page;
       const startDate = typeof req.query.start === 'string' ? parseIsoDate(req.query.start) : null;
       const endDate = typeof req.query.end === 'string' ? parseIsoDate(req.query.end) : null;
       const includeCancelled = req.query.include_cancelled === 'true';
@@ -345,7 +346,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
       }
 
       const { data, error } = await q;
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'scheduling.sessions.list' });
 
       return res.json({
         ok: true,
@@ -373,7 +374,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         )
         .eq('id', sessionId)
         .maybeSingle();
-      if (sessionErr) return res.status(400).json({ ok: false, error: sessionErr.message });
+      if (sessionErr) return sendDatabaseError(res, sessionErr, { context: 'scheduling.sessions.get' });
       if (!session) return res.status(404).json({ ok: false, error: 'session_not_found' });
 
       const { data: attendance, error: attErr } = await supabase
@@ -381,7 +382,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select('id, participant_id, status, recorded_at, recorded_by, created_at, updated_at')
         .eq('session_id', sessionId)
         .order('recorded_at', { ascending: true });
-      if (attErr) return res.status(400).json({ ok: false, error: attErr.message });
+      if (attErr) return sendDatabaseError(res, attErr, { context: 'scheduling.sessions.attendance' });
 
       return res.json({
         ok: true,
@@ -415,18 +416,23 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'invalid_schedule_template_id' });
       }
 
-      const label =
-        typeof session_label === 'string' && session_label.trim() ? session_label.trim() : null;
-      const sessionNotes = typeof notes === 'string' && notes.trim() ? notes.trim() : null;
+      const label = parseOptionalNullableString(session_label);
+      if (!label.omitted && !label.ok) {
+        return res.status(400).json({ ok: false, error: 'invalid_session_label' });
+      }
+      const sessionNotes = parseOptionalNullableString(notes);
+      if (!sessionNotes.omitted && !sessionNotes.ok) {
+        return res.status(400).json({ ok: false, error: 'invalid_notes' });
+      }
 
       const { data, error } = await supabase
         .from('sessions')
         .insert({
           starts_at: startsAt,
           ends_at: endsAt,
-          session_label: label,
+          session_label: label.omitted ? null : label.value,
           schedule_template_id: templateId,
-          notes: sessionNotes,
+          notes: sessionNotes.omitted ? null : sessionNotes.value,
         })
         .select(
           'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
@@ -434,8 +440,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .single();
 
       if (error) {
-        console.error('sessions.insert', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'sessions.insert' });
       }
 
       return res.json({ ok: true, session: data });
@@ -456,7 +461,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select('id, starts_at, ends_at, cancelled_at')
         .eq('id', sessionId)
         .maybeSingle();
-      if (findErr) return res.status(400).json({ ok: false, error: findErr.message });
+      if (findErr) return sendDatabaseError(res, findErr, { context: 'sessions.lookup' });
       if (!existing) return res.status(404).json({ ok: false, error: 'session_not_found' });
 
       const body = req.body || {};
@@ -473,10 +478,9 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         patch.ends_at = endsAt;
       }
       if (body.session_label !== undefined) {
-        patch.session_label =
-          typeof body.session_label === 'string' && body.session_label.trim()
-            ? body.session_label.trim()
-            : null;
+        const label = parseOptionalNullableString(body.session_label);
+        if (!label.ok) return res.status(400).json({ ok: false, error: 'invalid_session_label' });
+        patch.session_label = label.value;
       }
       if (body.schedule_template_id !== undefined) {
         if (body.schedule_template_id === null || body.schedule_template_id === '') {
@@ -488,12 +492,15 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         }
       }
       if (body.notes !== undefined) {
-        patch.notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
+        const sessionNotes = parseOptionalNullableString(body.notes);
+        if (!sessionNotes.ok) return res.status(400).json({ ok: false, error: 'invalid_notes' });
+        patch.notes = sessionNotes.value;
       }
-      if (body.cancel === true) {
-        patch.cancelled_at = new Date().toISOString();
-      } else if (body.cancel === false) {
-        patch.cancelled_at = null;
+      if (body.cancel !== undefined) {
+        if (typeof body.cancel !== 'boolean') {
+          return res.status(400).json({ ok: false, error: 'invalid_cancel' });
+        }
+        patch.cancelled_at = body.cancel ? new Date().toISOString() : null;
       }
 
       const nextStarts = patch.starts_at ?? existing.starts_at;
@@ -516,8 +523,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .single();
 
       if (error) {
-        console.error('sessions.update', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'sessions.update' });
       }
 
       return res.json({ ok: true, session: data });
@@ -549,7 +555,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select('id, session_label, cancelled_at')
         .eq('id', sessionId)
         .maybeSingle();
-      if (sessionErr) return res.status(400).json({ ok: false, error: sessionErr.message });
+      if (sessionErr) return sendDatabaseError(res, sessionErr, { context: 'attendance.session_lookup' });
       if (!session) return res.status(404).json({ ok: false, error: 'session_not_found' });
       if (session.cancelled_at) {
         return res.status(400).json({ ok: false, error: 'session_cancelled' });
@@ -565,8 +571,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
             p_session_label: session.session_label ?? null,
           });
           if (entErr) {
-            console.error('can_attend_group_session', entErr);
-            return res.status(400).json({ ok: false, error: entErr.message });
+            return sendDatabaseError(res, entErr, { context: 'can_attend_group_session' });
           }
           if (!canAttend) {
             blocked.push({ participant_id: rec.participant_id, reason: 'no_group_entitlement' });
@@ -593,8 +598,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         .select('id, participant_id, status, recorded_at, recorded_by');
 
       if (error) {
-        console.error('attendance_records.upsert', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'attendance_records.upsert' });
       }
 
       return res.json({

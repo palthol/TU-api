@@ -1,11 +1,17 @@
 # Admin API — Temple Underground
 
-Admin routes require header **`x-admin-key`**. That header accepts either:
+Admin routes require header **`x-admin-key`** **or** a valid admin session cookie.
+The header accepts either:
 
 1. The shared env **`ADMIN_API_KEY`** (legacy compatibility — authenticates as
    actor `legacy_shared_key` with role `owner`), or
 2. A personal staff key from `staff_users` (migration `20260914185843_staff_rbac.sql`; SHA-256 hashed).
    Roles: `owner`, `front_desk`, `finance`.
+
+Cookie-session auth (`__Host-tu_admin_session`) authenticates as owner when the
+cookie email matches `ADMIN_EMAIL`. Mutating cookie-auth requests also require
+`Origin` in `ADMIN_ALLOWED_ORIGINS` (`403 csrf_failed`). `x-admin-key` callers are
+unchanged and do not use the CSRF origin check.
 
 Use HTTPS in production; never expose admin or staff keys in public frontends or
 any `VITE_*` bundle (the `admin/apps/dashboard` merge UI is for trusted
@@ -22,7 +28,7 @@ key.
 
 | Topic | Rule |
 |--------|------|
-| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
+| **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key; **or** a valid `__Host-tu_admin_session` cookie for `ADMIN_EMAIL`. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Cookie-auth mutations without an allowlisted `Origin` → `403 csrf_failed`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
 | **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
 | **Cron / scheduler calls** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Scheduler calls authenticate as actor `cron`. Discord retains its Render Cron runbook; monthly billing uses the Cloudflare Worker source in `workers/billing-cron/`, not yet deployed/configured. |
 | **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
@@ -30,6 +36,28 @@ key.
 | **Partial payments** | Sum of `payment_allocations` for a charge must not exceed **net due** from `view_charge_net` (`gross - affiliate credits - write-offs`). Sum of allocations per `payment_id` must not exceed `payments.amount_cents`. Enforce in app logic when building allocation UIs |
 | **Card / invoice** | Prefer exact-amount payment links; if overcharged, record a **refund** for the difference (no wallet / unapplied credit) |
 | **Notifications** | Set **`DISCORD_WEBHOOK_URL`** and/or **`SLACK_WEBHOOK_URL`** on the API service. Waiver submission automation sends only to configured providers and never exposes webhook URLs to clients. |
+| **Errors** | Failures are non-2xx `{ "ok": false, "error": "<machine_key>" }`. Postgres / PostgREST `message`, `details`, and `hint` are never returned. Shared constraint mappings live in the [error keys](#error-keys) list below. Route-specific keys already documented on each endpoint stay the same. |
+| **Pagination** | Shared `parsePagination(query)`: omitted/empty `limit` defaults to **50**, `offset` defaults to **0**. Provided values must be integers (`limit` ≥ 1, `offset` ≥ 0); otherwise **`400 invalid_pagination`** — values are not silently coerced. `limit` above the route max is **clamped** (standard max **200**). Some list routes override the default/max (`GET /waivers` max 100; participant search default 8 / max 25; marketing-leads, operating-expenses, and personal-finance-entries default 100 / max 500). Reporting views keep their own silent-fallback parser. |
+
+---
+
+## Error keys
+
+Database failures are mapped by Postgres / PostgREST code before any raw text is considered. Unknown SQL text becomes `internal_error`. RPC / application raises that already use a snake_case machine key keep that key.
+
+| Key | HTTP status | When |
+| --- | --- | --- |
+| `related_record_not_found` | `400` (writes) or `404` (explicit read path) | Foreign-key violation (`23503`) |
+| `already_exists` | `409` | Unique violation (`23505`), unless the route already documents a more specific key such as `email_taken` |
+| `invalid_input` | `400` | Check / not-null / invalid-syntax (`23514`, `23502`, `22P02`) |
+| `not_found` | `404` | PostgREST no-row `PGRST116` |
+| `internal_error` | `500` | Unmapped database or driver error |
+| `invalid_pagination` | `400` | Provided `limit`/`offset` is non-integer, `limit < 1`, or `offset < 0` |
+| `rate_limited` | `429` | Public `POST /api/lead`, `POST /api/waivers/submit`, or `GET /api/calendar/occurrences` exceeded the per-IP window |
+| `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
+| `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
+
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -43,7 +71,7 @@ Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext re
 | --- | --- |
 | `owner` | All `/api/admin/*` routes, including staff directory and participant merge |
 | `finance` | `/billing/*` (payments, refunds, discounts, subscriptions, expenses). Not scheduling writes, staff, merge, or Discord notification POSTs |
-| `front_desk` | `/scheduling/*`, `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
+| `front_desk` | `/scheduling/*` (including `/scheduling-v2/*`), `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
 
 Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
 
@@ -55,7 +83,7 @@ Any authenticated staff (including the legacy shared key).
 
 **Response:** `{ "ok": true, "staff": { "id", "email", "display_name", "role", "auth_method", "actor_label" } }`
 
-`auth_method` is `staff_key` | `legacy_shared_key`. Cron does not use this route.
+`auth_method` is `staff_key` | `legacy_shared_key` | `admin_session`. Cron does not use this route.
 
 ### `GET /api/admin/staff`
 
@@ -91,7 +119,21 @@ Checks that the service-role client can reach `participants`. **Response:** `{ "
 
 ### `POST /api/lead` (public)
 
-Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Rate-limit at the edge in production if needed.
+Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key.
+
+Per-IP rate limit (default **10 / 15 minutes**, env `LEAD_RATE_LIMIT_MAX` /
+`LEAD_RATE_LIMIT_WINDOW_MS`). JSON body limit default **16kb** (`LEAD_JSON_LIMIT`).
+Over-limit bodies return `413 { "ok": false, "error": "payload_too_large" }`.
+Rate-limited requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Honeypot:** leave `website` omitted or blank. A filled value is treated as a bot
+and returns `200 { "ok": true }` with **no insert**.
+
+**Turnstile:** when `TURNSTILE_SECRET_KEY` is set, send `turnstileToken` (or
+`cf-turnstile-response`) in the JSON body. The API siteverifies before the DB
+write. Missing/invalid tokens return `400 { "ok": false, "error": "turnstile_failed" }`.
+When the secret is unset, the API logs a warning and accepts the request so
+existing lead forms keep working until they send tokens.
 
 **Body (JSON)** — align with marketing lead forms (`firstName`, `lastName`, `goals`, `preferredTime`; at least one of `email` or `phone`):
 
@@ -103,7 +145,9 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
   "phone": "",
   "goals": "first-class",
   "preferredTime": "Evenings after 6pm",
-  "notes": "Optional"
+  "notes": "Optional",
+  "website": "",
+  "turnstileToken": "<cloudflare-turnstile-token>"
 }
 ```
 
@@ -111,11 +155,29 @@ Stores a marketing-site trial inquiry in **`marketing_leads`**. No admin key. Ra
 
 **Response:** `{ "ok": true }`
 
-**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, etc.
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `email_or_phone_required`, `invalid_email`, `invalid_goals`, `invalid_preferred_time`, `turnstile_failed`, etc. `413` `payload_too_large`. `429` `rate_limited`.
 
 ---
 
 ### `POST /api/waivers/submit` (public)
+
+Per-IP rate limit (default **10 / 15 minutes**, env `WAIVER_SUBMIT_RATE_LIMIT_MAX` /
+`WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS`). JSON body limit default **512kb**
+(`WAIVER_SUBMIT_JSON_LIMIT`) — enough for a signature-pad PNG data URL plus
+`vectorJson`, far below the previous global 10MB parser. Over-limit bodies
+return `413 { "ok": false, "error": "payload_too_large" }`. Rate-limited
+requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Honeypot:** leave `website` omitted or blank. A filled value returns
+`200 { "ok": true }` with no Storage, PDF, DB, or Discord/Slack side effects
+(and no `waiverId`).
+
+**Turnstile:** when `TURNSTILE_SECRET_KEY` is set, send `turnstileToken` (or
+`cf-turnstile-response`) in the JSON body. Siteverify runs **before** Storage
+uploads, PDF generation, or Discord/Slack. Missing/invalid tokens return
+`400 { "ok": false, "error": "turnstile_failed" }`. When the secret is unset,
+the API logs a warning and accepts the request so current TU-Signup clients
+keep working until they send tokens.
 
 Stores the waiver submission and then records a **`waiver.submitted`** event in `event_ledger`. After persistence, the API sends a notification to each configured webhook provider:
 
@@ -199,8 +261,10 @@ Minimal authenticated list of `view_waiver_documents`. The Cloudflare Access vie
 
 **Query:**
 
-- `limit` — optional, default `50`, max `100`
+- `limit` — optional, default `50`, max `100` (clamped)
 - `offset` — optional, default `0`
+
+**Errors:** `400` — `invalid_pagination` when `limit`/`offset` is provided but not a valid integer in range (`limit` ≥ 1, `offset` ≥ 0)
 
 **Response:** `{ "ok": true, "limit": 50, "offset": 0, "rowCount": N, "rows": [...] }`
 
@@ -268,7 +332,7 @@ Insert a **write-off** row (`charge_adjustments`). Reduces **net due** via `view
 
 Lists explicit discount line-items applied to a charge.
 
-**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`)
+**Query:** `charge_id` (required UUID), `limit` (optional, default `50`, max `200`, clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -622,7 +686,7 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ### `GET /api/admin/billing/marketing-leads`
 
-**Query:** `limit` — optional, default `100`, max `500`
+**Query:** `limit` — optional, default `100`, max `500` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -630,7 +694,7 @@ After a **`payment_refunds`** row exists: voids the active **`money_in`** receip
 
 ### `GET /api/admin/billing/operating-expenses`
 
-**Query:** `limit` — optional, default `100`, max `500`
+**Query:** `limit` — optional, default `100`, max `500` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -700,7 +764,7 @@ If `due_at` is omitted, the API defaults to **tomorrow (UTC date)**. `invoice_st
 
 ### `GET /api/admin/billing/personal-finance-entries`
 
-**Query:** `limit` (optional, default `100`, max `500`), `entry_kind` (optional: `cash_received` or `invoice`)
+**Query:** `limit` (optional, default `100`, max `500`, clamped; invalid → `400` `invalid_pagination`), `entry_kind` (optional: `cash_received` or `invoice`)
 
 **Response:** `{ "ok": true, "rows": [ ... ] }`
 
@@ -726,11 +790,13 @@ Session and attendance writes for front-desk workflows. Requires migration **002
 
 List schedule templates.
 
-**Query:** `include_inactive=true`, `limit` (default 50, max 200), `offset` (default 0)
+**Query:** `include_inactive=true`, `limit` (default 50, max 200, clamped), `offset` (default 0)
 
 Inactive templates are omitted unless `include_inactive=true`.
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+**Errors:** `400` — `invalid_pagination`
 
 #### `GET /api/admin/scheduling/templates/:templateId`
 
@@ -757,7 +823,7 @@ Inactive templates are omitted unless `include_inactive=true`.
 
 **Response:** `{ "ok": true, "template": { ... } }`
 
-**Errors:** `400` — `name_required`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_is_active`
+**Errors:** `400` — `name_required`, `invalid_day_of_week` (must be integer 1–7), `invalid_start_time` (`HH:MM` or `HH:MM:SS`), `invalid_duration_minutes` (integer > 0), `invalid_is_active` (boolean), `invalid_notes` (string or null). Wrong types are rejected, not coerced.
 
 #### `PATCH /api/admin/scheduling/templates/:templateId`
 
@@ -765,7 +831,7 @@ Partial update. Deactivate with `"is_active": false`. Existing sessions are not 
 
 **Response:** `{ "ok": true, "template": { ... } }`
 
-**Errors:** `400` — `no_updates`, validation errors; `404` — `template_not_found`
+**Errors:** `400` — `no_updates`, same field keys as create; `404` — `template_not_found`
 
 #### `POST /api/admin/scheduling/generate-sessions`
 
@@ -793,9 +859,11 @@ Max span is 366 days (`end - start`).
 
 List sessions with optional filters.
 
-**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200), `offset` (default 0)
+**Query:** `start`, `end` (YYYY-MM-DD), `session_label`, `include_cancelled=true`, `limit` (default 50, max 200, clamped), `offset` (default 0)
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+**Errors:** `400` — `invalid_start`, `invalid_end`, `invalid_pagination`
 
 #### `GET /api/admin/scheduling/sessions/:sessionId`
 
@@ -819,11 +887,15 @@ Single session plus its `attendance_records`.
 
 **Response:** `{ "ok": true, "session": { ... } }`
 
+**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null). Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
+
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
 Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
 
 **Response:** `{ "ok": true, "session": { ... } }`
+
+**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean); `404` — `session_not_found`; `409` — `already_exists`
 
 #### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
 
@@ -846,6 +918,114 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 **Response:** `{ "ok": true, "session_id", "upserted": [ ... ], "blocked": [ { "participant_id", "reason" } ] }`
 
 **Errors:** `400` — `session_cancelled`, `all_records_blocked`, validation errors
+
+---
+
+### Scheduling v2 (`/api/admin/scheduling-v2/*` and public calendar)
+
+First slice of class scheduling. Migration **`20261101100000_scheduling_v2_classes.sql`** (in-repo only; not applied to production by this work). No booking, no persisted session rows. Occurrences are expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`).
+
+Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
+
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York** (unlike v1 `schedule_templates`, which store UTC wall-clock). `recurrence` is `weekly` only.
+
+Class-types, instructors, and v2 session stubs remain `501 not_implemented`.
+
+#### `GET /api/admin/scheduling-v2/classes`
+
+List classes.
+
+**Query:** `include_inactive=true`, `limit` (default 50, max 200, clamped), `offset` (default 0)
+
+Inactive classes are omitted unless `include_inactive=true`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
+
+**Errors:** `400` — `invalid_pagination`
+
+#### `GET /api/admin/scheduling-v2/classes/:classId`
+
+**Response:** `{ "ok": true, "class": { "id", "name", "instructor", "day_of_week", "recurrence", "start_time", "duration_minutes", "capacity", "is_active", "created_at", "updated_at" } }`
+
+**Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
+
+#### `POST /api/admin/scheduling-v2/classes`
+
+**Body (JSON):**
+
+```json
+{
+  "name": "Class 1",
+  "instructor": "Alex Rivera",
+  "day_of_week": 1,
+  "start_time": "19:00",
+  "duration_minutes": 90,
+  "capacity": 16,
+  "recurrence": "weekly",
+  "is_active": true
+}
+```
+
+`is_active` defaults to `true`. `recurrence` defaults to `weekly`. `capacity` is an integer 1–500. `duration_minutes` is an integer 1–1440.
+
+**Response:** `{ "ok": true, "class": { ... } }`
+
+**Errors:** `400` — `invalid_name`, `invalid_instructor`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_capacity`, `invalid_recurrence`, `invalid_is_active`
+
+#### `PATCH /api/admin/scheduling-v2/classes/:classId`
+
+Partial update. Deactivate with `"is_active": false`. Public occurrence listing is computed on read, so template edits apply to future expansions immediately.
+
+**Response:** `{ "ok": true, "class": { ... } }`
+
+**Errors:** `400` — `no_updates`, same field keys as create; `404` — `class_not_found`
+
+#### `DELETE /api/admin/scheduling-v2/classes/:classId`
+
+Hard-deletes the catalog row. There are no booking FKs in this slice. Prefer `"is_active": false` to hide a class without deleting it.
+
+**Response:** `{ "ok": true, "class": { ... } }` (deleted row)
+
+**Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
+
+#### `GET /api/calendar/occurrences` (public)
+
+Read-only list of upcoming occurrences for the next **14** gym-local calendar days (`America/New_York`). No admin key. Inactive classes are omitted. Occurrences whose `ends_at` is already in the past are omitted. Spring-forward nonexistent wall times are skipped; fall-back repeats use the earlier (DST) instant.
+
+Per-IP rate limit (default **60 / 15 minutes**, env `CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` /
+`CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS`). Over-limit requests return
+`429 { "ok": false, "error": "rate_limited" }`.
+
+Optional `Authorization: Bearer …` is accepted and ignored in this slice.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "timezone": "America/New_York",
+  "window": { "start_date": "2026-11-06", "end_date": "2026-11-19", "days": 14 },
+  "occurrences": [
+    {
+      "class_id": "uuid",
+      "name": "Class 1",
+      "instructor": "Alex Rivera",
+      "day_of_week": 1,
+      "recurrence": "weekly",
+      "start_time": "19:00:00",
+      "duration_minutes": 90,
+      "capacity": 16,
+      "gym_date": "2026-11-09",
+      "starts_at": "2026-11-10T00:00:00.000Z",
+      "ends_at": "2026-11-10T01:30:00.000Z"
+    }
+  ]
+}
+```
+
+There is no booking field and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
+
+**Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
 
 ---
 
@@ -894,8 +1074,8 @@ Participant-first lookup for finance and admin operator flows. Searches existing
 
 **Query:**
 
-- `q` — required string, minimum 2 characters
-- `limit` — optional, default `8`, min `1`, max `25`
+- `q` — required string, minimum 2 characters, maximum 80 after trim. Matched **literally** against `full_name`, `email`, `cell_phone`, and `home_phone` (`ILIKE`). PostgREST reserved characters (commas, parentheses, dots, quotes) are quoted; LIKE wildcards `%` and `_` are escaped so they do not match any character.
+- `limit` — optional, default `8`, min `1`, max `25` (clamped). Invalid `limit` → `400` `invalid_pagination`.
 
 **Response:**
 
@@ -924,7 +1104,7 @@ Participant-first lookup for finance and admin operator flows. Searches existing
 }
 ```
 
-**Errors:** `400` — `query_min_length_2` (or DB/select errors)
+**Errors:** `400` — `query_min_length_2`, `query_too_long`, `invalid_pagination`
 
 ---
 

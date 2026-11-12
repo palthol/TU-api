@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
@@ -19,15 +21,79 @@ import { createSupabaseAuditWriter } from './lib/staffAuth.js';
 import { registerStaffAuthRoutes } from './lib/staffRoutes.js';
 import { registerAdminSchedulingRoutes } from './routes/admin/scheduling.js';
 import { registerStripeWebhookRoute } from './routes/webhooks/stripe.js';
+import { createAdminSchedulingV2Router } from './routes/scheduling/index.js';
+import { createMemberRouter } from './routes/member/index.js';
+import { createCalendarRouter } from './routes/calendar/index.js';
+import { registerAuthRoutes } from './routes/auth/index.js';
+import {
+  createPublicPostMiddleware,
+  jsonPayloadTooLargeHandler,
+  jsonUnhandledErrorHandler,
+  parseTrustProxy,
+  readPublicPostLimitsFromEnv,
+} from './lib/publicPostGuard.js';
+import { isOriginAllowed, parseAdminAllowedOriginsEnv, parseAllowedOriginsEnv } from './lib/allowedOrigins.js';
 
 const app = express();
-// CORS: allow configured origin or all in dev
-const allowedOrigin = process.env.ALLOWED_ORIGIN || '*';
-if (allowedOrigin === '*') {
-  app.use(cors());
-} else {
-  app.use(cors({ origin: allowedOrigin }));
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.use((_req, res, next) => {
+  res.vary('Origin');
+  return next();
+});
+
+export { parseAllowedOriginsEnv };
+
+export function registerCors(appInstance, allowedOriginsEnvValue = process.env.ALLOWED_ORIGIN) {
+  appInstance.use((_req, res, next) => {
+    res.vary('Origin');
+    return next();
+  });
+
+  const publicParsed = parseAllowedOriginsEnv(allowedOriginsEnvValue);
+  const adminParsed = parseAdminAllowedOriginsEnv(process.env.ADMIN_ALLOWED_ORIGINS);
+
+  const allowAnyPublic = cors();
+  const adminAllowlisted = new Map();
+  const publicAllowlisted = new Map();
+
+  const middleware =
+    publicParsed.mode === 'any' && adminParsed.mode !== 'list'
+      ? allowAnyPublic
+      : (req, res, next) => {
+          const origin = req.header('origin');
+          if (!origin) return next();
+
+          if (isOriginAllowed(origin, adminParsed)) {
+            let mw = adminAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin, credentials: true });
+              adminAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
+          }
+
+          if (publicParsed.mode === 'any') {
+            return allowAnyPublic(req, res, next);
+          }
+
+          if (isOriginAllowed(origin, publicParsed)) {
+            let mw = publicAllowlisted.get(origin);
+            if (!mw) {
+              mw = cors({ origin });
+              publicAllowlisted.set(origin, mw);
+            }
+            return mw(req, res, next);
+          }
+
+          return next();
+        };
+  appInstance.use(middleware);
+  // Express 5 / path-to-regexp v8: unnamed `*` is invalid. `/{*splat}` is the
+  // Express 4 `app.options('*')` equivalent (matches `/` and every subpath).
+  appInstance.options('/{*splat}', middleware);
 }
+
+registerCors(app);
 
 const PORT = process.env.PORT || 3001;
 
@@ -38,12 +104,12 @@ if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
 
 // Raw body required for Stripe-Signature verify. Must run before express.json().
 registerStripeWebhookRoute(app, { supabase });
-app.use(express.json({ limit: '10mb' }));
 
 const requireAdmin = createRequireAdminFromSupabase(supabase);
 const requireAdminOrCron = createRequireAdminOrCron(requireAdmin, { writeAudit: createSupabaseAuditWriter(supabase) });
 const SIGNATURES_BUCKET = process.env.SIGNATURES_BUCKET || 'signatures';
 const WAIVERS_BUCKET = process.env.WAIVERS_BUCKET || 'signed-waivers';
+const publicPostLimits = readPublicPostLimitsFromEnv(process.env);
 
 const splitStorageObjectPath = (value) => {
   const [bucket, ...keyParts] = String(value || '').split('/');
@@ -100,22 +166,31 @@ function parseLeadBody(body) {
   };
 }
 
-app.post('/api/lead', async (req, res) => {
-  try {
-    if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-    const parsed = parseLeadBody(req.body);
-    if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
-    const { error } = await supabase.from('marketing_leads').insert(parsed.payload);
-    if (error) {
-      console.error('marketing_leads.insert', error);
-      return res.status(500).json({ ok: false, error: 'db_error' });
+app.post(
+  '/api/lead',
+  ...createPublicPostMiddleware({
+    name: 'lead',
+    jsonLimit: publicPostLimits.leadJsonLimit,
+    windowMs: publicPostLimits.leadWindowMs,
+    max: publicPostLimits.leadMax,
+  }),
+  async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const parsed = parseLeadBody(req.body);
+      if (parsed.error) return res.status(400).json({ ok: false, error: parsed.error });
+      const { error } = await supabase.from('marketing_leads').insert(parsed.payload);
+      if (error) {
+        console.error('marketing_leads.insert', error);
+        return res.status(500).json({ ok: false, error: 'db_error' });
+      }
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
     }
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ ok: false, error: 'server_error' });
-  }
-});
+  },
+);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/health/deep', async (_req, res) => {
@@ -134,7 +209,17 @@ registerWaiverSubmitRoute(app, {
   supabase,
   signaturesBucket: SIGNATURES_BUCKET,
   waiversBucket: WAIVERS_BUCKET,
+  middleware: createPublicPostMiddleware({
+    name: 'waiver_submit',
+    jsonLimit: publicPostLimits.waiverJsonLimit,
+    windowMs: publicPostLimits.waiverWindowMs,
+    max: publicPostLimits.waiverMax,
+  }),
 });
+
+registerAuthRoutes(app);
+
+app.use(express.json({ limit: '10mb' }));
 
 // Admin: fetch waiver metadata and return signed URLs
 app.get('/api/admin/waivers/:id', requireAdmin, async (req, res) => {
@@ -217,6 +302,7 @@ registerAdminBillingRoutes(adminBillingRouter, { supabase });
 registerAdminParticipantRoutes(adminBillingRouter, { supabase });
 registerAdminReportingRoutes(adminBillingRouter, { supabase });
 registerAdminSchedulingRoutes(adminBillingRouter, { supabase });
+adminBillingRouter.use('/scheduling-v2', createAdminSchedulingV2Router({ supabase }));
 registerAdminWaiverRoutes(adminBillingRouter, { supabase });
 app.use('/api/admin', adminBillingRouter);
 
@@ -225,6 +311,22 @@ viewerRouter.use(createRequireViewerAccess());
 registerViewerWaiverRoutes(viewerRouter, { supabase });
 app.use('/api/viewer', viewerRouter);
 
-app.listen(PORT, () => {
-  console.log(`API listening on :${PORT}`);
-});
+app.use('/api/member', createMemberRouter());
+app.use('/api/calendar', createCalendarRouter({ supabase }));
+
+app.use(jsonPayloadTooLargeHandler);
+app.use(jsonUnhandledErrorHandler);
+
+export function startServer() {
+  return app.listen(PORT, (error) => {
+    if (error) {
+      console.error(error);
+      throw error;
+    }
+    console.log(`API listening on :${PORT}`);
+  });
+}
+
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  startServer();
+}

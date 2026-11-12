@@ -3,7 +3,6 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { createOrBindParticipantAccount } from './createOrBindParticipantAccount.js';
 import { recordWaiverSubmittedEvent } from '../events/recordWaiverSubmittedEvent.js';
 import { notifyWaiverSubmitted } from '../notifications/notifyWaiverSubmitted.js';
-import { exposeSupabaseError } from '../../lib/exposeSupabaseError.js';
 
 export const WAIVER_IDEMPOTENCY_KEY_MAX_LENGTH = 200;
 export const DERIVED_IDEMPOTENCY_PREFIX = 'derived:v1:';
@@ -274,7 +273,6 @@ async function replaySuccessfulSubmit({
       body: {
         ok: false,
         errors: [{ field: 'participant', messageKey: 'server.db_find_participant_failed' }],
-        dbError: exposeSupabaseError(identity.error),
       },
     };
   }
@@ -497,7 +495,6 @@ export async function handleWaiverSubmit(req, res, deps) {
       return res.status(500).json({
         ok: false,
         errors: [{ field: 'waiver', messageKey: 'server.db_insert_waiver_failed' }],
-        dbError: exposeSupabaseError(existing.error),
       });
     }
     if (existing.waiver?.id) {
@@ -526,7 +523,6 @@ export async function handleWaiverSubmit(req, res, deps) {
         return res.status(500).json({
           ok: false,
           errors: [{ field: 'participant', messageKey: 'server.db_find_participant_failed' }],
-          dbError: exposeSupabaseError(findErr),
         });
       }
       const phone = String(participant.phone);
@@ -557,7 +553,6 @@ export async function handleWaiverSubmit(req, res, deps) {
           return res.status(500).json({
             ok: false,
             errors: [{ field: 'participant', messageKey: 'server.db_insert_participant_failed' }],
-            dbError: exposeSupabaseError(insErr),
           });
         }
         participantId = inserted.id;
@@ -739,5 +734,6 @@ export async function handleWaiverSubmit(req, res, deps) {
 }
 
 export function registerWaiverSubmitRoute(app, deps) {
-  app.post('/api/waivers/submit', (req, res) => handleWaiverSubmit(req, res, deps));
+  const middleware = Array.isArray(deps?.middleware) ? deps.middleware : [];
+  app.post('/api/waivers/submit', ...middleware, (req, res) => handleWaiverSubmit(req, res, deps));
 }

@@ -25,6 +25,15 @@ following top-level keys:
   intent so retries replay the original success envelope. If omitted, the API
   derives a key from participant email + DOB + phone + `content_version` +
   SHA-256 of the signature PNG bytes.
+- `website`: optional honeypot. Must be omitted or blank. Any non-empty value
+  is treated as a bot: `200 { "ok": true }` and no writes.
+- `turnstileToken` (or `cf-turnstile-response`): required only when the API
+  has `TURNSTILE_SECRET_KEY` set. Cloudflare Turnstile widget token; verified
+  server-side before Storage, PDF, or Discord/Slack.
+
+JSON body limit is **512kb** by default (`WAIVER_SUBMIT_JSON_LIMIT`). Typical
+signature-pad PNG data URLs are a few KB; dense `vectorJson` is the larger
+part and still well under this cap.
 
 Optional string properties should be sent as non-empty strings or `null`; empty
 strings are normalized to `null` on the server before persistence.
@@ -95,7 +104,9 @@ strings are normalized to `null` on the server before persistence.
   },
   "locale": "en|es",                  // default "en" in frontend if omitted
   "content_version": "string",        // current frontend constant "waiver.v1"
-  "idempotency_key": "string"         // optional; UUID per form session recommended
+  "idempotency_key": "string",        // optional; UUID per form session recommended
+  "website": "",                      // honeypot; omit or empty
+  "turnstileToken": "string"          // required when API TURNSTILE_SECRET_KEY is set
 }
 ```
 

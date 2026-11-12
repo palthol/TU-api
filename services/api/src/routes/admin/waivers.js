@@ -1,17 +1,5 @@
-const MAX_LIMIT = 100;
-const DEFAULT_LIMIT = 50;
-
-const parseLimit = (raw) => {
-  const parsed = Number.parseInt(String(raw || ''), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_LIMIT;
-  return Math.min(parsed, MAX_LIMIT);
-};
-
-const parseOffset = (raw) => {
-  const parsed = Number.parseInt(String(raw || ''), 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return 0;
-  return parsed;
-};
+import { parsePagination } from '../../lib/adminRequestValidation.js';
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 
 /**
  * Minimal waiver read API for the future admin review UI.
@@ -22,8 +10,9 @@ export function registerAdminWaiverRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
 
-      const limit = parseLimit(req.query.limit);
-      const offset = parseOffset(req.query.offset);
+      const page = parsePagination(req.query, { maxLimit: 100 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit, offset } = page;
       const { data, error } = await supabase
         .from('view_waiver_documents')
         .select(
@@ -42,8 +31,7 @@ export function registerAdminWaiverRoutes(router, { supabase }) {
         .range(offset, offset + limit - 1);
 
       if (error) {
-        console.error('admin.waivers.list error', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'admin.waivers.list' });
       }
 
       return res.json({

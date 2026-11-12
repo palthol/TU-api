@@ -46,7 +46,10 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
     (`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS`,
     `WAIVER_VIEWER_ALLOWED_EMAILS`), storage (`SIGNATURES_BUCKET`, `WAIVERS_BUCKET`),
     PDF letterhead (`PDF_ORG_NAME`, `PDF_ORG_TAGLINE`, `PDF_ORG_ADDRESS`), and
-    `API_EXPOSE_DB_ERRORS`
+    `API_EXPOSE_DB_ERRORS`, `TRUST_PROXY` (default `1` for Render), public POST
+    rate/JSON limits (`LEAD_RATE_LIMIT_*`, `WAIVER_SUBMIT_RATE_LIMIT_*`,
+    `LEAD_JSON_LIMIT`, `WAIVER_SUBMIT_JSON_LIMIT`), and optional
+    `TURNSTILE_SECRET_KEY`
   - Full name list: `services/api/.env.example` and [deployment.md](./deployment.md)
   - Discord digest schedule: [deployment.md](./deployment.md) (Render Dashboard
     cron; this repo has no `render.yaml`)

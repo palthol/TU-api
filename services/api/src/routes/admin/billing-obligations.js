@@ -1,3 +1,5 @@
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = value => typeof value === 'string' && UUID.test(value);
 const isDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -14,7 +16,7 @@ export function registerBillingObligationRoutes(router, { supabase }) {
   }
   const invalid = (res, error) => res.status(400).json({ ok: false, error });
   function result(res, data, error) {
-    if (error) return res.status(error.code === '23505' ? 409 : 400).json({ ok: false, error: error.message });
+    if (error) return sendDatabaseError(res, error, { context: 'billing.obligations' });
     return res.json({ ok: true, obligation: data });
   }
   router.post('/billing/obligations/:id/entitlements', handler(async (req, res) => {
@@ -29,7 +31,7 @@ export function registerBillingObligationRoutes(router, { supabase }) {
       p_id: b.id, p_obligation_id: req.params.id, p_participant_id: b.participant_id,
       p_plan_definition_id: b.plan_definition_id, p_replaces_subscription_id: b.replaces_subscription_id ?? null,
     });
-    if (error) return res.status(error.code === '23505' ? 409 : 400).json({ ok: false, error: error.message });
+    if (error) return sendDatabaseError(res, error, { context: 'billing.obligations.entitlements' });
     return res.json({ ok: true, ...data });
   }));
   router.get('/billing/obligations', handler(async (req, res) => {
@@ -37,7 +39,7 @@ export function registerBillingObligationRoutes(router, { supabase }) {
     const { data, error } = await supabase.from('billing_obligations')
       .select('*, billing_obligation_participants(participant_id)')
       .eq('account_id', req.query.account_id).order('created_at', { ascending: false });
-    if (error) return invalid(res, error.message);
+    if (error) return sendDatabaseError(res, error, { context: 'billing.obligations.list' });
     return res.json({ ok: true, obligations: data ?? [] });
   }));
   router.post('/billing/obligations', handler(async (req, res) => {

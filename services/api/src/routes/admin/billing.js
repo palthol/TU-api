@@ -5,6 +5,8 @@
  * matches Discord notification auth (x-admin-key or x-cron-secret).
  */
 
+import { parsePagination } from '../../lib/adminRequestValidation.js';
+import { mapDatabaseError, sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { registerBillingObligationRoutes } from './billing-obligations.js';
 
 import { BillingService } from '../../services/billing/BillingService.js';
@@ -36,17 +38,16 @@ function parseRpcDetail(error) {
   }
 }
 
-function recordPaymentErrorPayload(error) {
-  const key = String(error?.message || '').trim() || 'record_payment_failed';
+function recordPaymentErrorResponse(error) {
   const extra = parseRpcDetail(error);
-  const body = { ok: false, error: key };
-  if (RECORD_PAYMENT_CHARGE_ERRORS.has(key) && extra.charge_id) {
-    body.charge_id = extra.charge_id;
+  const mapped = mapDatabaseError(error, { context: 'record_payment', extra: {} });
+  if (RECORD_PAYMENT_CHARGE_ERRORS.has(mapped.body.error) && extra.charge_id) {
+    mapped.body.charge_id = extra.charge_id;
   }
-  if (key === 'allocation_exceeds_net_due' && extra.allocatable_cents != null) {
-    body.allocatable_cents = extra.allocatable_cents;
+  if (mapped.body.error === 'allocation_exceeds_net_due' && extra.allocatable_cents != null) {
+    mapped.body.allocatable_cents = extra.allocatable_cents;
   }
-  return body;
+  return mapped;
 }
 
 function recordPaymentResult(data) {
@@ -105,8 +106,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .select('id, status, primary_contact_name, primary_contact_phone, primary_contact_email, notes')
         .single();
       if (error || !data) {
-        console.error('external counterparty account insert', error);
-        return res.status(400).json({ ok: false, error: error?.message || 'account_insert_failed' });
+        return sendDatabaseError(res, error, { context: 'accounts.external_counterparty.insert' });
       }
 
       return res.json({
@@ -124,7 +124,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
       const chargeId = typeof req.query.charge_id === 'string' ? req.query.charge_id.trim() : '';
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 50, 200);
+      const page = parsePagination(req.query);
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       if (!chargeId) {
         return res.status(400).json({ ok: false, error: 'charge_id_required' });
       }
@@ -134,7 +136,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .eq('charge_id', chargeId)
         .order('created_at', { ascending: false })
         .limit(limit);
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'charge_discounts.list' });
       return res.json({ ok: true, rows: data ?? [] });
     } catch (e) {
       console.error(e);
@@ -178,8 +180,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
 
       const { data, error } = await supabase.from('charge_discounts').insert(insertRow).select('*').single();
       if (error) {
-        console.error('charge_discounts.insert', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'charge_discounts.insert' });
       }
 
       const { data: netRow } = await supabase
@@ -222,8 +223,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .select('id')
         .single();
       if (error) {
-        console.error('charge_adjustments.insert', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'charge_adjustments.insert' });
       }
       return res.json({ ok: true, id: data.id });
     } catch (e) {
@@ -250,8 +250,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         p_idempotency_key: idempotency_key || null,
       });
       if (error) {
-        console.error('record_payment_refund', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'record_payment_refund' });
       }
       return res.json({ ok: true, refund_id: data });
     } catch (e) {
@@ -303,8 +302,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
           create_initial_charge,
         );
       } catch (error) {
-        console.error('create_subscription.plan_lookup', { message: error?.message || String(error) });
-        return res.status(400).json({ ok: false, error: error?.message || 'plan_lookup_failed' });
+        return sendDatabaseError(res, error, { context: 'create_subscription.plan_lookup' });
       }
 
       const { data, error } = await supabase.rpc('create_subscription', {
@@ -319,8 +317,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       });
 
       if (error) {
-        console.error('create_subscription', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'create_subscription' });
       }
 
       const result = data && typeof data === 'object' ? data : {};
@@ -352,8 +349,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         p_effective_date: effective_date || null,
       });
       if (error) {
-        console.error('upgrade_subscription_prorated', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'upgrade_subscription_prorated' });
       }
       return res.json({ ok: true, proration_charge_id: data });
     } catch (e) {
@@ -383,8 +379,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         p_created_by: created_by || 'admin_api',
       });
       if (error) {
-        console.error('create_pay_per_class_charge', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'create_pay_per_class_charge' });
       }
 
       return res.json({ ok: true, charge_id: data });
@@ -430,8 +425,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         p_conversion_policy: conversion_policy || 'no_credit',
       });
       if (error) {
-        console.error('upgrade_per_class_to_monthly', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'upgrade_per_class_to_monthly' });
       }
 
       const row = Array.isArray(data) ? data[0] : data;
@@ -522,9 +516,8 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         return res.json(recordPaymentResult(rpcData));
       }
       if (!isMissingRecordPaymentFunction(rpcErr)) {
-        console.error('record_payment', rpcErr);
-        const status = String(rpcErr.message || '').trim() === 'idempotency_key_conflict' ? 409 : 400;
-        return res.status(status).json(recordPaymentErrorPayload(rpcErr));
+        const mapped = recordPaymentErrorResponse(rpcErr);
+        return res.status(mapped.status).json(mapped.body);
       }
 
       // Migration 20260916174649 not applied: keep sequential writes so live record-payment
@@ -571,8 +564,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .select('id')
         .single();
       if (payErr || !pay) {
-        console.error('payments.insert', payErr);
-        return res.status(400).json({ ok: false, error: payErr?.message || 'payment_insert_failed' });
+        return sendDatabaseError(res, payErr, { context: 'payments.insert' });
       }
 
       const paymentId = pay.id;
@@ -583,8 +575,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
           amount_cents: row.amount_cents,
         });
         if (aErr) {
-          console.error('payment_allocations.insert', aErr);
-          return res.status(400).json({ ok: false, error: aErr.message });
+          return sendDatabaseError(res, aErr, { context: 'payment_allocations.insert' });
         }
       }
 
@@ -616,8 +607,10 @@ export function registerAdminBillingRoutes(router, { supabase }) {
           .select('id')
           .single();
         if (rErr) {
-          console.error('receipts.insert', rErr);
-          return res.status(400).json({ ok: false, error: rErr.message, payment_id: paymentId });
+          return sendDatabaseError(res, rErr, {
+            context: 'receipts.insert',
+            extra: { payment_id: paymentId },
+          });
         }
         receiptId = rec.id;
       }
@@ -656,7 +649,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         })
         .eq('id', receiptId);
       if (uErr) {
-        return res.status(400).json({ ok: false, error: uErr.message });
+        return sendDatabaseError(res, uErr, { context: 'receipts.void' });
       }
       return res.json({ ok: true, receipt_id: receiptId });
     } catch (e) {
@@ -735,7 +728,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .select('id')
         .single();
       if (insErr) {
-        return res.status(400).json({ ok: false, error: insErr.message });
+        return sendDatabaseError(res, insErr, { context: 'receipts.issue_for_refund' });
       }
       return res.json({ ok: true, receipt_id: outRec.id, voided_money_in_receipt_id: moneyIn?.id || null });
     } catch (e) {
@@ -747,13 +740,15 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/marketing-leads', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const { data, error } = await supabase
         .from('marketing_leads')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(limit);
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'marketing_leads.list' });
       return res.json({ ok: true, rows: data ?? [] });
     } catch (e) {
       console.error(e);
@@ -764,13 +759,15 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/operating-expenses', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const { data, error } = await supabase
         .from('operating_expenses')
         .select('*')
         .order('expense_date', { ascending: false })
         .limit(limit);
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'operating_expenses.list' });
       return res.json({ ok: true, rows: data ?? [] });
     } catch (e) {
       console.error(e);
@@ -804,7 +801,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         })
         .select('id')
         .single();
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'operating_expenses.insert' });
       return res.json({ ok: true, id: data.id });
     } catch (e) {
       console.error(e);
@@ -880,7 +877,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       }
 
       const { data, error } = await supabase.from('personal_finance_entries').insert(row).select('id').single();
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'personal_finance_entries.insert' });
       return res.json({ ok: true, id: data.id });
     } catch (e) {
       console.error(e);
@@ -891,14 +888,16 @@ export function registerAdminBillingRoutes(router, { supabase }) {
   router.get('/billing/personal-finance-entries', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const limit = Math.min(Number.parseInt(String(req.query.limit || ''), 10) || 100, 500);
+      const page = parsePagination(req.query, { defaultLimit: 100, maxLimit: 500 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
       const kind = typeof req.query.entry_kind === 'string' ? req.query.entry_kind.trim() : '';
       let q = supabase.from('personal_finance_entries').select('*').order('created_at', { ascending: false }).limit(limit);
       if (kind === 'cash_received' || kind === 'invoice') {
         q = q.eq('entry_kind', kind);
       }
       const { data, error } = await q;
-      if (error) return res.status(400).json({ ok: false, error: error.message });
+      if (error) return sendDatabaseError(res, error, { context: 'personal_finance_entries.list' });
       return res.json({ ok: true, rows: data ?? [] });
     } catch (e) {
       console.error(e);
@@ -928,7 +927,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         .from('personal_finance_entries')
         .update({ invoice_status: status.trim() })
         .eq('id', entryId);
-      if (uErr) return res.status(400).json({ ok: false, error: uErr.message });
+      if (uErr) return sendDatabaseError(res, uErr, { context: 'personal_finance_entries.invoice_status' });
       return res.json({ ok: true, id: entryId, invoice_status: status.trim() });
     } catch (e) {
       console.error(e);
@@ -971,14 +970,7 @@ export function registerAdminBillingCronRoutes(router, { supabase }) {
         charges,
       });
     } catch (e) {
-      console.error('billing.generate_due_charges.failed', {
-        ran_at: ranAt,
-        message: e?.message || String(e),
-      });
-      if (!(e instanceof Error) && e && typeof e === 'object' && 'message' in e) {
-        return res.status(400).json({ ok: false, error: e.message });
-      }
-      return res.status(500).json({ ok: false, error: 'server_error' });
+      return sendDatabaseError(res, e, { context: 'billing.generate_due_charges' });
     }
   });
 }

@@ -1,3 +1,10 @@
+import {
+  buildParticipantSearchOrFilter,
+  parsePagination,
+  parseSearchQuery,
+} from '../../lib/adminRequestValidation.js';
+import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+
 /**
  * @param {import('express').Router} router
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
@@ -6,20 +13,21 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
   router.get('/participants/search', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
-      const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-      const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || ''), 10) || 8, 1), 25);
-      if (!q || q.length < 2) {
-        return res.status(400).json({ ok: false, error: 'query_min_length_2' });
+      const parsedQuery = parseSearchQuery(req.query.q);
+      if (!parsedQuery.ok) {
+        return res.status(400).json({ ok: false, error: parsedQuery.error });
       }
+      const page = parsePagination(req.query, { defaultLimit: 8, maxLimit: 25 });
+      if (!page.ok) return res.status(400).json({ ok: false, error: page.error });
+      const { limit } = page;
 
-      const like = `%${q}%`;
       const { data: people, error: pErr } = await supabase
         .from('participants')
         .select('id, full_name, email, cell_phone, home_phone, created_at')
-        .or(`full_name.ilike.${like},email.ilike.${like},cell_phone.ilike.${like},home_phone.ilike.${like}`)
+        .or(buildParticipantSearchOrFilter(parsedQuery.q))
         .order('created_at', { ascending: false })
         .limit(limit);
-      if (pErr) return res.status(400).json({ ok: false, error: pErr.message });
+      if (pErr) return sendDatabaseError(res, pErr, { context: 'participants.search' });
 
       const participantIds = (people || []).map((p) => p.id);
       let membershipRows = [];
@@ -29,7 +37,7 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
           .select('participant_id, account_id, role, created_at, accounts(id, status, primary_contact_name)')
           .in('participant_id', participantIds)
           .order('created_at', { ascending: false });
-        if (mErr) return res.status(400).json({ ok: false, error: mErr.message });
+        if (mErr) return sendDatabaseError(res, mErr, { context: 'participants.search.memberships' });
         membershipRows = mRows || [];
       }
 
@@ -83,8 +91,7 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
         p_duplicate_participant_id: duplicate_participant_id,
       });
       if (error) {
-        console.error('merge_participants', error);
-        return res.status(400).json({ ok: false, error: error.message });
+        return sendDatabaseError(res, error, { context: 'merge_participants' });
       }
       return res.json({ ok: true });
     } catch (e) {

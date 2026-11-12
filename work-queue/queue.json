@@ -185,6 +185,29 @@
       "depends_on": ["API-AUTO-003"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-OPS-002.md"
+    },
+    {
+      "id": "API-SCHED-A0",
+      "lane": "backend",
+      "status": "done",
+      "depends_on": ["API-AUTH-001", "API-SCHED-001"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-SCHED-A0.md",
+      "allowed_paths": [
+        "services/api/src/index.js",
+        "services/api/src/index.cors.test.js",
+        "services/api/src/lib/exposeSupabaseError.js",
+        "services/api/src/lib/exposeSupabaseError.test.js",
+        "services/api/src/lib/gymTime.js",
+        "services/api/src/lib/gymTime.test.js",
+        "services/api/src/routes/calendar/",
+        "services/api/src/routes/member/",
+        "services/api/src/routes/scheduling/",
+        "docs/scheduling/README.md",
+        "work-queue/claims/API-SCHED-A0.md",
+        "work-queue/queue.json",
+        "work-queue/README.md"
+      ]
     }
   ]
 }

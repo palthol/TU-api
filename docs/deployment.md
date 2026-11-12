@@ -68,6 +68,16 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | --- | --- |
 | `PORT` | Listen port (Render sets this) |
 | `ALLOWED_ORIGIN` | CORS origin; omit or `*` for allow-all |
+| `TRUST_PROXY` | Express `trust proxy` hop count. Default **`1`** (Render). Do not set `true`. |
+| `LEAD_RATE_LIMIT_MAX` | Max `POST /api/lead` requests per IP per window (default `10`) |
+| `LEAD_RATE_LIMIT_WINDOW_MS` | Lead rate-limit window (default `900000` = 15 minutes) |
+| `WAIVER_SUBMIT_RATE_LIMIT_MAX` | Max `POST /api/waivers/submit` requests per IP per window (default `10`) |
+| `WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS` | Waiver submit rate-limit window (default `900000` = 15 minutes) |
+| `LEAD_JSON_LIMIT` | JSON body limit for `POST /api/lead` (default `16kb`) |
+| `WAIVER_SUBMIT_JSON_LIMIT` | JSON body limit for `POST /api/waivers/submit` (default `512kb`) |
+| `CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` | Max `GET /api/calendar/occurrences` requests per IP per window (default `60`) |
+| `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS` | Calendar occurrence rate-limit window (default `900000` = 15 minutes) |
+| `TURNSTILE_SECRET_KEY` | Optional Turnstile secret. When set, public POSTs siteverify a token before side effects. When unset, those routes warn and allow the request. |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Server-only Supabase secret. Prefer the `sb_secret_` key. A legacy service_role JWT is also accepted here. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy service_role JWT. Read only when `SUPABASE_SECRET_KEY` is unset or blank. |
@@ -85,6 +95,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `PDF_ORG_TAGLINE` | PDF letterhead tagline |
 | `PDF_ORG_ADDRESS` | PDF letterhead address |
 | `API_EXPOSE_DB_ERRORS` | Expose DB errors (non-production debugging only) |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase Auth password sign-in for `/api/auth/login`. Prefer the `sb_publishable_` key. Not the server secret. |
+| `SUPABASE_ANON_KEY` | Legacy anon JWT for `/api/auth/login`. Read only when `SUPABASE_PUBLISHABLE_KEY` is unset or blank. |
 
 Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 
