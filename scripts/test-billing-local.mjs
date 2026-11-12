@@ -179,7 +179,7 @@ try {
     stub = createServer(async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; deliveries.push(JSON.parse(body)); res.writeHead(204).end(); });
     stub.listen(53002, '127.0.0.1'); await once(stub, 'listening');
     const apiEnv = { PATH: process.env.PATH, DOTENV_CONFIG_PATH: '/dev/null', NODE_ENV: 'test', PORT: '53001',
-      SUPABASE_URL: local.API_URL, SUPABASE_SERVICE_ROLE_KEY: local.SERVICE_ROLE_KEY,
+      SUPABASE_URL: local.API_URL, SUPABASE_SECRET_KEY: local.SERVICE_ROLE_KEY,
       ADMIN_API_KEY: adminKey, CRON_SECRET: cronKey, DISCORD_WEBHOOK_URL: 'http://127.0.0.1:53002/stub', ALLOWED_ORIGIN: 'http://127.0.0.1:53001' };
     api = spawn(process.execPath, ['services/api/src/index.js'], { cwd: root, env: apiEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     let apiLog = ''; api.stdout.on('data', b => { apiLog += b; }); api.stderr.on('data', b => { apiLog += b; });

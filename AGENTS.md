@@ -108,7 +108,7 @@ cd TU-web && npm run dev
   uses Cloudflare Access (JWT + email allowlist). Public: `/api/lead`, `/api/waivers/submit`,
   `/health`, `/health/deep`. Admin-key PDF: `GET /api/waivers/:id/pdf`.
 - **Supabase client** is **service-role** (bypasses RLS) — each route is responsible for its
-  own authorization. Never log `ADMIN_API_KEY` or `SUPABASE_SERVICE_ROLE_KEY`, and never
+  own authorization. Never log `ADMIN_API_KEY`, `SUPABASE_SECRET_KEY`, or `SUPABASE_SERVICE_ROLE_KEY`, and never
   expose them to any browser/Vite (`VITE_*`) bundle.
 - **Money is integer cents** everywhere.
 - **Response envelope:** success → `200 { ok:true, ... }`; failure → non-2xx
@@ -159,7 +159,7 @@ Inventory: [`docs/deployment.md`](docs/deployment.md).
 
 `services/api/.env` is git-ignored. Copy `services/api/.env.example` as a starting point.
 For real Supabase access set `SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY`, and `ADMIN_API_KEY`. Optional: `PORT`, `CRON_SECRET`,
+`SUPABASE_SECRET_KEY` (`SUPABASE_SERVICE_ROLE_KEY` is the legacy fallback), and `ADMIN_API_KEY`. Optional: `PORT`, `CRON_SECRET`,
 `ALLOWED_ORIGIN` (defaults to `*`), `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`,
 `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`, `WAIVER_VIEWER_DEV_BYPASS` /
 `WAIVER_VIEWER_ALLOWED_EMAILS`, `SIGNATURES_BUCKET`, `WAIVERS_BUCKET`, `PDF_ORG_*`,
