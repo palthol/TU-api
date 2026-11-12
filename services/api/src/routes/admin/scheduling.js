@@ -16,6 +16,8 @@ import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 
 const TEMPLATE_COLUMNS =
   'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
+const SESSION_COLUMNS =
+  'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at';
 const MAX_GENERATE_SPAN_DAYS = 366;
 const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
@@ -458,7 +460,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const { data: existing, error: findErr } = await supabase
         .from('sessions')
-        .select('id, starts_at, ends_at, cancelled_at')
+        .select(SESSION_COLUMNS)
         .eq('id', sessionId)
         .maybeSingle();
       if (findErr) return sendDatabaseError(res, findErr, { context: 'sessions.lookup' });
@@ -466,6 +468,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const body = req.body || {};
       const patch = {};
+      let cancelRequested = false;
 
       if (body.starts_at !== undefined) {
         const startsAt = parseIsoDateTime(body.starts_at);
@@ -500,7 +503,12 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         if (typeof body.cancel !== 'boolean') {
           return res.status(400).json({ ok: false, error: 'invalid_cancel' });
         }
-        patch.cancelled_at = body.cancel ? new Date().toISOString() : null;
+        if (body.cancel) {
+          // cancel_session owns the timestamp. A second cancel must not patch it.
+          cancelRequested = true;
+        } else {
+          patch.cancelled_at = null;
+        }
       }
 
       const nextStarts = patch.starts_at ?? existing.starts_at;
@@ -509,24 +517,42 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'ends_at_must_be_after_starts_at' });
       }
 
-      if (Object.keys(patch).length === 0) {
+      if (!cancelRequested && Object.keys(patch).length === 0) {
         return res.status(400).json({ ok: false, error: 'no_updates' });
       }
 
-      const { data, error } = await supabase
-        .from('sessions')
-        .update(patch)
-        .eq('id', sessionId)
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
-        .single();
+      let session = existing;
 
-      if (error) {
-        return sendDatabaseError(res, error, { context: 'sessions.update' });
+      if (cancelRequested && !existing.cancelled_at) {
+        const { error: cancelErr } = await supabase.rpc('cancel_session', {
+          p_session_id: sessionId,
+        });
+        if (cancelErr) return sendDatabaseError(res, cancelErr, { context: 'cancel_session' });
+
+        const { data: refreshed, error: readErr } = await supabase
+          .from('sessions')
+          .select(SESSION_COLUMNS)
+          .eq('id', sessionId)
+          .single();
+        if (readErr) return sendDatabaseError(res, readErr, { context: 'sessions.after_cancel' });
+        session = refreshed;
       }
 
-      return res.json({ ok: true, session: data });
+      if (Object.keys(patch).length > 0) {
+        const { data, error } = await supabase
+          .from('sessions')
+          .update(patch)
+          .eq('id', sessionId)
+          .select(SESSION_COLUMNS)
+          .single();
+
+        if (error) {
+          return sendDatabaseError(res, error, { context: 'sessions.update' });
+        }
+        session = data;
+      }
+
+      return res.json({ ok: true, session });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ ok: false, error: 'server_error' });
