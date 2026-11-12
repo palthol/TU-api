@@ -37,7 +37,7 @@ A single-operator guide for **building**, **maintaining**, and **using** this ap
 - **Dashboard app** — In the **`admin`** repo (`admin/apps/dashboard`), copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (same project as waiver). Use the **anon** / **public** (publishable) key from Project Settings → API, not the service_role key. Sign in with the admin user you add to `app_admin`.
 - **API** — In `services/api`, add a `.env` with at least:
   - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY` (for server-side PDF/DB access)
+  - `SUPABASE_SECRET_KEY` (server-side PDF/DB access; `sb_secret_` or a service_role JWT. `SUPABASE_SERVICE_ROLE_KEY` is used only when the new name is unset)
   - `ADMIN_API_KEY` (required for `/api/admin/*` and the on-demand PDF route)
   - Optional: `PORT`, `ALLOWED_ORIGIN` (defaults to `*` when unset), `CRON_SECRET`
     (required on the API **and** the Render cron job once Discord digest is
@@ -295,7 +295,7 @@ point a cron at a generate-monthly-charges HTTP route from this runbook.
 | “Permission denied” or empty results after signing in | Same as above: ensure that auth user’s id is in `app_admin`. Check: `select * from app_admin;` (as service_role). |
 | Need to run admin-only SQL from Dashboard | Dashboard SQL uses service_role, so it bypasses RLS. No extra step. |
 | Charge generation creates nothing | Subscriptions must be `status = 'active'`, plan must be `billing_cadence = 'monthly'`, and the next due date must be today or in the past. Check for existing charges for that period. |
-| Waiver PDF fails | Confirm API has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env` and that the waiver/participant data exists in the DB. |
+| Waiver PDF fails | Confirm API has `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in `.env` (`SUPABASE_SERVICE_ROLE_KEY` still works when the new name is unset) and that the waiver/participant data exists in the DB. |
 | Discord digest cron fails / `401 unauthorized` | `CRON_SECRET` must be set on **both** the API and the cron job, and the cron must send header `x-cron-secret` (not `x-admin-key`). Check Render Cron Job logs. |
 | Digest returns `500 discord_webhook_not_configured` | Set `DISCORD_WEBHOOK_URL` on the **API** web service (not on the cron job). |
 | Digest returns `502` with `discord_http_…` | Discord rejected the webhook; see API logs `discord.webhook.failed`. |

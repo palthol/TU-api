@@ -6,7 +6,8 @@
  *   node scripts/tu-test-seed.mjs [--count=2] [--billing] [--schedule]
  *
  * Env:
- *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY — required for --billing / --schedule
+ *   SUPABASE_URL, SUPABASE_SECRET_KEY — required for --billing / --schedule
+ *   (SUPABASE_SERVICE_ROLE_KEY is used only when SUPABASE_SECRET_KEY is unset)
  *   TU_TEST_API_BASE (default http://localhost:3001) — waiver POST target
  *   TU_TEST_API_TIMEOUT_MS (default 20000) — health + submit timeout
  *   TU_TEST_ALLOW_REMOTE=1 — required for a non-local, non-production target
@@ -18,6 +19,7 @@
  */
 
 import crypto from 'node:crypto';
+import { readSupabaseSecretKey } from '../services/api/src/lib/readSupabaseSecretKey.js';
 import { loadTuTestEnv, resolveApiBase, resolveSupabaseUrl } from './lib/tu-test-env.mjs';
 import { assertNonProductionTargets } from './lib/tu-test-guard.mjs';
 import {
@@ -181,7 +183,7 @@ async function main() {
       }
       if (body?.errors?.[0]?.messageKey === 'server.db_insert_participant_failed') {
         console.error(
-          '\nTypical fix: the API must use SUPABASE_SERVICE_ROLE_KEY (service_role JWT), not the anon key —',
+          '\nTypical fix: the API must use SUPABASE_SECRET_KEY (sb_secret_ or a service_role JWT), not the publishable/anon key —',
           'see Supabase Dashboard → Project Settings → API.',
         );
       }
@@ -197,9 +199,9 @@ async function main() {
     console.log(`OK waiver ${i + 1}/${count}: participant=${body.participantId} account=${body.accountId}`);
   }
 
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseKey = readSupabaseSecretKey();
   if ((billing || schedule) && (!supabaseUrl || !supabaseKey)) {
-    console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY (required for --billing / --schedule).');
+    console.error('Missing SUPABASE_URL or SUPABASE_SECRET_KEY (required for --billing / --schedule). SUPABASE_SERVICE_ROLE_KEY is accepted when the new name is unset.');
     process.exitCode = 1;
     return;
   }

@@ -9,7 +9,8 @@
  *
  * Default: dry-run. Deletions require --execute.
  *
- * Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ * Env: SUPABASE_URL, SUPABASE_SECRET_KEY
+ *      (SUPABASE_SERVICE_ROLE_KEY is used only when SUPABASE_SECRET_KEY is unset)
  *      TU_TEST_ALLOW_REMOTE=1 — required for a non-local, non-production target
  *
  * Production project jhxzecxkccqlgyazhsnb is never allowed.
@@ -19,6 +20,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { readSupabaseSecretKey } from '../services/api/src/lib/readSupabaseSecretKey.js';
 import { loadTuTestEnv, resolveSupabaseUrl } from './lib/tu-test-env.mjs';
 import { assertNonProductionTargets } from './lib/tu-test-guard.mjs';
 import { TU_TEST_EMAIL_DOMAIN, TU_TEST_DISPLAY_PREFIX } from './lib/tu-test-data.mjs';
@@ -67,9 +69,9 @@ async function main() {
   await loadTuTestEnv();
   const execute = process.argv.includes('--execute');
   const supabaseUrl = resolveSupabaseUrl();
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseKey = readSupabaseSecretKey();
   if (!supabaseUrl || !supabaseKey) {
-    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (non-production only).');
+    console.error('Set SUPABASE_URL and SUPABASE_SECRET_KEY (non-production only). SUPABASE_SERVICE_ROLE_KEY is accepted when the new name is unset.');
     process.exitCode = 1;
     return;
   }
