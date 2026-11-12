@@ -74,19 +74,20 @@ Docker is required for `supabase start`.
 npm run supabase:start
 # Keys: npx supabase status -o env
 #   API URL -> SUPABASE_URL (http://127.0.0.1:54321)
-#   service_role key -> SUPABASE_SERVICE_ROLE_KEY
+#   service_role key -> SUPABASE_SECRET_KEY
+#   (SUPABASE_SERVICE_ROLE_KEY still works when SUPABASE_SECRET_KEY is unset)
 
 # 2. Point the API at local, not production
 #    Put these in services/api/.env (gitignored). The file must NOT contain
 #    jhxzecxkccqlgyazhsnb or api.templeunderground.com.
 #      SUPABASE_URL=http://127.0.0.1:54321
-#      SUPABASE_SERVICE_ROLE_KEY=<local service_role from supabase status>
+#      SUPABASE_SECRET_KEY=<local service_role from supabase status>
 #      ADMIN_API_KEY=<any local-only test string>
 #      PORT=3001
 
 # 3. Same keys for seed/cleanup (repo-root .env.validation preferred; gitignored)
 #      SUPABASE_URL=http://127.0.0.1:54321
-#      SUPABASE_SERVICE_ROLE_KEY=<same local service_role>
+#      SUPABASE_SECRET_KEY=<same local service_role>
 #      TU_TEST_API_BASE=http://127.0.0.1:3001
 #      ADMIN_API_KEY=<same local-only string, for VAL curl>
 

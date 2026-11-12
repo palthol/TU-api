@@ -11,7 +11,7 @@ alwaysApply: false
 - **Auth:** every `/api/admin/*` route stays behind the `x-admin-key` check; `/api/viewer/*`
   uses Cloudflare Access. Never add an admin route that skips the key.
 - **Service-role client:** the Supabase client bypasses RLS, so each route owns its
-  authorization. Never log `ADMIN_API_KEY` / `SUPABASE_SERVICE_ROLE_KEY`; never expose them
+  authorization. Never log `ADMIN_API_KEY`, `SUPABASE_SECRET_KEY`, or `SUPABASE_SERVICE_ROLE_KEY`; never expose them
   to any browser/Vite (`VITE_*`) bundle in sibling front-end repos.
 - **Validate input** before using it in a query; return errors as `{ ok:false, error }` with
   a non-2xx status. Success is `200 { ok:true, ... }`.

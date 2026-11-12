@@ -79,7 +79,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS` | Calendar occurrence rate-limit window (default `900000` = 15 minutes) |
 | `TURNSTILE_SECRET_KEY` | Optional Turnstile secret. When set, public POSTs siteverify a token before side effects. When unset, those routes warn and allow the request. |
 | `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service-role key (server only) |
+| `SUPABASE_SECRET_KEY` | Server-only Supabase secret. Prefer the `sb_secret_` key. A legacy service_role JWT is also accepted here. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Legacy service_role JWT. Read only when `SUPABASE_SECRET_KEY` is unset or blank. |
 | `ADMIN_API_KEY` | `x-admin-key` for `/api/admin/*` and admin PDF |
 | `CRON_SECRET` | Shared secret for Discord cron routes (`x-cron-secret`). Optional until a scheduler is enabled; required on **both** the API web service and the cron job once Discord cron is live |
 | `DISCORD_WEBHOOK_URL` | Optional Discord webhook (read by the **API** service, not the cron job) |
@@ -94,6 +95,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `PDF_ORG_TAGLINE` | PDF letterhead tagline |
 | `PDF_ORG_ADDRESS` | PDF letterhead address |
 | `API_EXPOSE_DB_ERRORS` | Expose DB errors (non-production debugging only) |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase Auth password sign-in for `/api/auth/login`. Prefer the `sb_publishable_` key. Not the server secret. |
+| `SUPABASE_ANON_KEY` | Legacy anon JWT for `/api/auth/login`. Read only when `SUPABASE_PUBLISHABLE_KEY` is unset or blank. |
 
 Never commit secret values, webhook URLs with tokens, JWTs, or key material.
 
@@ -239,7 +242,7 @@ Set on the **API web service** (the handler process):
 | `CRON_SECRET` | Yes — otherwise the cron header is ignored |
 | `DISCORD_WEBHOOK_URL` | Yes — otherwise `500 discord_webhook_not_configured` |
 | `ADMIN_API_KEY` | No — not used by the cron path |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Yes — digest reads leads + reminder view |
+| `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | Yes — digest reads leads + reminder view. `SUPABASE_SERVICE_ROLE_KEY` is accepted only when `SUPABASE_SECRET_KEY` is unset or blank. |
 
 Set on the **Render Cron Job** (curl process only):
 
