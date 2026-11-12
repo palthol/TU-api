@@ -11,6 +11,7 @@ import { registerAdminNotificationRoutes } from './routes/admin/notifications.js
 import { registerAdminWaiverRoutes } from './routes/admin/waivers.js';
 import { createRequireViewerAccess } from './lib/cloudflareAccess.js';
 import { registerViewerWaiverRoutes } from './routes/viewer/waivers.js';
+import { readSupabaseSecretKey } from './lib/readSupabaseSecretKey.js';
 import { warnIfSupabaseKeyIsNotServiceRole } from './lib/warnIfSupabaseKeyIsNotServiceRole.js';
 import { createRequireAdminFromSupabase } from './lib/requireAdmin.js';
 import { createRequireAdminOrCron } from './lib/requireAdminOrCron.js';
@@ -31,7 +32,7 @@ if (allowedOrigin === '*') {
 const PORT = process.env.PORT || 3001;
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseServiceRole = readSupabaseSecretKey();
 const supabase = supabaseUrl && supabaseServiceRole ? createClient(supabaseUrl, supabaseServiceRole) : null;
 if (supabaseServiceRole) warnIfSupabaseKeyIsNotServiceRole(supabaseServiceRole);
 

@@ -10,8 +10,9 @@
  * event_ledger rows are append-only and are NOT deleted; they may reference
  * removed entity UUIDs as historical audit noise.
  *
- * Waiver seeding calls the HTTP API, which needs SUPABASE_SERVICE_ROLE_KEY in the API
- * process (service_role bypasses RLS). Using the anon key causes participant insert failures.
+ * Waiver seeding calls the HTTP API, which needs SUPABASE_SECRET_KEY in the API
+ * process (sb_secret_ or service_role JWT bypasses RLS; SUPABASE_SERVICE_ROLE_KEY
+ * is the legacy name). Using the publishable/anon key causes participant insert failures.
  *
  * Seed and cleanup refuse production project jhxzecxkccqlgyazhsnb and the
  * production API hosts. Procedure: docs/validation-environment.md.
