@@ -20,6 +20,7 @@ Read in this order for day-to-day work:
 | [api-schema-audit.md](./api-schema-audit.md) | Live DB vs code |
 | [api-capability-audit.md](./api-capability-audit.md) | Domain capability matrix |
 | [use-guide.md](./use-guide.md) | Operator setup and day-to-day |
+| [subscription-backfill.md](./subscription-backfill.md) | Dry-run roster export and enrollment-only backfill CLI |
 | [deployment.md](./deployment.md) | API host, platform, health, CORS, env names |
 | [validation-environment.md](./validation-environment.md) | Local/non-prod validation: who may write, seed, cleanup |
 | [database-overview.md](./database-overview.md) | Schema map |

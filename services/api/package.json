@@ -8,7 +8,9 @@
     "build": "echo 'API has no build step'",
     "start": "node src/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "roster:export": "node scripts/export-subscription-roster.mjs",
+    "roster:backfill": "node scripts/backfill-subscriptions.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
