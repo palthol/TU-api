@@ -16,7 +16,7 @@
 |------|--------|------------|------------------------|-------------------|
 | **Notifications** | Views for reminders; no `notifications` table | Webhook fan-out only (Discord/Slack) | Admin **POST** triggers for Discord reminders/digest; waiver submit auto-notify | No in-app notification center; staff channel = Discord |
 | **Finance / receipts** | Full billing + receipts + personal log + expenses (through **0019** on live) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `admin/apps/receipts` — personal log + formal billing **ready** (0017–0019 applied) |
-| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements; in-repo `classes` and `session_content` (v2); nullable `sessions.class_id` | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11); v2 class CRUD via `/api/admin/scheduling-v2/classes`; session content CRUD via `/api/admin/scheduling-v2/sessions/:sessionId/content` | Reporting views + entitlement check on attendance; billing RPC from attendance; public `GET /api/calendar/classes` (active classes) and `GET /api/calendar/occurrences` (public session content only) | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** until it consumes the public occurrence list |
+| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements; in-repo `classes`, `session_content`, `bookings` (v2); nullable `sessions.class_id` and `sessions.capacity` | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11); v2 class CRUD via `/api/admin/scheduling-v2/classes`; session content CRUD via `/api/admin/scheduling-v2/sessions/:sessionId/content`; staff booking via `/api/admin/scheduling-v2/sessions/:sessionId/bookings` | Reporting views + entitlement check on attendance; billing RPC from attendance; public `GET /api/calendar/classes` (active classes) and `GET /api/calendar/occurrences` (public session content only; no roster) | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** until it consumes the public occurrence list |
 
 **Schema sync:** Production includes migrations **0017–0020** and the marketing-lead name
 change (confirmed 2026-09-03 via `list_migrations`, version `20260608191715`). Repo
@@ -188,9 +188,10 @@ From `0001_foundation_schema.sql` and later views:
 | Table | Role |
 |-------|------|
 | `schedule_templates` | Recurring patterns (e.g. weekly class slots) |
-| `classes` | Scheduling v2 weekly class catalog (name, optional description, instructor, ISO weekday, NY start time, default duration, capacity, active). In-repo migrations `20261101100000` and `20261113175150`; not production-applied. No booking table. |
+| `classes` | Scheduling v2 weekly class catalog (name, optional description, instructor, ISO weekday, NY start time, default duration, capacity, active). In-repo migrations `20261101100000` and `20261113175150`; not production-applied. |
 | `session_content` | One row per `sessions` id: staff notes, https video URL, visibility `staff` (default) / `members` / `public`. In-repo migration `20261101101000`; not production-applied. |
-| `sessions` | Concrete instances (`starts_at`, `ends_at`, `session_label`, optional `schedule_template_id`, optional `class_id`, `cancelled_at`). `class_id` is nullable and clears if the class is deleted. |
+| `sessions` | Concrete instances (`starts_at`, `ends_at`, `session_label`, optional `schedule_template_id`, optional `class_id`, optional `capacity`, `cancelled_at`). `class_id` is nullable and clears if the class is deleted. `capacity` (`20261113190000`) is the per-session seat cap when set. |
+| `bookings` | Staff-operated roster: session ↔ participant with `booked` / `waitlisted` / `cancelled` / `late_cancelled` / `attended` / `no_show`. In-repo migration `20261113190000`; not production-applied. No charges. |
 | `attendance_records` | Participant ↔ session (`status`, etc.) — drives group entitlement consumption |
 | `private_usage`, `entitlement_credits`, `access_overrides` | Private minutes, bonuses, overrides |
 | `plan_entitlements`, `subscriptions` | What a member is allowed to attend |
@@ -221,11 +222,13 @@ Full request/response contracts: [admin-api.md](./admin-api.md) § Scheduling.
 | `GET /api/admin/reporting/views/participant-entitlements` | Per-participant entitlement snapshot |
 | `POST /api/admin/billing/per-class/charge-from-attendance` | Creates charge **given** `attendance_record_id` |
 
-**Scheduling v2 (in-repo, not production-applied):** admin CRUD on `classes` via `/api/admin/scheduling-v2/classes`; admin CRUD on `session_content` via `/api/admin/scheduling-v2/sessions/:sessionId/content`; public `GET /api/calendar/classes` lists active classes; public `GET /api/calendar/occurrences` expands the next 14 gym-local days and may attach `visibility=public` content only. `sessions.class_id` optionally links a scheduled session to a class. `members` content is stored and not served until member auth. No booking.
+**Scheduling v2 (in-repo, not production-applied):** admin CRUD on `classes` via `/api/admin/scheduling-v2/classes`; admin CRUD on `session_content` via `/api/admin/scheduling-v2/sessions/:sessionId/content`; staff booking via `/api/admin/scheduling-v2/sessions/:sessionId/bookings` (create/cancel/check-in/no-show); public `GET /api/calendar/classes` lists active classes; public `GET /api/calendar/occurrences` expands the next 14 gym-local days and may attach `visibility=public` content only. `sessions.class_id` optionally links a scheduled session to a class. `members` content is stored and not served until member auth. Bookings attach to existing `sessions` rows; weekly occurrences are not auto-materialized. Member self-booking stays stubbed.
 
 **Still missing (future):**
 
-- Scheduling v2 class-types / instructors as separate entities, persisted sessions, and booking
+- Scheduling v2 class-types / instructors as separate entities
+- Materializing weekly class occurrences into `sessions`
+- Member self-booking (after A4)
 - Hard-delete of v1 sessions (by design, cancel is soft-only)
 
 ### 4.4 Apps today

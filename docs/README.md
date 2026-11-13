@@ -44,6 +44,7 @@ These stay in the live tree because they explain behavior that `admin-api.md` do
 | [discord-waiver-notifications.md](./discord-waiver-notifications.md) | Operator Discord summary, vCards, privacy and delivery limits |
 | [waiver-pdf-generation.md](./waiver-pdf-generation.md) | On-demand PDF renderer |
 | [waiver-entrypoint-automation-checklist.md](./waiver-entrypoint-automation-checklist.md) | Submit → account tether (implemented; leftover monitoring checks) |
+| [scheduling/README.md](./scheduling/README.md) | Scheduling v2 lanes, class catalog, session content, staff booking |
 
 ## Archived
 
