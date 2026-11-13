@@ -2,11 +2,12 @@ import { parsePagination, parseUuid } from '../../lib/adminRequestValidation.js'
 import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 
 export const CLASS_COLUMNS =
-  'id, name, instructor, day_of_week, recurrence, start_time, duration_minutes, capacity, is_active, created_at, updated_at';
+  'id, name, description, instructor, day_of_week, recurrence, start_time, duration_minutes, capacity, is_active, created_at, updated_at';
 
 const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 const NAME_MAX = 200;
 const INSTRUCTOR_MAX = 200;
+const DESCRIPTION_MAX = 2000;
 const MAX_DURATION_MINUTES = 1440;
 const MAX_CAPACITY = 500;
 const RECURRENCE_WEEKLY = 'weekly';
@@ -73,6 +74,21 @@ function parseIsActive(value, { defaultValue } = {}) {
   if (value === undefined) return { ok: true, value: defaultValue, omitted: true };
   if (typeof value !== 'boolean') return { ok: false };
   return { ok: true, value, omitted: false };
+}
+
+/**
+ * Optional public description. Blank becomes null. Omitted on create stores null.
+ * @param {unknown} value
+ * @returns {{ ok: true, value: string | null, omitted: boolean } | { ok: false }}
+ */
+function parseDescription(value) {
+  if (value === undefined) return { ok: true, value: null, omitted: true };
+  if (value === null) return { ok: true, value: null, omitted: false };
+  if (typeof value !== 'string') return { ok: false };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, value: null, omitted: false };
+  if (trimmed.length > DESCRIPTION_MAX) return { ok: false };
+  return { ok: true, value: trimmed, omitted: false };
 }
 
 /**
@@ -153,6 +169,7 @@ export function registerAdminSchedulingV2ClassRoutes(router, { supabase } = {}) 
       const capacity = parseCapacity(body.capacity);
       const recurrence = parseRecurrence(body.recurrence);
       const isActive = parseIsActive(body.is_active, { defaultValue: true });
+      const description = parseDescription(body.description);
 
       if (!name) return res.status(400).json({ ok: false, error: 'invalid_name' });
       if (!instructor) return res.status(400).json({ ok: false, error: 'invalid_instructor' });
@@ -164,11 +181,13 @@ export function registerAdminSchedulingV2ClassRoutes(router, { supabase } = {}) 
       if (capacity == null) return res.status(400).json({ ok: false, error: 'invalid_capacity' });
       if (!recurrence) return res.status(400).json({ ok: false, error: 'invalid_recurrence' });
       if (!isActive.ok) return res.status(400).json({ ok: false, error: 'invalid_is_active' });
+      if (!description.ok) return res.status(400).json({ ok: false, error: 'invalid_description' });
 
       const { data, error } = await supabase
         .from('classes')
         .insert({
           name,
+          description: description.value,
           instructor,
           day_of_week: dayOfWeek,
           recurrence,
@@ -246,6 +265,11 @@ export function registerAdminSchedulingV2ClassRoutes(router, { supabase } = {}) 
         const isActive = parseIsActive(body.is_active);
         if (!isActive.ok) return res.status(400).json({ ok: false, error: 'invalid_is_active' });
         patch.is_active = isActive.value;
+      }
+      if (body.description !== undefined) {
+        const description = parseDescription(body.description);
+        if (!description.ok) return res.status(400).json({ ok: false, error: 'invalid_description' });
+        patch.description = description.value;
       }
 
       if (!Object.keys(patch).length) {

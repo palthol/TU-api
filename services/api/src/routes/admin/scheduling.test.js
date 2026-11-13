@@ -11,6 +11,7 @@ const SESSION_ID = '11111111-1111-4111-8111-111111111111';
 const PARTICIPANT_ID = '22222222-2222-4222-8222-222222222222';
 const PARTICIPANT_ID_B = '33333333-3333-4333-8333-333333333333';
 const TEMPLATE_ID = '44444444-4444-4444-8444-444444444444';
+const CLASS_ID = '55555555-5555-4555-8555-555555555555';
 
 /**
  * Isolated in-memory Supabase stand-in for sessions + attendance.
@@ -41,6 +42,7 @@ function normalizeStartTime(value) {
 function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
   const sessions = new Map();
   const templates = new Map();
+  const classes = new Map();
   const attendance = [];
   const rpcCalls = [];
   const cancelEvents = [];
@@ -60,6 +62,7 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       if (table === 'sessions') return runSessions(state);
       if (table === 'attendance_records') return runAttendance(state);
       if (table === 'schedule_templates') return runTemplates(state);
+      if (table === 'classes') return runClasses(state);
       return { data: null, error: { message: `unknown_table:${table}` } };
     };
 
@@ -171,6 +174,17 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       return { data: rows[0], error: null };
     }
     return { data: rows.map((r) => ({ ...r })), error: null };
+  }
+
+  function runClasses(state) {
+    let rows = [...classes.values()];
+    for (const f of state.filters) {
+      if (f.op === 'eq') rows = rows.filter((r) => r[f.col] === f.val);
+    }
+    if (state.terminal === 'maybeSingle' || state.terminal === 'single') {
+      return { data: rows[0] ?? null, error: null };
+    }
+    return { data: rows, error: null };
   }
 
   function runAttendance(state) {
@@ -376,11 +390,23 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       schedule_template_id: null,
       notes: null,
       cancelled_at: null,
+      class_id: null,
       created_at: '2026-06-01T00:00:00.000Z',
       updated_at: '2026-06-01T00:00:00.000Z',
       ...overrides,
     };
     sessions.set(row.id, row);
+    return row;
+  }
+
+  function seedClass(overrides = {}) {
+    const row = {
+      id: CLASS_ID,
+      name: 'Class 1',
+      is_active: true,
+      ...overrides,
+    };
+    classes.set(row.id, row);
     return row;
   }
 
@@ -427,8 +453,10 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     supabase,
     sessions,
     templates,
+    classes,
     attendance,
     seedSession,
+    seedClass,
     seedTemplate,
     rpcCalls,
     cancelEvents,
@@ -695,6 +723,7 @@ describe('admin scheduling routes', () => {
       expect(created.body.ok).toBe(true);
       expect(created.body.session.session_label).toBe('Class 1');
       expect(created.body.session.schedule_template_id).toBe(TEMPLATE_ID);
+      expect(created.body.session.class_id).toBeNull();
       expect(created.body.session.cancelled_at).toBeNull();
       expect(created.body.session.id).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -704,6 +733,61 @@ describe('admin scheduling routes', () => {
       expect(listed.status).toBe(200);
       expect(listed.body.rowCount).toBe(1);
       expect(listed.body.rows[0].id).toBe(created.body.session.id);
+    });
+
+    it('links a session to a class and can clear the link', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedClass();
+      const app = createApp(fixture.supabase);
+
+      const created = await auth(
+        request(app)
+          .post('/api/admin/scheduling/sessions')
+          .send({
+            starts_at: '2026-06-01T19:00:00.000Z',
+            ends_at: '2026-06-01T20:30:00.000Z',
+            class_id: CLASS_ID,
+          }),
+      );
+      expect(created.status).toBe(200);
+      expect(created.body.session.class_id).toBe(CLASS_ID);
+
+      const cleared = await auth(
+        request(app)
+          .patch(`/api/admin/scheduling/sessions/${created.body.session.id}`)
+          .send({ class_id: null }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.session.class_id).toBeNull();
+      expect(fixture.sessions.get(created.body.session.id).starts_at).toBe('2026-06-01T19:00:00.000Z');
+    });
+
+    it('rejects a bad class id and a missing class without writing a session', async () => {
+      const fixture = createSchedulingFixture();
+      const app = createApp(fixture.supabase);
+      const body = {
+        starts_at: '2026-06-01T19:00:00.000Z',
+        ends_at: '2026-06-01T20:00:00.000Z',
+      };
+
+      const badId = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, class_id: 'not-a-uuid' }));
+      expect(badId.status).toBe(400);
+      expect(badId.body).toEqual({ ok: false, error: 'invalid_class_id' });
+
+      const missing = await auth(
+        request(app).post('/api/admin/scheduling/sessions').send({ ...body, class_id: CLASS_ID }),
+      );
+      expect(missing.status).toBe(404);
+      expect(missing.body).toEqual({ ok: false, error: 'class_not_found' });
+      expect(fixture.sessions.size).toBe(0);
+
+      fixture.seedSession();
+      const badPatch = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ class_id: 12 }),
+      );
+      expect(badPatch.status).toBe(400);
+      expect(badPatch.body).toEqual({ ok: false, error: 'invalid_class_id' });
+      expect(fixture.sessions.get(SESSION_ID).class_id).toBeNull();
     });
   });
 
