@@ -37,6 +37,8 @@ describe('staffAuth helpers', () => {
     expect(roleAllowsRequest('finance', 'POST', '/scheduling/sessions')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/staff')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/auth/me')).toBe(true);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/plans')).toBe(true);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/subscriptions/current')).toBe(true);
   });
 
   it('allows front_desk desk writes and record-payment, not refunds', () => {
@@ -45,6 +47,9 @@ describe('staffAuth helpers', () => {
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/payment-refunds')).toBe(false);
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/generate-monthly-charges')).toBe(false);
     expect(roleAllowsRequest('front_desk', 'POST', '/participants/merge')).toBe(false);
+    expect(roleAllowsRequest('front_desk', 'GET', '/billing/plans')).toBe(true);
+    expect(roleAllowsRequest('front_desk', 'GET', '/billing/subscriptions/current')).toBe(true);
+    expect(rolesAllowedForRequest('GET', '/billing/plans')).toEqual(['owner', 'front_desk', 'finance']);
     expect(rolesAllowedForRequest('POST', '/billing/charge-adjustments')).toEqual(['owner', 'finance']);
   });
 

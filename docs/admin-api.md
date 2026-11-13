@@ -453,6 +453,96 @@ message in `error`).
 
 ---
 
+### `GET /api/admin/billing/plans`
+
+Read-only plan catalog for finance receipt prefills. Staff-authenticated; **owner**,
+**finance**, and **front_desk** may read (same GET matrix as other `/billing/*`
+routes). Cookie session and `x-admin-key` (shared or personal staff key) both work.
+No migration; reads existing `plan_definitions`.
+
+Returns **active** catalog rows only (`is_active = true`). Inactive plans are omitted.
+Money is integer cents. Field names match the table.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "plans": [
+    {
+      "id": "uuid",
+      "name": "Basic Group Plan",
+      "plan_category": "group",
+      "billing_cadence": "monthly",
+      "price_cents": 10000,
+      "is_active": true
+    }
+  ]
+}
+```
+
+`plan_category` is `group` | `private` | `hybrid`. `billing_cadence` is
+`per_session` | `monthly` | `contract` | `custom`. Empty catalog:
+`{ "ok": true, "plans": [] }`. Rows are ordered by category, price, then name.
+
+**Errors:** `401` `unauthorized`, `403` `forbidden` (not expected for active staff
+roles on GET), `500` `supabase_not_configured` / `internal_error`.
+
+---
+
+### `GET /api/admin/billing/subscriptions/current`
+
+Read-only current enrollment plan for a chosen person and/or payer account. Same
+auth as `GET /billing/plans`. Prefer `participant_id` (a participant has at most
+one overlapping active subscription). `account_id` is accepted for payer-first
+lookups; if an account has several currently effective enrollments, the most
+recently started one wins.
+
+Does not return names, emails, or other personal fields — only the plan used to
+prefill a receipt amount.
+
+**Query:**
+
+- `participant_id` — optional UUID
+- `account_id` — optional UUID
+
+At least one is required. Both may be sent together (AND).
+
+**Response (no current enrollment, including production’s empty subscriptions):**
+
+```json
+{ "ok": true, "plan": null }
+```
+
+**Response (enrolled):**
+
+```json
+{
+  "ok": true,
+  "plan": {
+    "id": "uuid",
+    "name": "Basic Group Plan",
+    "plan_category": "group",
+    "billing_cadence": "monthly",
+    "price_cents": 10000,
+    "is_active": true
+  }
+}
+```
+
+A subscription is current when `status = 'active'`, `starts_at` is today or
+earlier (America/New_York calendar date), and `ends_at` is null or today or
+later. Paused, cancelled, expired, and future-dated access return `plan: null`.
+Unknown ids also return `plan: null` (not 404). If the person is still enrolled
+on a catalog row that was later deactivated, that plan is returned with
+`is_active: false`.
+
+**Errors:** `400` `participant_or_account_id_required`, `invalid_participant_id`,
+`invalid_account_id`; `401` `unauthorized`; `500` `supabase_not_configured` /
+`internal_error`.
+
+---
+
 ### `POST /api/admin/billing/generate-monthly-charges`
 
 Calls the service-role-only `generate_monthly_charges()` RPC. After migration
