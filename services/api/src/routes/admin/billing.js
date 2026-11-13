@@ -8,6 +8,7 @@
 import { parsePagination } from '../../lib/adminRequestValidation.js';
 import { mapDatabaseError, sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { registerBillingObligationRoutes } from './billing-obligations.js';
+import { registerBillingPlanRoutes } from './billing-plans.js';
 
 import { BillingService } from '../../services/billing/BillingService.js';
 
@@ -77,6 +78,7 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  * @param {{ supabase: import('@supabase/supabase-js').SupabaseClient }} ctx
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
+  registerBillingPlanRoutes(router, { supabase });
   registerBillingObligationRoutes(router, { supabase });
   const billingService = supabase ? new BillingService(supabase) : null;
 
