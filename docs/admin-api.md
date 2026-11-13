@@ -57,7 +57,7 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
 | `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
 
-Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -925,13 +925,13 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### Scheduling v2 (`/api/admin/scheduling-v2/*` and public calendar)
 
-First slice of class scheduling. Migration **`20261101100000_scheduling_v2_classes.sql`** (in-repo only; not applied to production by this work). No booking, no persisted session rows. Occurrences are expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`).
+Class catalog plus session content. Migrations **`20261101100000_scheduling_v2_classes.sql`** and **`20261101101000_scheduling_v2_session_content.sql`** are in-repo only (not applied to production by this work). No booking. Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`). `session_content` attaches to existing `sessions` rows.
 
-Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
+Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and session content and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
 
 `day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York**, the same clock as v1 `schedule_templates.start_time`. `recurrence` is `weekly` only. v2 occurrences are still expanded in the API and are not rows in `sessions`.
 
-Class-types, instructors, and v2 session stubs remain `501 not_implemented`.
+Class-types, instructors, and v2 session stubs (`/sessions`, `/sessions/:sessionId`, cancel) remain `501 not_implemented`. Session **content** under those sessions is implemented.
 
 #### `GET /api/admin/scheduling-v2/classes`
 
@@ -990,6 +990,58 @@ Hard-deletes the catalog row. There are no booking FKs in this slice. Prefer `"i
 
 **Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
 
+#### `GET /api/admin/scheduling-v2/session-content`
+
+List session content. Staff see every visibility, including `members`.
+
+**Query:** `visibility` (`staff` | `members` | `public`), `session_id` (uuid), `limit` (default 50, max 200, clamped), `offset` (default 0)
+
+Rows are ordered by `created_at`, then `id`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ { "id", "session_id", "notes", "video_url", "visibility", "created_at", "updated_at" } ] }`
+
+**Errors:** `400` — `invalid_pagination`, `invalid_visibility`, `invalid_session_id`
+
+#### `GET /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+**Response:** `{ "ok": true, "content": { "id", "session_id", "notes", "video_url", "visibility", "created_at", "updated_at" } }`
+
+**Errors:** `400` — `invalid_session_id`; `404` — `session_not_found`, `content_not_found`
+
+#### `POST /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Creates the one content row for a session. `visibility` defaults to `staff`. `notes` and `video_url` are optional; blank strings are stored as null. `notes` is trimmed and limited to 8000 characters. `video_url` must be an absolute `https` URL (max 2048 characters, no userinfo). A leading `HTTPS://` is stored as `https://`.
+
+```json
+{
+  "notes": "Bring a towel",
+  "video_url": "https://videos.example.com/class-1",
+  "visibility": "staff"
+}
+```
+
+**Response:** `{ "ok": true, "content": { ... } }`
+
+**Errors:** `400` — `invalid_session_id`, `invalid_notes`, `invalid_video_url`, `invalid_visibility`; `404` — `session_not_found`; `409` — `already_exists`
+
+#### `PATCH /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Partial update. Send `null` to clear `notes` or `video_url`. `visibility` accepts `staff`, `members`, or `public` (case-insensitive).
+
+**Response:** `{ "ok": true, "content": { ... } }`
+
+**Errors:** `400` — `no_updates`, `invalid_notes`, `invalid_video_url`, `invalid_visibility`; `404` — `session_not_found`, `content_not_found`
+
+#### `DELETE /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Hard-deletes the content row. The session remains.
+
+**Response:** `{ "ok": true, "content": { ... } }` (deleted row)
+
+**Errors:** `400` — `invalid_session_id`; `404` — `session_not_found`, `content_not_found`
+
+`members` is stored and visible on these staff routes. No member API serves it until lane A4.
+
 #### `GET /api/calendar/occurrences` (public)
 
 Read-only list of upcoming occurrences for the next **14** gym-local calendar days (`America/New_York`). No admin key. Inactive classes are omitted. Occurrences whose `ends_at` is already in the past are omitted. Spring-forward nonexistent wall times are skipped; fall-back repeats use the earlier (DST) instant.
@@ -998,7 +1050,19 @@ Per-IP rate limit (default **60 / 15 minutes**, env `CALENDAR_OCCURRENCES_RATE_L
 `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS`). Over-limit requests return
 `429 { "ok": false, "error": "rate_limited" }`.
 
-Optional `Authorization: Bearer …` is accepted and ignored in this slice.
+Optional `Authorization: Bearer …` is accepted and ignored. It does not reveal `members` or `staff` session content.
+
+When exactly one non-cancelled `sessions` row shares an occurrence's `starts_at` and its `session_label` equals the class `name`, and that session's `session_content.visibility` is `public`, the occurrence includes:
+
+```json
+"content": {
+  "notes": "Bring a towel",
+  "video_url": "https://videos.example.com/class-1",
+  "visibility": "public"
+}
+```
+
+Otherwise the occurrence has no `content` key. `staff` and `members` rows are not selected. A non-https `video_url` is not copied onto the public object. Two sessions matching the same occurrence omit `content`.
 
 **Response:**
 

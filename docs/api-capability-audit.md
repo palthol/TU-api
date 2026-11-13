@@ -16,7 +16,7 @@
 |------|--------|------------|------------------------|-------------------|
 | **Notifications** | Views for reminders; no `notifications` table | Webhook fan-out only (Discord/Slack) | Admin **POST** triggers for Discord reminders/digest; waiver submit auto-notify | No in-app notification center; staff channel = Discord |
 | **Finance / receipts** | Full billing + receipts + personal log + expenses (through **0019** on live) | Rich `/api/admin/billing/*` + reporting | No payment processor; no scheduled invoice reminders in API yet | `admin/apps/receipts` — personal log + formal billing **ready** (0017–0019 applied) |
-| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements; in-repo `classes` (v2) | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11); v2 class CRUD via `/api/admin/scheduling-v2/classes` | Reporting views + entitlement check on attendance; billing RPC from attendance; public `GET /api/calendar/occurrences` | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** until it consumes the public occurrence list |
+| **Scheduling** | `schedule_templates`, `sessions`, `attendance_records`, entitlements; in-repo `classes` and `session_content` (v2) | **Session + attendance CRUD** via `/api/admin/scheduling/*` (Tier 1, PR #11); v2 class CRUD via `/api/admin/scheduling-v2/classes`; session content CRUD via `/api/admin/scheduling-v2/sessions/:sessionId/content` | Reporting views + entitlement check on attendance; billing RPC from attendance; public `GET /api/calendar/occurrences` (public session content only) | Dashboard still reads `sessions` via **direct Supabase**; marketing schedule is **static config** until it consumes the public occurrence list |
 
 **Schema sync:** Production includes migrations **0017–0020** and the marketing-lead name
 change (confirmed 2026-09-03 via `list_migrations`, version `20260608191715`). Repo
@@ -189,6 +189,7 @@ From `0001_foundation_schema.sql` and later views:
 |-------|------|
 | `schedule_templates` | Recurring patterns (e.g. weekly class slots) |
 | `classes` | Scheduling v2 weekly class catalog (name, instructor, ISO weekday, NY start time, duration, capacity, active). In-repo migration `20261101100000`; not production-applied. No booking table. |
+| `session_content` | One row per `sessions` id: staff notes, https video URL, visibility `staff` (default) / `members` / `public`. In-repo migration `20261101101000`; not production-applied. |
 | `sessions` | Concrete instances (`starts_at`, `ends_at`, `session_label`, optional `schedule_template_id`, `cancelled_at`) |
 | `attendance_records` | Participant ↔ session (`status`, etc.) — drives group entitlement consumption |
 | `private_usage`, `entitlement_credits`, `access_overrides` | Private minutes, bonuses, overrides |
@@ -220,7 +221,7 @@ Full request/response contracts: [admin-api.md](./admin-api.md) § Scheduling.
 | `GET /api/admin/reporting/views/participant-entitlements` | Per-participant entitlement snapshot |
 | `POST /api/admin/billing/per-class/charge-from-attendance` | Creates charge **given** `attendance_record_id` |
 
-**Scheduling v2 (in-repo, not production-applied):** admin CRUD on `classes` via `/api/admin/scheduling-v2/classes`; public `GET /api/calendar/occurrences` expands the next 14 gym-local days. No booking.
+**Scheduling v2 (in-repo, not production-applied):** admin CRUD on `classes` via `/api/admin/scheduling-v2/classes`; admin CRUD on `session_content` via `/api/admin/scheduling-v2/sessions/:sessionId/content`; public `GET /api/calendar/occurrences` expands the next 14 gym-local days and may attach `visibility=public` content only. `members` content is stored and not served until member auth. No booking.
 
 **Still missing (future):**
 

@@ -1,5 +1,6 @@
 import { expandClassOccurrences } from '../../lib/classOccurrences.js';
 import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+import { attachPublicSessionContent, readPublicSessionContentRows } from '../../lib/sessionContent.js';
 import { CLASS_COLUMNS } from '../scheduling/classes.js';
 
 /**
@@ -20,6 +21,14 @@ export function registerCalendarOccurrenceRoutes(router, { supabase } = {}) {
         .order('start_time', { ascending: true });
       if (error) return sendDatabaseError(res, error, { context: 'calendar.occurrences.list' });
 
+      const { data: contentRows, error: contentError } = await supabase
+        .from('session_content')
+        .select('notes, video_url, visibility, sessions!inner(starts_at, session_label, cancelled_at)')
+        .eq('visibility', 'public');
+      if (contentError) {
+        return sendDatabaseError(res, contentError, { context: 'calendar.occurrences.content' });
+      }
+
       const expanded = expandClassOccurrences(data ?? [], { now: new Date() });
       return res.json({
         ok: true,
@@ -29,7 +38,7 @@ export function registerCalendarOccurrenceRoutes(router, { supabase } = {}) {
           end_date: expanded.endDate,
           days: expanded.days,
         },
-        occurrences: expanded.occurrences,
+        occurrences: attachPublicSessionContent(expanded.occurrences, readPublicSessionContentRows(contentRows)),
       });
     } catch (e) {
       console.error(e);

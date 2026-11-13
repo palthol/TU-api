@@ -123,6 +123,7 @@ describe('mapDatabaseError', () => {
     ['class_not_found', 404],
     ['instructor_not_found', 404],
     ['session_not_found', 404],
+    ['content_not_found', 404],
     ['unauthorized_member', 401],
     ['session_full', 409],
     ['booking_closed', 409],
