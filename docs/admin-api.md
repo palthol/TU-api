@@ -451,6 +451,10 @@ and creates neither access nor an initial charge.
 non-monthly plan, plan lookup failure, or date validation failure (Postgres exception
 message in `error`).
 
+Bulk enrollment of existing monthly payers is **not** an HTTP flag. Use the
+operator CLI in [subscription-backfill.md](./subscription-backfill.md) (default
+dry-run; `--apply` is enrollment-only with `create_initial_charge: false`).
+
 ---
 
 ### `GET /api/admin/billing/plans`

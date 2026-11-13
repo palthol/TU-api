@@ -1,6 +1,7 @@
 import { parseUuid } from '../../lib/adminRequestValidation.js';
 import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 import { nyCalendarDate } from '../../lib/gymTime.js';
+import { isCurrentlyEffective } from '../../lib/subscriptionCurrent.js';
 
 const PLAN_COLUMNS = 'id, name, plan_category, billing_cadence, price_cents, is_active';
 const CURRENT_SUBSCRIPTION_COLUMNS = `id, account_id, participant_id, status, starts_at, ends_at, created_at, plan_definitions(${PLAN_COLUMNS})`;
@@ -35,13 +36,6 @@ function nestedPlan(row) {
   const raw = row?.plan_definitions;
   const plan = Array.isArray(raw) ? raw[0] : raw;
   return publicPlan(plan);
-}
-
-function isCurrentlyEffective(subscription, today) {
-  if (!subscription || subscription.status !== 'active') return false;
-  if (typeof subscription.starts_at !== 'string' || subscription.starts_at > today) return false;
-  if (subscription.ends_at != null && subscription.ends_at < today) return false;
-  return true;
 }
 
 /**
