@@ -933,7 +933,7 @@ Expands **active** templates into `sessions` for an inclusive calendar-date rang
 
 Examples: `2026-06-01 19:00` → `2026-06-01T23:00:00Z` (EDT); `2026-01-05 19:00` → `2026-01-06T00:00:00Z` (EST); `2026-11-01 01:30` → `2026-11-01T05:30:00Z` (earlier fall-back instant). `2027-03-14 02:30` is omitted: `created_count` and `skipped_count` do not include it.
 
-Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences. Response keys are unchanged.
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences. Wrapper response keys are unchanged. Each created session includes `class_id: null`; generation does not assign a class.
 
 **Body (JSON):**
 
@@ -959,6 +959,8 @@ List sessions with optional filters.
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
 
+Each session includes `class_id` (`uuid` or `null`).
+
 **Errors:** `400` — `invalid_start`, `invalid_end`, `invalid_pagination`
 
 #### `GET /api/admin/scheduling/sessions/:sessionId`
@@ -977,21 +979,26 @@ Single session plus its `attendance_records`.
   "ends_at": "ISO-8601 datetime",
   "session_label": "optional e.g. Class 1",
   "schedule_template_id": "uuid optional",
+  "class_id": "uuid optional",
   "notes": "optional"
 }
 ```
 
 **Response:** `{ "ok": true, "session": { ... } }`
 
-**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null). Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
+Session objects include `class_id` (`uuid` or `null`). Omitting `class_id` stores null and does not change the other fields.
+
+**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null), `invalid_class_id`; `404` — `class_not_found`. Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
 
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
 Partial update. Set `"cancel": true` to soft-cancel via RPC `cancel_session`. The first cancel sets `cancelled_at` and appends one `event_ledger` row (`session.cancelled`, category `system`, reason `manual_cancellation`). Cancelling an already-cancelled session returns **200** with the original session: `cancelled_at` and `updated_at` stay put, and no second event is written. `"cancel": false` clears `cancelled_at`. Reschedule with `starts_at` / `ends_at`. A notes edit on an already-cancelled session still applies and does not move `cancelled_at`.
 
-**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before)
+**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before, plus `class_id`)
 
-**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean); `404` — `session_not_found`; `409` — `already_exists`
+`class_id` is optional. Send `null` or `""` to clear the link. A class that does not exist returns `class_not_found`. Other fields are unchanged when only `class_id` is sent.
+
+**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean), `invalid_class_id`; `404` — `session_not_found`, `class_not_found`; `409` — `already_exists`
 
 #### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
 
@@ -1019,7 +1026,7 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### Scheduling v2 (`/api/admin/scheduling-v2/*` and public calendar)
 
-Class catalog plus session content. Migrations **`20261101100000_scheduling_v2_classes.sql`** and **`20261101101000_scheduling_v2_session_content.sql`** are in-repo only (not applied to production by this work). No booking. Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`). `session_content` attaches to existing `sessions` rows.
+Class catalog plus session content. Migrations **`20261101100000_scheduling_v2_classes.sql`**, **`20261101101000_scheduling_v2_session_content.sql`**, and **`20261113175150_scheduling_v2_class_description_and_session_link.sql`** are in-repo only (not applied to production by this work). No booking. Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`). `session_content` attaches to existing `sessions` rows. `sessions.class_id` optionally points at a class and is null for sessions that have none.
 
 Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and session content and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
 
@@ -1041,7 +1048,7 @@ Inactive classes are omitted unless `include_inactive=true`.
 
 #### `GET /api/admin/scheduling-v2/classes/:classId`
 
-**Response:** `{ "ok": true, "class": { "id", "name", "instructor", "day_of_week", "recurrence", "start_time", "duration_minutes", "capacity", "is_active", "created_at", "updated_at" } }`
+**Response:** `{ "ok": true, "class": { "id", "name", "description", "instructor", "day_of_week", "recurrence", "start_time", "duration_minutes", "capacity", "is_active", "created_at", "updated_at" } }`
 
 **Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
 
@@ -1052,6 +1059,7 @@ Inactive classes are omitted unless `include_inactive=true`.
 ```json
 {
   "name": "Class 1",
+  "description": "Bring a towel",
   "instructor": "Alex Rivera",
   "day_of_week": 1,
   "start_time": "19:00",
@@ -1062,11 +1070,11 @@ Inactive classes are omitted unless `include_inactive=true`.
 }
 ```
 
-`is_active` defaults to `true`. `recurrence` defaults to `weekly`. `capacity` is an integer 1–500. `duration_minutes` is an integer 1–1440.
+`is_active` defaults to `true`. `recurrence` defaults to `weekly`. `description` is optional; blank stores null; trimmed length is 1–2000. `capacity` is an integer 1–500. `duration_minutes` is the default duration, an integer 1–1440. Sessions keep their own `starts_at` / `ends_at`.
 
 **Response:** `{ "ok": true, "class": { ... } }`
 
-**Errors:** `400` — `invalid_name`, `invalid_instructor`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_capacity`, `invalid_recurrence`, `invalid_is_active`
+**Errors:** `400` — `invalid_name`, `invalid_description`, `invalid_instructor`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_capacity`, `invalid_recurrence`, `invalid_is_active`
 
 #### `PATCH /api/admin/scheduling-v2/classes/:classId`
 
@@ -1074,7 +1082,9 @@ Partial update. Deactivate with `"is_active": false`. Public occurrence listing 
 
 **Response:** `{ "ok": true, "class": { ... } }`
 
-**Errors:** `400` — `no_updates`, same field keys as create; `404` — `class_not_found`
+**Errors:** `400` — `no_updates`, same field keys as create, including `invalid_description`; `404` — `class_not_found`
+
+Send `"description": null` to clear the description. `duration_minutes` remains the default duration.
 
 #### `DELETE /api/admin/scheduling-v2/classes/:classId`
 
@@ -1184,6 +1194,42 @@ Otherwise the occurrence has no `content` key. `staff` and `members` rows are no
 ```
 
 There is no booking field and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
+
+**Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
+
+#### `GET /api/calendar/classes` (public)
+
+Read-only list of **active** classes. No admin key. Inactive classes are omitted. There is no `include_inactive` switch on this route.
+
+Optional `Authorization: Bearer …` is accepted and ignored.
+
+The class object matches the admin class: `id`, `name`, `description`, `instructor`, `day_of_week`, `recurrence`, `start_time`, `duration_minutes` (default duration), `capacity`, `is_active`, `created_at`, `updated_at`. Rows are ordered by `day_of_week`, `start_time`, then `name`.
+
+Per-IP rate limit uses the same default (**60 / 15 minutes**) and the same env knobs as occurrences (`CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` / `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS`). The counters are separate, so reading occurrences does not consume the class-list budget. Over-limit requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "classes": [
+    {
+      "id": "uuid",
+      "name": "Class 1",
+      "description": "Bring a towel",
+      "instructor": "Alex Rivera",
+      "day_of_week": 1,
+      "recurrence": "weekly",
+      "start_time": "19:00:00",
+      "duration_minutes": 90,
+      "capacity": 16,
+      "is_active": true,
+      "created_at": "2026-11-01T00:00:00.000Z",
+      "updated_at": "2026-11-01T00:00:00.000Z"
+    }
+  ]
+}
+```
 
 **Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
 

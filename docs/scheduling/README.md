@@ -53,6 +53,18 @@ Full HTTP shapes: [admin-api.md](../admin-api.md) § Scheduling v2.
 - `GET /api/calendar/occurrences` adds `content` (`notes`, `video_url`, `visibility: "public"`) when exactly one non-cancelled session shares that occurrence's UTC `starts_at` and its `session_label` equals the class `name`. Staff content, members content, cancelled sessions, and ambiguous matches are omitted (no `content` key). Optional Bearer auth does not unlock `members`.
 - Apply this migration before deploying the API revision that reads `session_content`. The public occurrence list queries that table.
 
+## Class description and session link
+
+- Migration `20261113175150_scheduling_v2_class_description_and_session_link.sql` (in-repo only; **not** applied to production by this work). This is not one of the reserved A4–A10 filenames.
+- `public.classes` already exists from A1. This migration does not replace that weekly catalog. It adds optional `description` and keeps `duration_minutes` as the default duration (1–1440). `name`, `instructor`, `capacity`, `is_active`, `created_at`, and `updated_at` stay as they are.
+- `sessions.class_id` is a nullable foreign key to `classes` with `ON DELETE SET NULL`. Existing sessions stay valid with `class_id` null. Deleting a class unlinks its sessions and does not delete them.
+- RLS on `classes` stays enabled. Table privileges are `service_role` only, matching `session_content`. The authenticated `admin_all_classes` policy does not grant `anon` or `authenticated`.
+- `preserve_session_cancelled_at` treats `class_id` as an other-column edit. Linking a cancelled session still applies and does not move `cancelled_at`.
+- Admin CRUD stays on the existing gate: `GET/POST /api/admin/scheduling-v2/classes`, `GET/PATCH/DELETE /api/admin/scheduling-v2/classes/:classId`. `description` is optional (trimmed, 1–2000, blank stores null).
+- The persisted session link is on the existing v1 session routes (`POST` / `PATCH /api/admin/scheduling/sessions`). `class_id` is optional. Omitting it leaves current create behavior, with `class_id: null` on the response. v2 `/sessions` stubs stay `501`.
+- Public: `GET /api/calendar/classes` lists active classes only. It uses the same rate-limit env knobs as occurrences, with a separate counter.
+- Apply this migration before deploying an API build that selects `sessions.class_id`.
+
 ## Stable error keys (reserved)
 
 These keys are pre-registered in the API error mapper with explicit HTTP statuses so
@@ -86,3 +98,5 @@ PRs do not collide. All timestamps are **after** `20261003045729`.
 - **A8**: `20261101103500_scheduling_v2_lane_a8.sql`
 - **A9**: `20261101104000_scheduling_v2_lane_a9.sql`
 - **A10**: `20261101104500_scheduling_v2_lane_a10.sql`
+
+Class description and the nullable session link shipped as `20261113175150_scheduling_v2_class_description_and_session_link.sql`. That filename is outside the reserved A4–A10 block so those lanes can still use their timestamps.

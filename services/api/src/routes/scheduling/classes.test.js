@@ -283,6 +283,36 @@ describe('admin scheduling-v2 class CRUD', () => {
     expect((await post({ ...validBody, capacity: 501 })).body.error).toBe('invalid_capacity');
     expect((await post({ ...validBody, recurrence: 'daily' })).body.error).toBe('invalid_recurrence');
     expect((await post({ ...validBody, is_active: 'yes' })).body.error).toBe('invalid_is_active');
+    expect((await post({ ...validBody, description: 12 })).body.error).toBe('invalid_description');
+    expect((await post({ ...validBody, description: 'x'.repeat(2001) })).body.error).toBe('invalid_description');
+  });
+
+  it('stores an optional description and can clear it', async () => {
+    const supabase = createClassesFixture();
+    const app = createApp({ requireAdmin: createRequireAdmin(), supabase });
+
+    const blank = await request(app)
+      .post('/api/admin/scheduling-v2/classes')
+      .set('x-admin-key', ADMIN_KEY)
+      .send({ ...validBody, description: '   ' });
+    expect(blank.status).toBe(200);
+    expect(blank.body.class.description).toBeNull();
+
+    const created = await request(app)
+      .post('/api/admin/scheduling-v2/classes')
+      .set('x-admin-key', ADMIN_KEY)
+      .send({ ...validBody, name: 'Class 2', description: '  Bring a towel  ' });
+    expect(created.status).toBe(200);
+    expect(created.body.class.description).toBe('Bring a towel');
+    expect(created.body.class.duration_minutes).toBe(90);
+
+    const cleared = await request(app)
+      .patch(`/api/admin/scheduling-v2/classes/${created.body.class.id}`)
+      .set('x-admin-key', ADMIN_KEY)
+      .send({ description: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.class.description).toBeNull();
+    expect(cleared.body.class.name).toBe('Class 2');
   });
 
   it('returns 404 class_not_found and 400 invalid_class_id', async () => {

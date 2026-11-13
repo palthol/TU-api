@@ -17,7 +17,7 @@ import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 const TEMPLATE_COLUMNS =
   'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
 const SESSION_COLUMNS =
-  'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at';
+  'id, starts_at, ends_at, session_label, schedule_template_id, class_id, notes, cancelled_at, created_at, updated_at';
 const MAX_GENERATE_SPAN_DAYS = 366;
 const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
@@ -64,6 +64,31 @@ function parseOptionalNotes(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+/**
+ * Optional class link. Empty string clears. Omitted leaves the caller to default null.
+ * @param {unknown} value
+ * @returns {{ ok: true, omitted: true } | { ok: true, omitted: false, value: string | null } | { ok: false }}
+ */
+function parseOptionalClassId(value) {
+  if (value === undefined) return { ok: true, omitted: true };
+  if (value === null || value === '') return { ok: true, omitted: false, value: null };
+  if (typeof value !== 'string') return { ok: false };
+  const id = parseUuid(value);
+  if (!id) return { ok: false };
+  return { ok: true, omitted: false, value: id };
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} classId
+ */
+async function findClassId(supabase, classId) {
+  const { data, error } = await supabase.from('classes').select('id').eq('id', classId).maybeSingle();
+  if (error) return { error };
+  if (!data) return { missing: true };
+  return { id: data.id };
 }
 
 /** Inclusive YYYY-MM-DD span in whole UTC days. */
@@ -328,9 +353,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       let q = supabase
         .from('sessions')
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .order('starts_at', { ascending: true })
         .range(offset, offset + limit - 1);
 
@@ -371,9 +394,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const { data: session, error: sessionErr } = await supabase
         .from('sessions')
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .eq('id', sessionId)
         .maybeSingle();
       if (sessionErr) return sendDatabaseError(res, sessionErr, { context: 'scheduling.sessions.get' });
@@ -427,6 +448,14 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'invalid_notes' });
       }
 
+      const classId = parseOptionalClassId((req.body || {}).class_id);
+      if (!classId.ok) return res.status(400).json({ ok: false, error: 'invalid_class_id' });
+      if (!classId.omitted && classId.value) {
+        const found = await findClassId(supabase, classId.value);
+        if (found.error) return sendDatabaseError(res, found.error, { context: 'sessions.class_lookup' });
+        if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
+      }
+
       const { data, error } = await supabase
         .from('sessions')
         .insert({
@@ -434,11 +463,10 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
           ends_at: endsAt,
           session_label: label.omitted ? null : label.value,
           schedule_template_id: templateId,
+          class_id: classId.omitted ? null : classId.value,
           notes: sessionNotes.omitted ? null : sessionNotes.value,
         })
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .single();
 
       if (error) {
@@ -498,6 +526,16 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         const sessionNotes = parseOptionalNullableString(body.notes);
         if (!sessionNotes.ok) return res.status(400).json({ ok: false, error: 'invalid_notes' });
         patch.notes = sessionNotes.value;
+      }
+      if (body.class_id !== undefined) {
+        const classId = parseOptionalClassId(body.class_id);
+        if (!classId.ok) return res.status(400).json({ ok: false, error: 'invalid_class_id' });
+        if (classId.value) {
+          const found = await findClassId(supabase, classId.value);
+          if (found.error) return sendDatabaseError(res, found.error, { context: 'sessions.class_lookup' });
+          if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
+        }
+        patch.class_id = classId.value;
       }
       if (body.cancel !== undefined) {
         if (typeof body.cancel !== 'boolean') {
