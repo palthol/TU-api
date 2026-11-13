@@ -15,7 +15,8 @@ This repository owns the **backend** for scheduling. Front-ends live in sibling 
 - **A2 (landed)**: Eastern-time correctness in `generate_sessions` (America/New_York wall-clock → UTC with DST) and idempotent session cancel. No repair SOP: production has no generated sessions. See the A2 contract below.
 - **A3 (landed)**: `session_content` (staff notes + HTTPS video link + visibility: staff/members/public; default staff) attached to `sessions`. See the A3 contract below.
 - **A4**: member login via Terpsichora Supabase magic-link JWT (separate Supabase project from TU-api). Verify against Terpsichora JWKS/issuer configured by env.
-- **A5–A10**: follow-on lanes per the scheduling plan (defined in their task briefs).
+- **Staff booking (landed)**: staff-operated `bookings` on existing `sessions` rows. See the staff booking contract below. Weekly class occurrences are still expanded in the API and are not auto-materialized.
+- **A5–A10**: follow-on lanes per the scheduling plan (defined in their task briefs). Member self-booking waits on A4.
 
 ## A1 contract (landed)
 
@@ -65,6 +66,22 @@ Full HTTP shapes: [admin-api.md](../admin-api.md) § Scheduling v2.
 - Public: `GET /api/calendar/classes` lists active classes only. It uses the same rate-limit env knobs as occurrences, with a separate counter.
 - Apply this migration before deploying an API build that selects `sessions.class_id`.
 
+## Staff booking contract (landed)
+
+This slice books against **existing `sessions` rows**, not computed class occurrences. Staff create or generate a session (v1 `POST /api/admin/scheduling/sessions` or `generate_sessions`) and may set `class_id`. Materializing the 14-day occurrence list into `sessions` is a later generator; it is not required to store a booking once a session row exists.
+
+- Migration `20261113190000_scheduling_v2_bookings.sql` (in-repo only; **not** applied to production by this work). Filename is after `20261113175150` and outside the reserved A4–A10 timestamps.
+- `public.bookings` links `session_id` + `participant_id`. Statuses: `booked`, `waitlisted`, `cancelled`, `late_cancelled`, `attended`, `no_show`. One active row per participant per session (`booked` / `waitlisted` / `attended` / `no_show`). Cancelled rows stay as history; the participant may rebook.
+- Seat cap is `sessions.capacity` when set, otherwise `classes.capacity`. Neither set → `capacity_not_configured`. Occupying statuses are `booked`, `attended`, and `no_show`. A full session waitlists new bookings in FIFO (`created_at`, `id`).
+- `book_session`, `cancel_booking`, `check_in_booking`, and `mark_booking_no_show` are `service_role` execute-only. They lock the session row so concurrent books and cancel+promote do not overfill. This slice writes **no charges and no credit holds**. Statuses are the later hook: booked/promoted → hold, attended → consume, cancelled → release, late_cancelled / no_show → penalty or consume.
+- Cancel more than 3 **elapsed** hours before `starts_at` is `cancelled`. At or inside 3 hours (including exactly 3h) is `late_cancelled`. Both free the spot. `starts_at` is timestamptz, so DST is already encoded; do not subtract gym-local wall-clock hours. Cancelling a booked row auto-promotes the oldest waitlisted row. Cancelling a waitlisted row does not.
+- Check-in marks `attended`. No-show is allowed at or after `starts_at` and does not promote the waitlist.
+- Admin (existing `requireAdmin` gate and scheduling RBAC: owner and `front_desk` write, `finance` read-only): `GET/POST /api/admin/scheduling-v2/sessions/:sessionId/bookings`, `POST /api/admin/scheduling-v2/bookings/:bookingId/cancel`, `.../check-in`, `.../no-show`. No public or member booking routes. v2 `/sessions` stubs stay `501`. Optional `sessions.capacity` is accepted on the existing v1 session create/patch.
+- RLS on `bookings` matches `session_content`: enabled, `service_role` DML only, authenticated admin policy does not grant `anon` or `authenticated`.
+- Apply this migration before deploying an API build that calls `book_session` / `cancel_booking` / `check_in_booking` / `mark_booking_no_show` or selects `sessions.capacity`.
+
+Rollback (in-repo only; do not run against production from this work): drop the four RPCs and helpers, drop `public.bookings`, drop `sessions.capacity`, restore `preserve_session_cancelled_at` to the `20261113175150` body (no `capacity` compare).
+
 ## Stable error keys (reserved)
 
 These keys are pre-registered in the API error mapper with explicit HTTP statuses so
@@ -81,6 +98,9 @@ front-ends can rely on stable behavior:
 - `late_cancel`
 - `already_booked`
 - `not_booked`
+- `booking_not_found`
+- `participant_not_found`
+- `capacity_not_configured`
 - `unauthorized_member`
 
 ## Reserved migration timestamps (future PRs only)

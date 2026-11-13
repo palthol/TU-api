@@ -17,7 +17,8 @@ import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 const TEMPLATE_COLUMNS =
   'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
 const SESSION_COLUMNS =
-  'id, starts_at, ends_at, session_label, schedule_template_id, class_id, notes, cancelled_at, created_at, updated_at';
+  'id, starts_at, ends_at, session_label, schedule_template_id, class_id, capacity, notes, cancelled_at, created_at, updated_at';
+const MAX_SESSION_CAPACITY = 500;
 const MAX_GENERATE_SPAN_DAYS = 366;
 const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
@@ -71,6 +72,23 @@ function parseOptionalNotes(value) {
  * @param {unknown} value
  * @returns {{ ok: true, omitted: true } | { ok: true, omitted: false, value: string | null } | { ok: false }}
  */
+/**
+ * Optional per-session seat cap. Empty string / null clears. Omitted leaves the caller to default null.
+ * @param {unknown} value
+ * @returns {{ ok: true, omitted: true } | { ok: true, omitted: false, value: number | null } | { ok: false }}
+ */
+function parseOptionalCapacity(value) {
+  if (value === undefined) return { ok: true, omitted: true };
+  if (value === null || value === '') return { ok: true, omitted: false, value: null };
+  let n = null;
+  if (typeof value === 'number' && Number.isInteger(value)) n = value;
+  else if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    n = Number.parseInt(value.trim(), 10);
+  }
+  if (n == null || n < 1 || n > MAX_SESSION_CAPACITY) return { ok: false };
+  return { ok: true, omitted: false, value: n };
+}
+
 function parseOptionalClassId(value) {
   if (value === undefined) return { ok: true, omitted: true };
   if (value === null || value === '') return { ok: true, omitted: false, value: null };
@@ -455,6 +473,8 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         if (found.error) return sendDatabaseError(res, found.error, { context: 'sessions.class_lookup' });
         if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
       }
+      const capacity = parseOptionalCapacity((req.body || {}).capacity);
+      if (!capacity.ok) return res.status(400).json({ ok: false, error: 'invalid_capacity' });
 
       const { data, error } = await supabase
         .from('sessions')
@@ -464,6 +484,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
           session_label: label.omitted ? null : label.value,
           schedule_template_id: templateId,
           class_id: classId.omitted ? null : classId.value,
+          capacity: capacity.omitted ? null : capacity.value,
           notes: sessionNotes.omitted ? null : sessionNotes.value,
         })
         .select(SESSION_COLUMNS)
@@ -536,6 +557,11 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
           if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
         }
         patch.class_id = classId.value;
+      }
+      if (body.capacity !== undefined) {
+        const capacity = parseOptionalCapacity(body.capacity);
+        if (!capacity.ok) return res.status(400).json({ ok: false, error: 'invalid_capacity' });
+        patch.capacity = capacity.value;
       }
       if (body.cancel !== undefined) {
         if (typeof body.cancel !== 'boolean') {
