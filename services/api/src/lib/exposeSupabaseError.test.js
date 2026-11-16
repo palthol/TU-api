@@ -124,6 +124,8 @@ describe('mapDatabaseError', () => {
     ['instructor_not_found', 404],
     ['session_not_found', 404],
     ['content_not_found', 404],
+    ['booking_not_found', 404],
+    ['participant_not_found', 404],
     ['unauthorized_member', 401],
     ['session_full', 409],
     ['booking_closed', 409],
@@ -131,6 +133,7 @@ describe('mapDatabaseError', () => {
     ['late_cancel', 409],
     ['already_booked', 409],
     ['not_booked', 409],
+    ['capacity_not_configured', 400],
   ])('pre-registers %s with status %s', (key, status) => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(mapDatabaseError({ message: key }, { log: false })).toEqual({

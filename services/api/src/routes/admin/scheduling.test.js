@@ -724,6 +724,7 @@ describe('admin scheduling routes', () => {
       expect(created.body.session.session_label).toBe('Class 1');
       expect(created.body.session.schedule_template_id).toBe(TEMPLATE_ID);
       expect(created.body.session.class_id).toBeNull();
+      expect(created.body.session.capacity).toBeNull();
       expect(created.body.session.cancelled_at).toBeNull();
       expect(created.body.session.id).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -760,6 +761,29 @@ describe('admin scheduling routes', () => {
       expect(cleared.status).toBe(200);
       expect(cleared.body.session.class_id).toBeNull();
       expect(fixture.sessions.get(created.body.session.id).starts_at).toBe('2026-06-01T19:00:00.000Z');
+    });
+
+    it('stores optional session capacity and rejects invalid values', async () => {
+      const fixture = createSchedulingFixture();
+      const app = createApp(fixture.supabase);
+      const body = {
+        starts_at: '2026-06-01T19:00:00.000Z',
+        ends_at: '2026-06-01T20:00:00.000Z',
+      };
+
+      const created = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, capacity: 12 }));
+      expect(created.status).toBe(200);
+      expect(created.body.session.capacity).toBe(12);
+
+      const cleared = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${created.body.session.id}`).send({ capacity: null }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.session.capacity).toBeNull();
+
+      const bad = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, capacity: 0 }));
+      expect(bad.status).toBe(400);
+      expect(bad.body).toEqual({ ok: false, error: 'invalid_capacity' });
     });
 
     it('rejects a bad class id and a missing class without writing a session', async () => {

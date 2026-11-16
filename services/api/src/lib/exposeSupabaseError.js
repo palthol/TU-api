@@ -62,6 +62,8 @@ const MACHINE_KEY_STATUS = Object.freeze({
   instructor_not_found: 404,
   session_not_found: 404,
   content_not_found: 404,
+  booking_not_found: 404,
+  participant_not_found: 404,
   receipt_not_found: 404,
   entry_not_found: 404,
   payment_refund_not_found: 404,
@@ -76,6 +78,7 @@ const MACHINE_KEY_STATUS = Object.freeze({
   late_cancel: 409,
   already_booked: 409,
   not_booked: 409,
+  capacity_not_configured: 400,
 });
 
 function statusForMachineKey(key) {

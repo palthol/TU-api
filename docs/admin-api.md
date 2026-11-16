@@ -29,7 +29,7 @@ key.
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key; **or** a valid `__Host-tu_admin_session` cookie for `ADMIN_EMAIL`. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Cookie-auth mutations without an allowlisted `Origin` → `403 csrf_failed`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`). Scheduling booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are the same (`20261113190000`, in-repo until applied). |
 | **Cron / scheduler calls** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Scheduler calls authenticate as actor `cron`. Discord retains its Render Cron runbook; monthly billing uses the Cloudflare Worker source in `workers/billing-cron/`, not yet deployed/configured. |
 | **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
@@ -57,7 +57,7 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
 | `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
 
-Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `booking_not_found`, `participant_not_found`, `already_booked`, `not_booked`, `booking_closed`, `capacity_not_configured`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -959,7 +959,7 @@ List sessions with optional filters.
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
 
-Each session includes `class_id` (`uuid` or `null`).
+Each session includes `class_id` (`uuid` or `null`) and `capacity` (integer 1–500 or `null`).
 
 **Errors:** `400` — `invalid_start`, `invalid_end`, `invalid_pagination`
 
@@ -980,25 +980,26 @@ Single session plus its `attendance_records`.
   "session_label": "optional e.g. Class 1",
   "schedule_template_id": "uuid optional",
   "class_id": "uuid optional",
+  "capacity": 12,
   "notes": "optional"
 }
 ```
 
 **Response:** `{ "ok": true, "session": { ... } }`
 
-Session objects include `class_id` (`uuid` or `null`). Omitting `class_id` stores null and does not change the other fields.
+Session objects include `class_id` (`uuid` or `null`) and `capacity` (integer 1–500 or `null`). Omitting `class_id` stores null and does not change the other fields. Omitting `capacity` stores null; booking then uses `classes.capacity` when `class_id` is set.
 
-**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null), `invalid_class_id`; `404` — `class_not_found`. Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
+**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null), `invalid_class_id`, `invalid_capacity`; `404` — `class_not_found`. Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
 
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
 Partial update. Set `"cancel": true` to soft-cancel via RPC `cancel_session`. The first cancel sets `cancelled_at` and appends one `event_ledger` row (`session.cancelled`, category `system`, reason `manual_cancellation`). Cancelling an already-cancelled session returns **200** with the original session: `cancelled_at` and `updated_at` stay put, and no second event is written. `"cancel": false` clears `cancelled_at`. Reschedule with `starts_at` / `ends_at`. A notes edit on an already-cancelled session still applies and does not move `cancelled_at`.
 
-**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before, plus `class_id`)
+**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before, plus `class_id` and `capacity`)
 
-`class_id` is optional. Send `null` or `""` to clear the link. A class that does not exist returns `class_not_found`. Other fields are unchanged when only `class_id` is sent.
+`class_id` is optional. Send `null` or `""` to clear the link. A class that does not exist returns `class_not_found`. Other fields are unchanged when only `class_id` is sent. `capacity` is optional (integer 1–500). Send `null` or `""` to clear it.
 
-**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean), `invalid_class_id`; `404` — `session_not_found`, `class_not_found`; `409` — `already_exists`
+**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean), `invalid_class_id`, `invalid_capacity`; `404` — `session_not_found`, `class_not_found`; `409` — `already_exists`
 
 #### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
 
@@ -1026,13 +1027,13 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### Scheduling v2 (`/api/admin/scheduling-v2/*` and public calendar)
 
-Class catalog plus session content. Migrations **`20261101100000_scheduling_v2_classes.sql`**, **`20261101101000_scheduling_v2_session_content.sql`**, and **`20261113175150_scheduling_v2_class_description_and_session_link.sql`** are in-repo only (not applied to production by this work). No booking. Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`). `session_content` attaches to existing `sessions` rows. `sessions.class_id` optionally points at a class and is null for sessions that have none.
+Class catalog, session content, and staff-operated booking. Migrations **`20261101100000_scheduling_v2_classes.sql`**, **`20261101101000_scheduling_v2_session_content.sql`**, **`20261113175150_scheduling_v2_class_description_and_session_link.sql`**, and **`20261113190000_scheduling_v2_bookings.sql`** are in-repo only (not applied to production by this work). Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`) and are not auto-materialized into `sessions`. `session_content` and `bookings` attach to existing `sessions` rows. `sessions.class_id` optionally points at a class. `sessions.capacity` is an optional per-session seat cap; booking uses it when set, otherwise `classes.capacity`.
 
-Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and session content and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
+Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes, session content, and booking rosters and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
 
 `day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York**, the same clock as v1 `schedule_templates.start_time`. `recurrence` is `weekly` only. v2 occurrences are still expanded in the API and are not rows in `sessions`.
 
-Class-types, instructors, and v2 session stubs (`/sessions`, `/sessions/:sessionId`, cancel) remain `501 not_implemented`. Session **content** under those sessions is implemented.
+Class-types, instructors, and v2 session stubs (`/sessions`, `/sessions/:sessionId`, cancel) remain `501 not_implemented`. Session **content** and **bookings** under those sessions are implemented. There are no public or member booking routes in this slice (`/api/member/bookings` stays `501`).
 
 #### `GET /api/admin/scheduling-v2/classes`
 
@@ -1088,7 +1089,7 @@ Send `"description": null` to clear the description. `duration_minutes` remains 
 
 #### `DELETE /api/admin/scheduling-v2/classes/:classId`
 
-Hard-deletes the catalog row. There are no booking FKs in this slice. Prefer `"is_active": false` to hide a class without deleting it.
+Hard-deletes the catalog row. Bookings hang off `sessions`, not `classes`; deleting a class sets `sessions.class_id` to null and leaves bookings in place. Prefer `"is_active": false` to hide a class without deleting it.
 
 **Response:** `{ "ok": true, "class": { ... } }` (deleted row)
 
@@ -1146,6 +1147,87 @@ Hard-deletes the content row. The session remains.
 
 `members` is stored and visible on these staff routes. No member API serves it until lane A4.
 
+Booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are `service_role` execute-only. They lock the session row. Credits and charges are **not** written; statuses are the later hook.
+
+#### `GET /api/admin/scheduling-v2/sessions/:sessionId/bookings`
+
+Roster for one session. Requires a `sessions` row. Rows are ordered booked, waitlisted, attended, no_show, cancelled, late_cancelled, then `created_at`, then `id`. Participant objects are `id`, `full_name`, `email` only (no address, phone, or date of birth).
+
+**Query:** `limit` (default 50, max 200, clamped), `offset` (default 0)
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "session_id": "uuid",
+  "capacity": 16,
+  "occupied_count": 12,
+  "booked_count": 10,
+  "waitlist_count": 3,
+  "limit": 50,
+  "offset": 0,
+  "rowCount": 13,
+  "rows": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "participant_id": "uuid",
+      "status": "booked",
+      "created_at": "2026-05-01T12:00:00.000Z",
+      "updated_at": "2026-05-01T12:00:00.000Z",
+      "cancelled_at": null,
+      "checked_in_at": null,
+      "no_show_at": null,
+      "promoted_at": null,
+      "created_by": "staff:uuid",
+      "cancelled_by": null,
+      "checked_in_by": null,
+      "no_show_by": null,
+      "participant": { "id": "uuid", "full_name": "Pat One", "email": "pat@example.com" }
+    }
+  ]
+}
+```
+
+`capacity` is `sessions.capacity` or, if that is null, `classes.capacity` (or `null` when neither is set). `occupied_count` is `booked` + `attended` + `no_show`. `booked_count` is status `booked` only.
+
+**Errors:** `400` — `invalid_session_id`, `invalid_pagination`; `404` — `session_not_found`
+
+#### `POST /api/admin/scheduling-v2/sessions/:sessionId/bookings`
+
+Create a booking for a participant. Full sessions waitlist in FIFO order (HTTP 200, `status: "waitlisted"`). Duplicate active bookings return `already_booked`. Cancelled sessions return `booking_closed`. No credit is held.
+
+**Body:** `{ "participant_id": "uuid" }`
+
+**Response:** `{ "ok": true, "booking": { ... } }` (same booking fields as the roster row, without `participant`)
+
+**Errors:** `400` — `invalid_session_id`, `invalid_participant_id`, `capacity_not_configured`; `404` — `session_not_found`, `participant_not_found`; `409` — `already_booked`, `booking_closed`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/cancel`
+
+Cancel a booked or waitlisted row via `cancel_booking`. More than 3 elapsed hours before `starts_at` → `cancelled`. At or inside 3 hours (including exactly 3h) → `late_cancelled`. Both free the spot. A booked cancel auto-promotes the oldest waitlisted row. A waitlist cancel does not. Repeat cancel is a no-op (`200` with the existing row, `promoted: null`). Attended and no-show rows return `not_booked`.
+
+**Response:** `{ "ok": true, "booking": { ... }, "promoted": { ... } | null }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/check-in`
+
+Marks a booked row `attended`. Repeat check-in is a no-op. Waitlisted, cancelled, and no-show rows return `not_booked`. No credit is consumed in this slice.
+
+**Response:** `{ "ok": true, "booking": { ... } }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/no-show`
+
+Marks a booked row `no_show` at or after `starts_at`. Does not promote the waitlist. Repeat no-show is a no-op. Before start → `booking_closed`.
+
+**Response:** `{ "ok": true, "booking": { ... } }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`, `booking_closed`
+
 #### `GET /api/calendar/occurrences` (public)
 
 Read-only list of upcoming occurrences for the next **14** gym-local calendar days (`America/New_York`). No admin key. Inactive classes are omitted. Occurrences whose `ends_at` is already in the past are omitted. Spring-forward nonexistent wall times are skipped; fall-back repeats use the earlier (DST) instant.
@@ -1193,7 +1275,7 @@ Otherwise the occurrence has no `content` key. `staff` and `members` rows are no
 }
 ```
 
-There is no booking field and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
+There is no booking field, no roster, and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
 
 **Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
 
