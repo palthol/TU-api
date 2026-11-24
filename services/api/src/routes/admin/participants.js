@@ -3,7 +3,13 @@ import {
   parsePagination,
   parseSearchQuery,
 } from '../../lib/adminRequestValidation.js';
-import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+import { mapDatabaseError, sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+import { nyCalendarDate } from '../../lib/gymTime.js';
+import {
+  parsePlaceholderCreateBody,
+  publicPlaceholderParticipant,
+  publicPlaceholderSubscription,
+} from '../../lib/placeholderParticipant.js';
 
 /**
  * @param {import('express').Router} router
@@ -79,6 +85,62 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
     }
   });
 
+  router.post('/participants/placeholders', async (req, res) => {
+    try {
+      if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
+      const parsed = parsePlaceholderCreateBody(req.body);
+      if (!parsed.ok) return res.status(400).json({ ok: false, error: parsed.error });
+
+      const createdBy =
+        typeof req.staff?.actorLabel === 'string' && req.staff.actorLabel.trim()
+          ? req.staff.actorLabel.trim()
+          : 'admin_api';
+
+      const { data, error } = await supabase.rpc('create_placeholder_participant', {
+        p_first_name: parsed.value.first_name,
+        p_last_name: parsed.value.last_name,
+        p_placeholder_reason: parsed.value.placeholder_reason,
+        p_email: parsed.value.email,
+        p_phone: parsed.value.phone,
+        p_date_of_birth: parsed.value.date_of_birth,
+        p_dob_is_placeholder: parsed.value.dob_is_placeholder,
+        p_dob_placeholder_reason: parsed.value.dob_placeholder_reason,
+        p_account_id: parsed.value.account_id,
+        p_account_name: parsed.value.account_name,
+        p_plan_id: parsed.value.plan_id,
+        p_start_date: parsed.value.plan_id
+          ? parsed.value.start_date || nyCalendarDate()
+          : null,
+        p_created_by: createdBy,
+      });
+      if (error) {
+        const mapped = mapDatabaseError(error, { context: 'create_placeholder_participant' });
+        if (mapped.body.error === 'duplicate_name') {
+          const detail = parseRpcJsonDetail(error);
+          if (typeof detail.existing_participant_id === 'string') {
+            mapped.body.existing_participant_id = detail.existing_participant_id;
+          }
+        }
+        return res.status(mapped.status).json(mapped.body);
+      }
+
+      const row = data && typeof data === 'object' ? data : {};
+      const participant = publicPlaceholderParticipant(row);
+      if (!participant) {
+        return res.status(500).json({ ok: false, error: 'internal_error' });
+      }
+      return res.status(201).json({
+        ok: true,
+        participant,
+        account_id: typeof row.account_id === 'string' ? row.account_id : null,
+        subscription: publicPlaceholderSubscription(row.subscription),
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
   router.post('/participants/merge', async (req, res) => {
     try {
       if (!supabase) return res.status(500).json({ ok: false, error: 'supabase_not_configured' });
@@ -99,4 +161,15 @@ export function registerAdminParticipantRoutes(router, { supabase }) {
       return res.status(500).json({ ok: false, error: 'server_error' });
     }
   });
+}
+
+function parseRpcJsonDetail(error) {
+  const raw = error?.details ?? error?.detail ?? '';
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }

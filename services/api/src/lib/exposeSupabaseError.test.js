@@ -134,6 +134,9 @@ describe('mapDatabaseError', () => {
     ['already_booked', 409],
     ['not_booked', 409],
     ['capacity_not_configured', 400],
+    ['overlapping_active_subscription', 409],
+    ['duplicate_name', 409],
+    ['account_not_found', 404],
   ])('pre-registers %s with status %s', (key, status) => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(mapDatabaseError({ message: key }, { log: false })).toEqual({

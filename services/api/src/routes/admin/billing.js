@@ -7,6 +7,7 @@
 
 import { parsePagination } from '../../lib/adminRequestValidation.js';
 import { mapDatabaseError, sendDatabaseError } from '../../lib/exposeSupabaseError.js';
+import { registerBillingEnrollmentBoardRoutes } from './billing-enrollment-board.js';
 import { registerBillingObligationRoutes } from './billing-obligations.js';
 import { registerBillingPlanRoutes } from './billing-plans.js';
 
@@ -80,6 +81,7 @@ async function getChargeAllocatableCents(supabase, chargeId) {
  */
 export function registerAdminBillingRoutes(router, { supabase }) {
   registerBillingPlanRoutes(router, { supabase });
+  registerBillingEnrollmentBoardRoutes(router, { supabase });
   registerBillingObligationRoutes(router, { supabase });
 
   router.post('/billing/external-counterparty-accounts', async (req, res) => {
@@ -267,7 +269,9 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       const {
         participant_id,
         plan_definition_id,
+        plan_id,
         starts_at,
+        start_date,
         ends_at,
         account_id,
         create_initial_charge,
@@ -278,10 +282,17 @@ export function registerAdminBillingRoutes(router, { supabase }) {
       if (!participant_id || typeof participant_id !== 'string') {
         return res.status(400).json({ ok: false, error: 'participant_id_required' });
       }
-      if (!plan_definition_id || typeof plan_definition_id !== 'string') {
+      const planDefinitionId =
+        typeof plan_definition_id === 'string' && plan_definition_id.trim()
+          ? plan_definition_id.trim()
+          : typeof plan_id === 'string' && plan_id.trim()
+            ? plan_id.trim()
+            : '';
+      if (!planDefinitionId) {
         return res.status(400).json({ ok: false, error: 'plan_definition_id_required' });
       }
-      if (starts_at != null && typeof starts_at !== 'string') {
+      const startsAt = starts_at ?? start_date ?? null;
+      if (startsAt != null && typeof startsAt !== 'string') {
         return res.status(400).json({ ok: false, error: 'invalid_starts_at' });
       }
       if (ends_at != null && typeof ends_at !== 'string') {
@@ -299,8 +310,8 @@ export function registerAdminBillingRoutes(router, { supabase }) {
 
       const enrolled = await enrollSubscription(supabase, {
         participant_id: participant_id.trim(),
-        plan_definition_id: plan_definition_id.trim(),
-        starts_at: starts_at || null,
+        plan_definition_id: planDefinitionId,
+        starts_at: startsAt || null,
         ends_at: ends_at || null,
         account_id: account_id || null,
         create_initial_charge,
@@ -319,7 +330,7 @@ export function registerAdminBillingRoutes(router, { supabase }) {
         subscription_id: result.subscription_id ?? null,
         account_id: result.account_id ?? null,
         participant_id: result.participant_id ?? participant_id,
-        plan_definition_id: result.plan_definition_id ?? plan_definition_id,
+        plan_definition_id: result.plan_definition_id ?? planDefinitionId,
         initial_charge_id: result.initial_charge_id ?? null,
         automatic_billing_starts_at: result.automatic_billing_starts_at ?? null,
       });

@@ -240,6 +240,33 @@ describe('POST /api/admin/billing/subscriptions', () => {
     });
     expect(supabase.from).not.toHaveBeenCalled();
   });
+
+  it('accepts plan_id / start_date aliases and returns 409 when already enrolled', async () => {
+    const supabase = createSupabase({
+      rpcResult: { data: null, error: { message: 'overlapping_active_subscription' } },
+    });
+    const res = await auth(
+      request(createApp(supabase))
+        .post('/api/admin/billing/subscriptions')
+        .send({
+          participant_id: PARTICIPANT_ID,
+          plan_id: PLAN_ID,
+          start_date: '2026-11-01',
+          create_initial_charge: false,
+        }),
+    );
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ ok: false, error: 'overlapping_active_subscription' });
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      'create_subscription',
+      expect.objectContaining({
+        p_participant_id: PARTICIPANT_ID,
+        p_plan_definition_id: PLAN_ID,
+        p_starts_at: '2026-11-01',
+        p_create_initial_charge: false,
+      }),
+    );
+  });
 });
 
 describe('POST /api/admin/billing/per-class/upgrade-to-monthly', () => {
