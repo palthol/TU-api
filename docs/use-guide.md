@@ -108,6 +108,7 @@ What the numbered files do:
 - **20260916225225** — payment processor reference fields (applied)
 - **20260921185003** — V1 subscription charge-generation safety and `automatic_billing_starts_at` (applied)
 - **20260921221500** — monthly-period uniqueness scope and per-class conversion billing baseline (applied)
+- **20261124120000** — placeholder participants + `create_placeholder_participant` (in-repo; do not apply to production from that change)
 
 ### 2.4 Make yourself admin
 
@@ -188,7 +189,8 @@ Start the API from this repo (`npm run dev`) and the waiver app from `TU-Signup`
 ### 4.1 Waivers and participants
 
 - **Signing** — Participants use the waiver app; data goes to `participants`, `waivers`, `emergency_contacts`, `waiver_medical_histories`, `audit_trails`.
-- **Viewing** — Use the view `view_waiver_documents` (Supabase Table Editor or SQL) for a joined snapshot.
+- **Placeholders** — Staff can create name-only members (`POST /api/admin/participants/placeholders`) before a waiver exists, optionally enroll without charging, and book/check them in. Unknown DOB uses stand-in `1900-01-01` with `dob_is_placeholder`.
+- **Viewing** — Use the view `view_waiver_documents` (Supabase Table Editor or SQL) for a joined snapshot. Enrollment status is `GET /api/admin/billing/enrollment-board`.
 - **PDFs** — Use your API’s waiver PDF endpoint (see `docs/waiver-pdf-generation.md` and `services/api` routes).
 
 ### 4.2 Gym admin (dashboard app + optional SQL)
@@ -200,7 +202,7 @@ Preferred operator path is the **admin API** ([admin-api.md](./admin-api.md)): s
 - **Plans** — Insert into `plan_definitions` (name, plan_category, billing_cadence, price_cents, etc.). Then add rows to `plan_entitlements` (e.g. group sessions or private minutes, limit_type, quantity, reset_rule like `calendar_week`).
 - **Accounts** — One row per payer (family or individual). Optionally set primary_contact_*, notes.
 - **Linking participants to accounts** — Insert into `account_members` (account_id, participant_id, role: member | payer | guardian).
-- **Subscriptions** — Prefer `POST /api/admin/billing/subscriptions`. Omit `create_initial_charge` to create the initial charge automatically for a paid monthly plan; free/non-monthly plans do not receive one. An explicit `false` skips the entire current billing period and persists `automatic_billing_starts_at` for the next period, so the daily generator cannot recreate the suppressed charge. To enroll today’s monthly payers from a reviewed CSV, use the dry-run CLI in [subscription-backfill.md](./subscription-backfill.md) (no charges or obligations).
+- **Subscriptions** — Prefer `POST /api/admin/billing/subscriptions`. Omit `create_initial_charge` to create the initial charge automatically for a paid monthly plan; free/non-monthly plans do not receive one. An explicit `false` skips the entire current billing period and persists `automatic_billing_starts_at` for the next period, so the daily generator cannot recreate the suppressed charge. Already-enrolled people return `409 overlapping_active_subscription`. `plan_id` and `start_date` are accepted as aliases. To enroll today’s monthly payers from a reviewed CSV, use the dry-run CLI in [subscription-backfill.md](./subscription-backfill.md) (no charges or obligations).
 - **Charges** — Either insert manually, call `POST /api/admin/billing/generate-monthly-charges`, or run `select * from generate_monthly_charges();` (see section 5.2).
 - **Payments** — Insert into `payments` (account_id, amount_cents, method, etc.). Then insert into `payment_allocations` (payment_id, charge_id, amount_cents). Mark charges as paid when fully covered (update `charges.status` to `'paid'`).
 - **Sessions** — Insert into `sessions` (starts_at, ends_at, optional schedule_template_id, session_label).

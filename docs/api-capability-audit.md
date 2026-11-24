@@ -132,7 +132,9 @@ All routes under `/api/admin` with `x-admin-key`. Full request/response shapes: 
 | Refund member payment | `POST /billing/payment-refunds` | RPC `record_payment_refund` |
 | Charge write-off | `POST /billing/charge-adjustments` | `charge_adjustments` |
 | Charge discounts | `GET/POST /billing/charge-discounts` | `charge_discounts`, discount-aware `view_charge_net` (**0019**) |
-| Subscription enrollment | `POST /billing/subscriptions` | RPC `create_subscription` (**0020**) |
+| Subscription enrollment | `POST /billing/subscriptions` | RPC `create_subscription` (**0020**); `plan_id`/`start_date` aliases; `409 overlapping_active_subscription`; `create_initial_charge: false` for no-charge enroll |
+| Placeholder create + optional enroll | `POST /participants/placeholders` | RPC `create_placeholder_participant` (`20261124120000`, in-repo) |
+| Enrollment board | `GET /billing/enrollment-board` | `participants`, `account_members`, `subscriptions`, `waivers` |
 | Subscription upgrade (prorated) | `POST /billing/subscription-upgrade` | RPC `upgrade_subscription_prorated` |
 | Per-class charge from attendance | `POST /billing/per-class/charge-from-attendance` | RPC `create_pay_per_class_charge` |
 | Upgrade per-class → monthly | `POST /billing/per-class/upgrade-to-monthly` | RPC `upgrade_per_class_to_monthly` |

@@ -29,7 +29,7 @@ key.
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key; **or** a valid `__Host-tu_admin_session` cookie for `ADMIN_EMAIL`. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Cookie-auth mutations without an allowlisted `Origin` → `403 csrf_failed`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`). Scheduling booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are the same (`20261113190000`, in-repo until applied). |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `create_placeholder_participant`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`, `20261124120000`). Scheduling booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are the same (`20261113190000`, in-repo until applied). |
 | **Cron / scheduler calls** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Scheduler calls authenticate as actor `cron`. Discord retains its Render Cron runbook; monthly billing uses the Cloudflare Worker source in `workers/billing-cron/`, not yet deployed/configured. |
 | **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
@@ -57,7 +57,7 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
 | `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
 
-Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `booking_not_found`, `participant_not_found`, `already_booked`, `not_booked`, `booking_closed`, `capacity_not_configured`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `booking_not_found`, `participant_not_found`, `already_booked`, `not_booked`, `booking_closed`, `capacity_not_configured`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `overlapping_active_subscription`, `duplicate_name`, `account_not_found`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -71,7 +71,7 @@ Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext re
 | --- | --- |
 | `owner` | All `/api/admin/*` routes, including staff directory and participant merge |
 | `finance` | `/billing/*` (payments, refunds, discounts, subscriptions, expenses). Not scheduling writes, staff, merge, or Discord notification POSTs |
-| `front_desk` | `/scheduling/*` (including `/scheduling-v2/*`), `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
+| `front_desk` | `/scheduling/*` (including `/scheduling-v2/*`), `/waivers*`, `POST /participants/placeholders`, `POST /billing/subscriptions` (enrollment), `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, expenses, staff, or merge |
 
 Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
 
@@ -397,7 +397,9 @@ Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_a
 
 ### `POST /api/admin/billing/subscriptions`
 
-Creates an **active** subscription for a participant on a plan (enrollment). Calls RPC `create_subscription` (migration **0020**).
+Creates an **active** subscription for an existing participant on a plan (enrollment). This is the name-based enrollment form path. Calls RPC `create_subscription` (migration **0020**). **Auth:** `requireAdmin`. Mutations: **owner**, **finance**, and **front_desk**.
+
+For enrollment **without** a first charge, send `create_initial_charge: false`. That is the same helper as the subscription-backfill CLI.
 
 **Body (JSON):**
 
@@ -405,7 +407,9 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
 {
   "participant_id": "uuid",
   "plan_definition_id": "uuid",
+  "plan_id": "uuid alias for plan_definition_id",
   "starts_at": "YYYY-MM-DD optional; defaults to current date in DB",
+  "start_date": "YYYY-MM-DD alias for starts_at",
   "ends_at": "YYYY-MM-DD optional",
   "account_id": "uuid optional; defaults to participant's first account_members row",
   "create_initial_charge": "boolean optional; defaults to true for paid monthly plans and false for free/non-monthly plans",
@@ -413,6 +417,8 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
   "created_by": "optional; defaults to admin_api"
 }
 ```
+
+Sibling admin UI may send `{ "participant_id", "account_id?", "plan_id", "start_date?", "create_initial_charge": false }`. `plan_id` is accepted as an alias of `plan_definition_id`; `start_date` is accepted as an alias of `starts_at`. HTTP **200** (not 201) with the fields below.
 
 **Response:**
 
@@ -447,9 +453,10 @@ inclusive; a nonoverlapping successor starts the following day. Rejection is ato
 and creates neither access nor an initial charge.
 
 **Errors:** `400` — participant/plan not found, inactive plan, no account binding,
-`overlapping_active_subscription`, explicit `create_initial_charge: true` on a
-non-monthly plan, plan lookup failure, or date validation failure (Postgres exception
-message in `error`).
+explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure,
+or date validation failure. `409` `overlapping_active_subscription` when the
+participant already has an intersecting **active** subscription. `401` `unauthorized`;
+`403` `forbidden`.
 
 Bulk enrollment of existing monthly payers is **not** an HTTP flag. Use the
 operator CLI in [subscription-backfill.md](./subscription-backfill.md) (default
@@ -544,6 +551,57 @@ on a catalog row that was later deactivated, that plan is returned with
 **Errors:** `400` `participant_or_account_id_required`, `invalid_participant_id`,
 `invalid_account_id`; `401` `unauthorized`; `500` `supabase_not_configured` /
 `internal_error`.
+
+---
+
+### `GET /api/admin/billing/enrollment-board`
+
+Roster of unmerged participants with current enrollment, account, placeholder flags, and whether any waiver row exists. **Auth:** `requireAdmin`. **owner**, **finance**, and **front_desk** may read.
+
+A subscription is current with the same rule as `GET /billing/subscriptions/current`: `status = 'active'`, `starts_at` today or earlier (America/New_York), `ends_at` null or today or later.
+
+**Query:**
+
+- `status` — optional `enrolled` | `unenrolled` | `placeholder`. Filters **rows** only. `placeholder` is `is_placeholder = true` (a placeholder with a plan still matches this filter). `enrolled` / `unenrolled` use the current-subscription rule.
+- `q` — optional name search, minimum 2 characters, maximum 80 after trim. Literal `ILIKE` against `full_name` (`%` and `_` escaped). Applied to both **counts** and **rows**.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "counts": {
+    "total": 3,
+    "enrolled": 1,
+    "unenrolled": 2,
+    "placeholders": 1
+  },
+  "rows": [
+    {
+      "participant_id": "uuid",
+      "first_name": "Casey",
+      "last_name": "Placeholder",
+      "is_placeholder": true,
+      "placeholder_reason": "name only; no waiver yet",
+      "dob_is_placeholder": true,
+      "waiver_signed": false,
+      "account_id": "uuid",
+      "account_name": "Casey Placeholder household",
+      "subscription": {
+        "id": "uuid",
+        "plan_id": "uuid",
+        "plan_name": "Basic Group Plan",
+        "status": "active",
+        "start_date": "2026-11-01"
+      }
+    }
+  ]
+}
+```
+
+`first_name` / `last_name` are split from stored `participants.full_name` on the first space. `subscription` is `null` when there is no currently effective enrollment. `waiver_signed` is true when at least one `waivers` row exists for that person. `counts` ignore `status` and follow `q`.
+
+**Errors:** `400` `invalid_status`, `query_min_length_2`, `query_too_long`; `401` `unauthorized`; `500` `supabase_not_configured` / `internal_error`.
 
 ---
 
@@ -1151,7 +1209,7 @@ Booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_bookin
 
 #### `GET /api/admin/scheduling-v2/sessions/:sessionId/bookings`
 
-Roster for one session. Requires a `sessions` row. Rows are ordered booked, waitlisted, attended, no_show, cancelled, late_cancelled, then `created_at`, then `id`. Participant objects are `id`, `full_name`, `email` only (no address, phone, or date of birth).
+Roster for one session. Requires a `sessions` row. Rows are ordered booked, waitlisted, attended, no_show, cancelled, late_cancelled, then `created_at`, then `id`. Participant objects are `id`, `full_name`, `email`, `is_placeholder` only (no address, phone, or date of birth). Placeholders may book and check in before signing a waiver; `book_session` / `check_in_booking` do not inspect waiver rows.
 
 **Query:** `limit` (default 50, max 200, clamped), `offset` (default 0)
 
@@ -1184,7 +1242,7 @@ Roster for one session. Requires a `sessions` row. Rows are ordered booked, wait
       "cancelled_by": null,
       "checked_in_by": null,
       "no_show_by": null,
-      "participant": { "id": "uuid", "full_name": "Pat One", "email": "pat@example.com" }
+      "participant": { "id": "uuid", "full_name": "Pat One", "email": "pat@example.com", "is_placeholder": false }
     }
   ]
 }
@@ -1336,6 +1394,68 @@ Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 h
 **Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
+
+---
+
+### `POST /api/admin/participants/placeholders`
+
+Create a name-only placeholder participant, bind an account, and optionally enroll in a plan **without** an initial charge. Calls RPC `create_placeholder_participant` (migration `20261124120000`, in-repo until applied). The RPC is one transaction: participant + account + `account_members` + optional `create_subscription(..., create_initial_charge := false)`. Failure rolls back every row.
+
+**Auth:** `requireAdmin`. Mutations: **owner** and **front_desk**. **finance** is `403 forbidden`.
+
+Email and phone may be omitted. Stored canonical name is `participants.full_name` (`first_name` + space + `last_name`), matching waiver submit. Unknown date of birth: send `dob_is_placeholder: true` and `dob_placeholder_reason`. Omitted `date_of_birth` then stores the documented stand-in **`1900-01-01`**. Using `1900-01-01` without the flag is `400 dob_is_placeholder_required`.
+
+**Duplicate names:** `409 duplicate_name` when an unmerged participant already has the same `full_name` (case-insensitive). Response includes `existing_participant_id` when the RPC detail is present. There is no force-create flag; enroll the existing person instead.
+
+**Body (JSON):**
+
+```json
+{
+  "first_name": "Casey",
+  "last_name": "Placeholder",
+  "email": "optional@example.invalid",
+  "phone": "optional",
+  "date_of_birth": "YYYY-MM-DD optional when dob_is_placeholder is true",
+  "dob_is_placeholder": true,
+  "dob_placeholder_reason": "DOB unknown at desk",
+  "placeholder_reason": "name only; no waiver yet",
+  "account_id": "uuid optional existing account",
+  "account_name": "optional new account primary_contact_name",
+  "plan_id": "uuid optional",
+  "start_date": "YYYY-MM-DD optional; requires plan_id"
+}
+```
+
+Send `account_id` **or** `account_name`, not both (`400 account_id_xor_account_name`). If neither is sent, a new active account is created named after the person.
+
+**Response `201`:**
+
+```json
+{
+  "ok": true,
+  "participant": {
+    "id": "uuid",
+    "first_name": "Casey",
+    "last_name": "Placeholder",
+    "is_placeholder": true,
+    "placeholder_reason": "name only; no waiver yet",
+    "dob_is_placeholder": true
+  },
+  "account_id": "uuid",
+  "subscription": {
+    "id": "uuid",
+    "plan_id": "uuid",
+    "status": "active",
+    "start_date": "2026-11-01"
+  }
+}
+```
+
+`subscription` is `null` when `plan_id` is omitted.
+
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `placeholder_reason_required`, `date_of_birth_required`, `invalid_date_of_birth`, `dob_is_placeholder_required`, `dob_placeholder_reason_required`, `invalid_dob_is_placeholder`, `invalid_email`, `invalid_phone`, `invalid_account_id`, `invalid_account_name`, `account_id_xor_account_name`, `invalid_plan_id`, `plan_id_required`, `invalid_start_date`; `404` `account_not_found`; `409` `duplicate_name`, `overlapping_active_subscription`; `401` `unauthorized`; `403` `forbidden`; `500` `supabase_not_configured` / `internal_error`.
+
+Placeholders **can** book and check in on scheduling-v2 before a new waiver is signed.
 
 ---
 
