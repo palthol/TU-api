@@ -79,6 +79,18 @@ const MACHINE_KEY_STATUS = Object.freeze({
   already_booked: 409,
   not_booked: 409,
   capacity_not_configured: 400,
+  overlapping_active_subscription: 409,
+  duplicate_name: 409,
+  account_not_found: 404,
+  placeholder_reason_required: 400,
+  date_of_birth_required: 400,
+  dob_placeholder_reason_required: 400,
+  dob_is_placeholder_required: 400,
+  invalid_first_name: 400,
+  invalid_last_name: 400,
+  invalid_email: 400,
+  invalid_phone: 400,
+  account_id_xor_account_name: 400,
 });
 
 function statusForMachineKey(key) {

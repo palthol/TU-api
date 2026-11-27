@@ -136,11 +136,13 @@ export function rolesAllowedForRequest(method, canonicalPath) {
   }
 
   if (path.startsWith('/participants/merge')) return ['owner'];
+  if (path.startsWith('/participants/placeholders')) return ['owner', 'front_desk'];
   if (path.startsWith('/notifications')) return ['owner'];
   if (path.startsWith('/scheduling')) return ['owner', 'front_desk'];
   if (path.startsWith('/waivers')) return ['owner', 'front_desk'];
   if (path.startsWith('/billing/record-payment')) return ['owner', 'finance', 'front_desk'];
   if (path.startsWith('/billing/external-counterparty')) return ['owner', 'finance', 'front_desk'];
+  if (path.startsWith('/billing/subscriptions')) return ['owner', 'finance', 'front_desk'];
   if (path.startsWith('/billing')) return ['owner', 'finance'];
   if (path.startsWith('/api/waivers')) return [...STAFF_ROLES];
   if (path.startsWith('/auth/')) return [...STAFF_ROLES];

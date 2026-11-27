@@ -111,11 +111,16 @@ export function registerAdminSchedulingV2BookingRoutes(router, { supabase } = {}
       if (participantIds.length) {
         const { data: people, error: peopleErr } = await supabase
           .from('participants')
-          .select('id, full_name, email')
+          .select('id, full_name, email, is_placeholder')
           .in('id', participantIds);
         if (peopleErr) return sendDatabaseError(res, peopleErr, { context: 'bookings.participants' });
         for (const person of people ?? []) {
-          peopleById.set(person.id, { id: person.id, full_name: person.full_name, email: person.email });
+          peopleById.set(person.id, {
+            id: person.id,
+            full_name: person.full_name,
+            email: person.email ?? null,
+            is_placeholder: person.is_placeholder === true,
+          });
         }
       }
 

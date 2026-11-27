@@ -299,8 +299,14 @@ function createBookingFixture() {
         ...row,
       });
     },
-    seedParticipant(id, name = 'Pat') {
-      participants.set(id, { id, full_name: name, email: `${id.slice(0, 8)}@example.com` });
+    seedParticipant(id, name = 'Pat', extra = {}) {
+      participants.set(id, {
+        id,
+        full_name: name,
+        email: `${id.slice(0, 8)}@example.com`,
+        is_placeholder: false,
+        ...extra,
+      });
     },
     seedDefaultRoster() {
       this.seedClass();
@@ -411,8 +417,45 @@ describe('admin scheduling-v2 bookings', () => {
       id: PAT_1,
       full_name: 'Pat One',
       email: `${PAT_1.slice(0, 8)}@example.com`,
+      is_placeholder: false,
     });
     expect(roster.body.rows[0]).not.toHaveProperty('date_of_birth');
+  });
+
+  it('books and checks in a placeholder who has not signed a waiver', async () => {
+    const PLACEHOLDER = 'ffffffff-6666-4666-8666-666666666661';
+    const supabase = createBookingFixture();
+    supabase.seedClass();
+    supabase.seedSession();
+    supabase.seedParticipant(PLACEHOLDER, 'Casey Placeholder', {
+      email: null,
+      is_placeholder: true,
+    });
+    const app = createApp({ requireAdmin: createRequireAdmin(), supabase });
+
+    const booked = await request(app)
+      .post(`/api/admin/scheduling-v2/sessions/${SESSION_ID}/bookings`)
+      .set('x-admin-key', ADMIN_KEY)
+      .send({ participant_id: PLACEHOLDER });
+    expect(booked.status).toBe(200);
+    expect(booked.body.booking.status).toBe('booked');
+
+    const checkedIn = await request(app)
+      .post(`/api/admin/scheduling-v2/bookings/${booked.body.booking.id}/check-in`)
+      .set('x-admin-key', ADMIN_KEY);
+    expect(checkedIn.status).toBe(200);
+    expect(checkedIn.body.booking.status).toBe('attended');
+
+    const roster = await request(app)
+      .get(`/api/admin/scheduling-v2/sessions/${SESSION_ID}/bookings`)
+      .set('x-admin-key', ADMIN_KEY);
+    expect(roster.status).toBe(200);
+    expect(roster.body.rows[0].participant).toEqual({
+      id: PLACEHOLDER,
+      full_name: 'Casey Placeholder',
+      email: null,
+      is_placeholder: true,
+    });
   });
 
   it('rejects duplicate active bookings', async () => {
