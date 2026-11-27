@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { nyWallClockToUtc } from '../../lib/gymTime.js';
 import { requireAdmin } from '../../lib/requireAdmin.js';
 import { registerAdminSchedulingRoutes } from './scheduling.js';
 
@@ -10,6 +11,7 @@ const SESSION_ID = '11111111-1111-4111-8111-111111111111';
 const PARTICIPANT_ID = '22222222-2222-4222-8222-222222222222';
 const PARTICIPANT_ID_B = '33333333-3333-4333-8333-333333333333';
 const TEMPLATE_ID = '44444444-4444-4444-8444-444444444444';
+const CLASS_ID = '55555555-5555-4555-8555-555555555555';
 
 /**
  * Isolated in-memory Supabase stand-in for sessions + attendance.
@@ -40,7 +42,11 @@ function normalizeStartTime(value) {
 function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
   const sessions = new Map();
   const templates = new Map();
+  const classes = new Map();
   const attendance = [];
+  const rpcCalls = [];
+  const cancelEvents = [];
+  const stats = { sessionUpdates: 0 };
 
   function createQuery(table) {
     const state = {
@@ -56,6 +62,7 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       if (table === 'sessions') return runSessions(state);
       if (table === 'attendance_records') return runAttendance(state);
       if (table === 'schedule_templates') return runTemplates(state);
+      if (table === 'classes') return runClasses(state);
       return { data: null, error: { message: `unknown_table:${table}` } };
     };
 
@@ -146,6 +153,7 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       const idFilter = state.filters.find((f) => f.op === 'eq' && f.col === 'id');
       const existing = idFilter ? sessions.get(idFilter.val) : null;
       if (!existing) return { data: null, error: { message: 'session not found' } };
+      stats.sessionUpdates += 1;
       const updated = { ...existing, ...state.payload, updated_at: new Date().toISOString() };
       sessions.set(updated.id, updated);
       return { data: { ...updated }, error: null };
@@ -166,6 +174,17 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       return { data: rows[0], error: null };
     }
     return { data: rows.map((r) => ({ ...r })), error: null };
+  }
+
+  function runClasses(state) {
+    let rows = [...classes.values()];
+    for (const f of state.filters) {
+      if (f.op === 'eq') rows = rows.filter((r) => r[f.col] === f.val);
+    }
+    if (state.terminal === 'maybeSingle' || state.terminal === 'single') {
+      return { data: rows[0] ?? null, error: null };
+    }
+    return { data: rows, error: null };
   }
 
   function runAttendance(state) {
@@ -277,9 +296,20 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
         if (p_template_id && template.id !== p_template_id) continue;
         if (template.day_of_week !== isoDowUtc(date)) continue;
         const startTime = normalizeStartTime(template.start_time);
-        const startsAt = `${date}T${startTime}.000Z`;
+        let startsAtDate;
+        try {
+          startsAtDate = nyWallClockToUtc({
+            date,
+            time: startTime,
+            disambiguation: 'earlier',
+          });
+        } catch (error) {
+          if (error?.code === 'nonexistent_wall_time') continue;
+          throw error;
+        }
+        const startsAt = startsAtDate.toISOString();
         const endsAt = new Date(
-          new Date(startsAt).getTime() + template.duration_minutes * 60 * 1000,
+          startsAtDate.getTime() + template.duration_minutes * 60 * 1000,
         ).toISOString();
         candidates.push({
           starts_at: startsAt,
@@ -325,6 +355,32 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     };
   }
 
+  function runCancelSession({ p_session_id } = {}) {
+    const existing = sessions.get(p_session_id);
+    if (!existing) return { data: null, error: { message: 'session_not_found' } };
+    if (existing.cancelled_at) {
+      return {
+        data: { already_cancelled: true, session: { ...existing } },
+        error: null,
+      };
+    }
+    const updated = {
+      ...existing,
+      cancelled_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    sessions.set(existing.id, updated);
+    cancelEvents.push({
+      event_name: 'session.cancelled',
+      entity_id: existing.id,
+      cancelled_at: updated.cancelled_at,
+    });
+    return {
+      data: { already_cancelled: false, session: { ...updated } },
+      error: null,
+    };
+  }
+
   function seedSession(overrides = {}) {
     const row = {
       id: SESSION_ID,
@@ -334,11 +390,23 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       schedule_template_id: null,
       notes: null,
       cancelled_at: null,
+      class_id: null,
       created_at: '2026-06-01T00:00:00.000Z',
       updated_at: '2026-06-01T00:00:00.000Z',
       ...overrides,
     };
     sessions.set(row.id, row);
+    return row;
+  }
+
+  function seedClass(overrides = {}) {
+    const row = {
+      id: CLASS_ID,
+      name: 'Class 1',
+      is_active: true,
+      ...overrides,
+    };
+    classes.set(row.id, row);
     return row;
   }
 
@@ -365,6 +433,10 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
       return createQuery(table);
     },
     async rpc(name, args) {
+      rpcCalls.push({ name, args });
+      if (name === 'cancel_session') {
+        return runCancelSession(args);
+      }
       if (name === 'generate_sessions') {
         return runGenerateSessions(args);
       }
@@ -377,7 +449,19 @@ function createSchedulingFixture({ canAttend = true, rpcError = null } = {}) {
     },
   };
 
-  return { supabase, sessions, templates, attendance, seedSession, seedTemplate };
+  return {
+    supabase,
+    sessions,
+    templates,
+    classes,
+    attendance,
+    seedSession,
+    seedClass,
+    seedTemplate,
+    rpcCalls,
+    cancelEvents,
+    stats,
+  };
 }
 
 function createApp(supabase) {
@@ -639,6 +723,8 @@ describe('admin scheduling routes', () => {
       expect(created.body.ok).toBe(true);
       expect(created.body.session.session_label).toBe('Class 1');
       expect(created.body.session.schedule_template_id).toBe(TEMPLATE_ID);
+      expect(created.body.session.class_id).toBeNull();
+      expect(created.body.session.capacity).toBeNull();
       expect(created.body.session.cancelled_at).toBeNull();
       expect(created.body.session.id).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -648,6 +734,84 @@ describe('admin scheduling routes', () => {
       expect(listed.status).toBe(200);
       expect(listed.body.rowCount).toBe(1);
       expect(listed.body.rows[0].id).toBe(created.body.session.id);
+    });
+
+    it('links a session to a class and can clear the link', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedClass();
+      const app = createApp(fixture.supabase);
+
+      const created = await auth(
+        request(app)
+          .post('/api/admin/scheduling/sessions')
+          .send({
+            starts_at: '2026-06-01T19:00:00.000Z',
+            ends_at: '2026-06-01T20:30:00.000Z',
+            class_id: CLASS_ID,
+          }),
+      );
+      expect(created.status).toBe(200);
+      expect(created.body.session.class_id).toBe(CLASS_ID);
+
+      const cleared = await auth(
+        request(app)
+          .patch(`/api/admin/scheduling/sessions/${created.body.session.id}`)
+          .send({ class_id: null }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.session.class_id).toBeNull();
+      expect(fixture.sessions.get(created.body.session.id).starts_at).toBe('2026-06-01T19:00:00.000Z');
+    });
+
+    it('stores optional session capacity and rejects invalid values', async () => {
+      const fixture = createSchedulingFixture();
+      const app = createApp(fixture.supabase);
+      const body = {
+        starts_at: '2026-06-01T19:00:00.000Z',
+        ends_at: '2026-06-01T20:00:00.000Z',
+      };
+
+      const created = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, capacity: 12 }));
+      expect(created.status).toBe(200);
+      expect(created.body.session.capacity).toBe(12);
+
+      const cleared = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${created.body.session.id}`).send({ capacity: null }),
+      );
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.session.capacity).toBeNull();
+
+      const bad = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, capacity: 0 }));
+      expect(bad.status).toBe(400);
+      expect(bad.body).toEqual({ ok: false, error: 'invalid_capacity' });
+    });
+
+    it('rejects a bad class id and a missing class without writing a session', async () => {
+      const fixture = createSchedulingFixture();
+      const app = createApp(fixture.supabase);
+      const body = {
+        starts_at: '2026-06-01T19:00:00.000Z',
+        ends_at: '2026-06-01T20:00:00.000Z',
+      };
+
+      const badId = await auth(request(app).post('/api/admin/scheduling/sessions').send({ ...body, class_id: 'not-a-uuid' }));
+      expect(badId.status).toBe(400);
+      expect(badId.body).toEqual({ ok: false, error: 'invalid_class_id' });
+
+      const missing = await auth(
+        request(app).post('/api/admin/scheduling/sessions').send({ ...body, class_id: CLASS_ID }),
+      );
+      expect(missing.status).toBe(404);
+      expect(missing.body).toEqual({ ok: false, error: 'class_not_found' });
+      expect(fixture.sessions.size).toBe(0);
+
+      fixture.seedSession();
+      const badPatch = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ class_id: 12 }),
+      );
+      expect(badPatch.status).toBe(400);
+      expect(badPatch.body).toEqual({ ok: false, error: 'invalid_class_id' });
+      expect(fixture.sessions.get(SESSION_ID).class_id).toBeNull();
     });
   });
 
@@ -670,6 +834,56 @@ describe('admin scheduling routes', () => {
 
       const listed = await auth(request(app).get('/api/admin/scheduling/sessions'));
       expect(listed.body.rowCount).toBe(0);
+    });
+
+    it('cancels an already-cancelled session without rewriting it or adding an event', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedSession();
+      const app = createApp(fixture.supabase);
+
+      const first = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ cancel: true }),
+      );
+      expect(first.status).toBe(200);
+      expect(first.body.session.cancelled_at).toBeTruthy();
+      expect(fixture.rpcCalls.filter((call) => call.name === 'cancel_session')).toHaveLength(1);
+      expect(fixture.cancelEvents).toEqual([
+        {
+          event_name: 'session.cancelled',
+          entity_id: SESSION_ID,
+          cancelled_at: first.body.session.cancelled_at,
+        },
+      ]);
+      expect(fixture.stats.sessionUpdates).toBe(0);
+
+      const again = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ cancel: true }),
+      );
+      expect(again.status).toBe(200);
+      expect(again.body.ok).toBe(true);
+      expect(again.body.session.cancelled_at).toBe(first.body.session.cancelled_at);
+      expect(again.body.session.updated_at).toBe(first.body.session.updated_at);
+      expect(fixture.rpcCalls.filter((call) => call.name === 'cancel_session')).toHaveLength(1);
+      expect(fixture.cancelEvents).toHaveLength(1);
+      expect(fixture.stats.sessionUpdates).toBe(0);
+
+      const noted = await auth(
+        request(app)
+          .patch(`/api/admin/scheduling/sessions/${SESSION_ID}`)
+          .send({ cancel: true, notes: 'still cancelled' }),
+      );
+      expect(noted.status).toBe(200);
+      expect(noted.body.session.notes).toBe('still cancelled');
+      expect(noted.body.session.cancelled_at).toBe(first.body.session.cancelled_at);
+      expect(fixture.cancelEvents).toHaveLength(1);
+      expect(fixture.stats.sessionUpdates).toBe(1);
+
+      const restored = await auth(
+        request(app).patch(`/api/admin/scheduling/sessions/${SESSION_ID}`).send({ cancel: false }),
+      );
+      expect(restored.status).toBe(200);
+      expect(restored.body.session.cancelled_at).toBeNull();
+      expect(fixture.cancelEvents).toHaveLength(1);
     });
 
     it('rejects invalid patch dates and unknown ids', async () => {
@@ -1018,8 +1232,9 @@ describe('admin scheduling routes', () => {
         'Friday Open Mat',
       ]);
       const monday = generated.body.created.find((row) => row.schedule_template_id === TEMPLATE_ID);
-      expect(monday.starts_at).toBe('2026-06-01T19:00:00.000Z');
-      expect(monday.ends_at).toBe('2026-06-01T20:00:00.000Z');
+      // 2026-06-01 19:00 America/New_York is EDT (UTC-4).
+      expect(monday.starts_at).toBe('2026-06-01T23:00:00.000Z');
+      expect(monday.ends_at).toBe('2026-06-02T00:00:00.000Z');
       expect(monday.cancelled_at).toBeNull();
 
       const listed = await auth(
@@ -1058,8 +1273,8 @@ describe('admin scheduling routes', () => {
       fixture.seedTemplate();
       fixture.seedSession({
         schedule_template_id: TEMPLATE_ID,
-        starts_at: '2026-06-01T19:00:00.000Z',
-        ends_at: '2026-06-01T20:00:00.000Z',
+        starts_at: '2026-06-01T23:00:00.000Z',
+        ends_at: '2026-06-02T00:00:00.000Z',
         cancelled_at: '2026-06-01T12:00:00.000Z',
       });
       const app = createApp(fixture.supabase);
@@ -1121,6 +1336,48 @@ describe('admin scheduling routes', () => {
       );
       expect(missingTemplate.status).toBe(404);
       expect(missingTemplate.body).toEqual({ ok: false, error: 'template_not_found' });
+    });
+
+    it('uses the earlier fall-back instant and skips a spring-forward gap', async () => {
+      const fixture = createSchedulingFixture();
+      fixture.seedTemplate({
+        day_of_week: 7,
+        start_time: '01:30:00',
+        duration_minutes: 60,
+      });
+      const app = createApp(fixture.supabase);
+
+      const fallback = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2026-11-01', end: '2026-11-01', template_id: TEMPLATE_ID }),
+      );
+      expect(fallback.status).toBe(200);
+      expect(fallback.body.created_count).toBe(1);
+      expect(fallback.body.created[0].starts_at).toBe('2026-11-01T05:30:00.000Z');
+      expect(fallback.body.created[0].ends_at).toBe('2026-11-01T06:30:00.000Z');
+
+      fixture.templates.get(TEMPLATE_ID).start_time = '02:30:00';
+      const gap = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2027-03-14', end: '2027-03-14', template_id: TEMPLATE_ID }),
+      );
+      expect(gap.status).toBe(200);
+      expect(gap.body.created_count).toBe(0);
+      expect(gap.body.skipped_count).toBe(0);
+      expect(fixture.sessions.size).toBe(1);
+
+      fixture.templates.get(TEMPLATE_ID).start_time = '03:30:00';
+      const afterGap = await auth(
+        request(app)
+          .post('/api/admin/scheduling/generate-sessions')
+          .send({ start: '2027-03-14', end: '2027-03-14', template_id: TEMPLATE_ID }),
+      );
+      expect(afterGap.status).toBe(200);
+      expect(afterGap.body.created_count).toBe(1);
+      expect(afterGap.body.created[0].starts_at).toBe('2027-03-14T07:30:00.000Z');
+      expect(afterGap.body.created[0].ends_at).toBe('2027-03-14T08:30:00.000Z');
     });
 
     it('does not generate from inactive templates unless they are reactivated', async () => {

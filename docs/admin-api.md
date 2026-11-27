@@ -29,7 +29,7 @@ key.
 | Topic | Rule |
 |--------|------|
 | **Auth** | Header `x-admin-key`: shared `ADMIN_API_KEY` (owner compatibility) or a personal staff key; **or** a valid `__Host-tu_admin_session` cookie for `ADMIN_EMAIL`. Missing/wrong → `401 { ok: false, error: "unauthorized" }`. Role denied → `403 { ok: false, error: "forbidden" }`. Cookie-auth mutations without an allowlisted `Origin` → `403 csrf_failed`. Authenticated actor is `req.staff`; mutating admin requests append `staff_audit_events`. Public `POST /api/webhooks/stripe` is **not** admin-authenticated; it verifies Stripe-Signature against `STRIPE_WEBHOOK_SECRET` (API-ADR-006). |
-| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`) |
+| **Supabase** | Server uses **service role**; internal billing/affiliate RPCs (`record_payment`, `record_payment_refund`, `merge_participants`, `create_subscription`, `create_placeholder_participant`, `upgrade_subscription_prorated`, `upgrade_per_class_to_monthly`, `create_pay_per_class_charge`, `generate_monthly_charges`, `create_affiliation`, `record_payment_affiliate_credits`, `get_referrer_credit_balance`, `apply_credits_to_account`, `can_attend_group_session`) are **service_role execute only** (migrations `0007` through `0009`, `0020`, `20260916174649`, `20261124120000`). Scheduling booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are the same (`20261113190000`, in-repo until applied). |
 | **Cron / scheduler calls** | Discord notification routes and `POST /api/admin/billing/generate-monthly-charges` also accept header `x-cron-secret` when **`CRON_SECRET`** is set on the API (in addition to `x-admin-key`). Scheduler calls authenticate as actor `cron`. Discord retains its Render Cron runbook; monthly billing uses the Cloudflare Worker source in `workers/billing-cron/`, not yet deployed/configured. |
 | **Idempotency** | `POST .../record-payment` and `POST .../payment-refunds` accept optional `idempotency_key` (unique when set); replays return the same `payment_id` + `receipt_id` or `refund_id`. Public `POST /api/waivers/submit` accepts optional `idempotency_key` (unique when set) and otherwise derives a stable intent key; replays return the original success envelope. Stripe webhooks use Stripe event ids plus `stripe:pi_<payment_intent_id>` / `stripe:re_<refund_id>` as `record_payment` / `record_payment_refund` keys. |
 | **Backdated charges** | When inserting charges manually (SQL or future endpoint), set `coverage_start`, `coverage_end`, and `due_at` to the real period; add a `notes` reason (e.g. entered after class) |
@@ -57,7 +57,7 @@ Database failures are mapped by Postgres / PostgREST code before any raw text is
 | `turnstile_failed` | `400` | `TURNSTILE_SECRET_KEY` is set and the Turnstile token is missing or siteverify failed |
 | `payload_too_large` | `413` | Public POST JSON body exceeded the route limit |
 
-Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
+Existing route-specific keys are unchanged. Common ones include `unauthorized`, `forbidden`, `csrf_failed`, `supabase_not_configured`, `server_error`, `charge_not_found`, `charge_account_mismatch`, `charge_is_void`, `allocation_exceeds_net_due`, `idempotency_key_conflict`, `template_not_found`, `class_not_found`, `session_not_found`, `content_not_found`, `booking_not_found`, `participant_not_found`, `already_booked`, `not_booked`, `booking_closed`, `capacity_not_configured`, `receipt_not_found`, `payment_not_found`, `email_taken`, `last_owner`, `overlapping_active_subscription`, `duplicate_name`, `account_not_found`, `invalid_notes`, `invalid_session_label`, `invalid_cancel`, `query_min_length_2`, and `query_too_long`.
 
 ---
 
@@ -71,7 +71,7 @@ Personal keys are issued by an `owner` via `POST /api/admin/staff` (plaintext re
 | --- | --- |
 | `owner` | All `/api/admin/*` routes, including staff directory and participant merge |
 | `finance` | `/billing/*` (payments, refunds, discounts, subscriptions, expenses). Not scheduling writes, staff, merge, or Discord notification POSTs |
-| `front_desk` | `/scheduling/*` (including `/scheduling-v2/*`), `/waivers*`, `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, subscriptions, expenses, staff, or merge |
+| `front_desk` | `/scheduling/*` (including `/scheduling-v2/*`), `/waivers*`, `POST /participants/placeholders`, `POST /billing/subscriptions` (enrollment), `POST /billing/record-payment`, `POST /billing/external-counterparty-accounts`. Not refunds, write-offs, discounts, expenses, staff, or merge |
 
 Unknown mutation paths default to `owner` only. Privileged-write identity is `req.staff.actorLabel` plus a `staff_audit_events` row. Body `created_by` / `recorded_by` remain optional client strings until each route adopts `req.staff`.
 
@@ -397,7 +397,9 @@ Calls RPC `record_payment_refund`: inserts `payment_refunds`, shrinks `payment_a
 
 ### `POST /api/admin/billing/subscriptions`
 
-Creates an **active** subscription for a participant on a plan (enrollment). Calls RPC `create_subscription` (migration **0020**).
+Creates an **active** subscription for an existing participant on a plan (enrollment). This is the name-based enrollment form path. Calls RPC `create_subscription` (migration **0020**). **Auth:** `requireAdmin`. Mutations: **owner**, **finance**, and **front_desk**.
+
+For enrollment **without** a first charge, send `create_initial_charge: false`. That is the same helper as the subscription-backfill CLI.
 
 **Body (JSON):**
 
@@ -405,7 +407,9 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
 {
   "participant_id": "uuid",
   "plan_definition_id": "uuid",
+  "plan_id": "uuid alias for plan_definition_id",
   "starts_at": "YYYY-MM-DD optional; defaults to current date in DB",
+  "start_date": "YYYY-MM-DD alias for starts_at",
   "ends_at": "YYYY-MM-DD optional",
   "account_id": "uuid optional; defaults to participant's first account_members row",
   "create_initial_charge": "boolean optional; defaults to true for paid monthly plans and false for free/non-monthly plans",
@@ -413,6 +417,8 @@ Creates an **active** subscription for a participant on a plan (enrollment). Cal
   "created_by": "optional; defaults to admin_api"
 }
 ```
+
+Sibling admin UI may send `{ "participant_id", "account_id?", "plan_id", "start_date?", "create_initial_charge": false }`. `plan_id` is accepted as an alias of `plan_definition_id`; `start_date` is accepted as an alias of `starts_at`. HTTP **200** (not 201) with the fields below.
 
 **Response:**
 
@@ -447,9 +453,155 @@ inclusive; a nonoverlapping successor starts the following day. Rejection is ato
 and creates neither access nor an initial charge.
 
 **Errors:** `400` — participant/plan not found, inactive plan, no account binding,
-`overlapping_active_subscription`, explicit `create_initial_charge: true` on a
-non-monthly plan, plan lookup failure, or date validation failure (Postgres exception
-message in `error`).
+explicit `create_initial_charge: true` on a non-monthly plan, plan lookup failure,
+or date validation failure. `409` `overlapping_active_subscription` when the
+participant already has an intersecting **active** subscription. `401` `unauthorized`;
+`403` `forbidden`.
+
+Bulk enrollment of existing monthly payers is **not** an HTTP flag. Use the
+operator CLI in [subscription-backfill.md](./subscription-backfill.md) (default
+dry-run; `--apply` is enrollment-only with `create_initial_charge: false`).
+
+---
+
+### `GET /api/admin/billing/plans`
+
+Read-only plan catalog for finance receipt prefills. Staff-authenticated; **owner**,
+**finance**, and **front_desk** may read (same GET matrix as other `/billing/*`
+routes). Cookie session and `x-admin-key` (shared or personal staff key) both work.
+No migration; reads existing `plan_definitions`.
+
+Returns **active** catalog rows only (`is_active = true`). Inactive plans are omitted.
+Money is integer cents. Field names match the table.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "plans": [
+    {
+      "id": "uuid",
+      "name": "Basic Group Plan",
+      "plan_category": "group",
+      "billing_cadence": "monthly",
+      "price_cents": 10000,
+      "is_active": true
+    }
+  ]
+}
+```
+
+`plan_category` is `group` | `private` | `hybrid`. `billing_cadence` is
+`per_session` | `monthly` | `contract` | `custom`. Empty catalog:
+`{ "ok": true, "plans": [] }`. Rows are ordered by category, price, then name.
+
+**Errors:** `401` `unauthorized`, `403` `forbidden` (not expected for active staff
+roles on GET), `500` `supabase_not_configured` / `internal_error`.
+
+---
+
+### `GET /api/admin/billing/subscriptions/current`
+
+Read-only current enrollment plan for a chosen person and/or payer account. Same
+auth as `GET /billing/plans`. Prefer `participant_id` (a participant has at most
+one overlapping active subscription). `account_id` is accepted for payer-first
+lookups; if an account has several currently effective enrollments, the most
+recently started one wins.
+
+Does not return names, emails, or other personal fields — only the plan used to
+prefill a receipt amount.
+
+**Query:**
+
+- `participant_id` — optional UUID
+- `account_id` — optional UUID
+
+At least one is required. Both may be sent together (AND).
+
+**Response (no current enrollment, including production’s empty subscriptions):**
+
+```json
+{ "ok": true, "plan": null }
+```
+
+**Response (enrolled):**
+
+```json
+{
+  "ok": true,
+  "plan": {
+    "id": "uuid",
+    "name": "Basic Group Plan",
+    "plan_category": "group",
+    "billing_cadence": "monthly",
+    "price_cents": 10000,
+    "is_active": true
+  }
+}
+```
+
+A subscription is current when `status = 'active'`, `starts_at` is today or
+earlier (America/New_York calendar date), and `ends_at` is null or today or
+later. Paused, cancelled, expired, and future-dated access return `plan: null`.
+Unknown ids also return `plan: null` (not 404). If the person is still enrolled
+on a catalog row that was later deactivated, that plan is returned with
+`is_active: false`.
+
+**Errors:** `400` `participant_or_account_id_required`, `invalid_participant_id`,
+`invalid_account_id`; `401` `unauthorized`; `500` `supabase_not_configured` /
+`internal_error`.
+
+---
+
+### `GET /api/admin/billing/enrollment-board`
+
+Roster of unmerged participants with current enrollment, account, placeholder flags, and whether any waiver row exists. **Auth:** `requireAdmin`. **owner**, **finance**, and **front_desk** may read.
+
+A subscription is current with the same rule as `GET /billing/subscriptions/current`: `status = 'active'`, `starts_at` today or earlier (America/New_York), `ends_at` null or today or later.
+
+**Query:**
+
+- `status` — optional `enrolled` | `unenrolled` | `placeholder`. Filters **rows** only. `placeholder` is `is_placeholder = true` (a placeholder with a plan still matches this filter). `enrolled` / `unenrolled` use the current-subscription rule.
+- `q` — optional name search, minimum 2 characters, maximum 80 after trim. Literal `ILIKE` against `full_name` (`%` and `_` escaped). Applied to both **counts** and **rows**.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "counts": {
+    "total": 3,
+    "enrolled": 1,
+    "unenrolled": 2,
+    "placeholders": 1
+  },
+  "rows": [
+    {
+      "participant_id": "uuid",
+      "first_name": "Casey",
+      "last_name": "Placeholder",
+      "is_placeholder": true,
+      "placeholder_reason": "name only; no waiver yet",
+      "dob_is_placeholder": true,
+      "waiver_signed": false,
+      "account_id": "uuid",
+      "account_name": "Casey Placeholder household",
+      "subscription": {
+        "id": "uuid",
+        "plan_id": "uuid",
+        "plan_name": "Basic Group Plan",
+        "status": "active",
+        "start_date": "2026-11-01"
+      }
+    }
+  ]
+}
+```
+
+`first_name` / `last_name` are split from stored `participants.full_name` on the first space. `subscription` is `null` when there is no currently effective enrollment. `waiver_signed` is true when at least one `waivers` row exists for that person. `counts` ignore `status` and follow `q`.
+
+**Errors:** `400` `invalid_status`, `query_min_length_2`, `query_too_long`; `401` `unauthorized`; `500` `supabase_not_configured` / `internal_error`.
 
 ---
 
@@ -782,9 +934,9 @@ Updates **`invoice_status`** for an **`invoice`** entry only.
 
 ### Scheduling (`/api/admin/scheduling/*`)
 
-Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`). Soft-cancel remains the only session delete.
+Session and attendance writes for front-desk workflows. Requires migration **0020** (`sessions.cancelled_at`). Template CRUD uses existing `schedule_templates`. Recurring generation requires migration **20260914202053** (`generate_sessions` RPC + unique `(schedule_template_id, starts_at)`), replaced for Eastern-time conversion and idempotent cancel by **`20261101100500_scheduling_v2_eastern_time_and_cancel_idempotency.sql`** (in-repo until applied). Soft-cancel remains the only session delete.
 
-`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is UTC wall-clock on each matching calendar date.
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). Template `start_time` is America/New_York wall-clock on each matching calendar date. `generate_sessions` converts it to UTC the same way as `gymTime`: the earlier instant when the civil time repeats, and no session when the civil time does not exist.
 
 #### `GET /api/admin/scheduling/templates`
 
@@ -835,9 +987,11 @@ Partial update. Deactivate with `"is_active": false`. Existing sessions are not 
 
 #### `POST /api/admin/scheduling/generate-sessions`
 
-Expands **active** templates into `sessions` for an inclusive UTC date range via RPC `generate_sessions` (migration **20260914202053**, `service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`; `starts_at` / `ends_at` use template `start_time` (UTC) plus `duration_minutes`.
+Expands **active** templates into `sessions` for an inclusive calendar-date range via RPC `generate_sessions` (`service_role` execute only). Optional `template_id` limits generation to one template. `session_label` is the template `name`. `starts_at` is template `start_time` interpreted as **America/New_York** wall-clock and stored in UTC. `ends_at` is that instant plus `duration_minutes`.
 
-Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences.
+Examples: `2026-06-01 19:00` → `2026-06-01T23:00:00Z` (EDT); `2026-01-05 19:00` → `2026-01-06T00:00:00Z` (EST); `2026-11-01 01:30` → `2026-11-01T05:30:00Z` (earlier fall-back instant). `2027-03-14 02:30` is omitted: `created_count` and `skipped_count` do not include it.
+
+Generating the same range twice does not create duplicates: unique `(schedule_template_id, starts_at)` (including cancelled sessions). Retry response: `created_count: 0` and `skipped_count` for already-present occurrences. Wrapper response keys are unchanged. Each created session includes `class_id: null`; generation does not assign a class.
 
 **Body (JSON):**
 
@@ -863,6 +1017,8 @@ List sessions with optional filters.
 
 **Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ ... ] }`
 
+Each session includes `class_id` (`uuid` or `null`) and `capacity` (integer 1–500 or `null`).
+
 **Errors:** `400` — `invalid_start`, `invalid_end`, `invalid_pagination`
 
 #### `GET /api/admin/scheduling/sessions/:sessionId`
@@ -881,21 +1037,27 @@ Single session plus its `attendance_records`.
   "ends_at": "ISO-8601 datetime",
   "session_label": "optional e.g. Class 1",
   "schedule_template_id": "uuid optional",
+  "class_id": "uuid optional",
+  "capacity": 12,
   "notes": "optional"
 }
 ```
 
 **Response:** `{ "ok": true, "session": { ... } }`
 
-**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null). Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
+Session objects include `class_id` (`uuid` or `null`) and `capacity` (integer 1–500 or `null`). Omitting `class_id` stores null and does not change the other fields. Omitting `capacity` stores null; booking then uses `classes.capacity` when `class_id` is set.
+
+**Errors:** `400` — `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label` (string or null), `invalid_notes` (string or null), `invalid_class_id`, `invalid_capacity`; `404` — `class_not_found`. Unique `(schedule_template_id, starts_at)` → `409` `already_exists`. Missing template FK → `400` `related_record_not_found`.
 
 #### `PATCH /api/admin/scheduling/sessions/:sessionId`
 
-Partial update. Set `"cancel": true` to set `cancelled_at` (soft cancel); `"cancel": false` clears it. Reschedule with `starts_at` / `ends_at`.
+Partial update. Set `"cancel": true` to soft-cancel via RPC `cancel_session`. The first cancel sets `cancelled_at` and appends one `event_ledger` row (`session.cancelled`, category `system`, reason `manual_cancellation`). Cancelling an already-cancelled session returns **200** with the original session: `cancelled_at` and `updated_at` stay put, and no second event is written. `"cancel": false` clears `cancelled_at`. Reschedule with `starts_at` / `ends_at`. A notes edit on an already-cancelled session still applies and does not move `cancelled_at`.
 
-**Response:** `{ "ok": true, "session": { ... } }`
+**Response:** `{ "ok": true, "session": { ... } }` (same session fields as before, plus `class_id` and `capacity`)
 
-**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean); `404` — `session_not_found`; `409` — `already_exists`
+`class_id` is optional. Send `null` or `""` to clear the link. A class that does not exist returns `class_not_found`. Other fields are unchanged when only `class_id` is sent. `capacity` is optional (integer 1–500). Send `null` or `""` to clear it.
+
+**Errors:** `400` — `no_updates`, `invalid_starts_at`, `invalid_ends_at`, `ends_at_must_be_after_starts_at`, `invalid_schedule_template_id`, `invalid_session_label`, `invalid_notes`, `invalid_cancel` (boolean), `invalid_class_id`, `invalid_capacity`; `404` — `session_not_found`, `class_not_found`; `409` — `already_exists`
 
 #### `POST /api/admin/scheduling/sessions/:sessionId/attendance`
 
@@ -923,13 +1085,13 @@ When `enforce_entitlement` is true (default), `present` rows call `can_attend_gr
 
 ### Scheduling v2 (`/api/admin/scheduling-v2/*` and public calendar)
 
-First slice of class scheduling. Migration **`20261101100000_scheduling_v2_classes.sql`** (in-repo only; not applied to production by this work). No booking, no persisted session rows. Occurrences are expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`).
+Class catalog, session content, and staff-operated booking. Migrations **`20261101100000_scheduling_v2_classes.sql`**, **`20261101101000_scheduling_v2_session_content.sql`**, **`20261113175150_scheduling_v2_class_description_and_session_link.sql`**, and **`20261113190000_scheduling_v2_bookings.sql`** are in-repo only (not applied to production by this work). Class occurrences are still expanded in the API from weekly `classes` using America/New_York wall-clock (`gymTime`) and are not auto-materialized into `sessions`. `session_content` and `bookings` attach to existing `sessions` rows. `sessions.class_id` optionally points at a class. `sessions.capacity` is an optional per-session seat cap; booking uses it when set, otherwise `classes.capacity`.
 
-Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
+Staff mutations follow the existing scheduling RBAC matrix (`owner`, `front_desk`). Finance may **read** classes, session content, and booking rosters and is **forbidden** on writes. Auth is the shared `requireAdmin` middleware: `x-admin-key` **or** cookie session; cookie mutations need `Origin` in `ADMIN_ALLOWED_ORIGINS`.
 
-`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York** (unlike v1 `schedule_templates`, which store UTC wall-clock). `recurrence` is `weekly` only.
+`day_of_week` is ISO-8601 (`1` = Monday … `7` = Sunday). `start_time` is gym-local `HH:MM` or `HH:MM:SS` in **America/New_York**, the same clock as v1 `schedule_templates.start_time`. `recurrence` is `weekly` only. v2 occurrences are still expanded in the API and are not rows in `sessions`.
 
-Class-types, instructors, and v2 session stubs remain `501 not_implemented`.
+Class-types, instructors, and v2 session stubs (`/sessions`, `/sessions/:sessionId`, cancel) remain `501 not_implemented`. Session **content** and **bookings** under those sessions are implemented. There are no public or member booking routes in this slice (`/api/member/bookings` stays `501`).
 
 #### `GET /api/admin/scheduling-v2/classes`
 
@@ -945,7 +1107,7 @@ Inactive classes are omitted unless `include_inactive=true`.
 
 #### `GET /api/admin/scheduling-v2/classes/:classId`
 
-**Response:** `{ "ok": true, "class": { "id", "name", "instructor", "day_of_week", "recurrence", "start_time", "duration_minutes", "capacity", "is_active", "created_at", "updated_at" } }`
+**Response:** `{ "ok": true, "class": { "id", "name", "description", "instructor", "day_of_week", "recurrence", "start_time", "duration_minutes", "capacity", "is_active", "created_at", "updated_at" } }`
 
 **Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
 
@@ -956,6 +1118,7 @@ Inactive classes are omitted unless `include_inactive=true`.
 ```json
 {
   "name": "Class 1",
+  "description": "Bring a towel",
   "instructor": "Alex Rivera",
   "day_of_week": 1,
   "start_time": "19:00",
@@ -966,11 +1129,11 @@ Inactive classes are omitted unless `include_inactive=true`.
 }
 ```
 
-`is_active` defaults to `true`. `recurrence` defaults to `weekly`. `capacity` is an integer 1–500. `duration_minutes` is an integer 1–1440.
+`is_active` defaults to `true`. `recurrence` defaults to `weekly`. `description` is optional; blank stores null; trimmed length is 1–2000. `capacity` is an integer 1–500. `duration_minutes` is the default duration, an integer 1–1440. Sessions keep their own `starts_at` / `ends_at`.
 
 **Response:** `{ "ok": true, "class": { ... } }`
 
-**Errors:** `400` — `invalid_name`, `invalid_instructor`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_capacity`, `invalid_recurrence`, `invalid_is_active`
+**Errors:** `400` — `invalid_name`, `invalid_description`, `invalid_instructor`, `invalid_day_of_week`, `invalid_start_time`, `invalid_duration_minutes`, `invalid_capacity`, `invalid_recurrence`, `invalid_is_active`
 
 #### `PATCH /api/admin/scheduling-v2/classes/:classId`
 
@@ -978,15 +1141,150 @@ Partial update. Deactivate with `"is_active": false`. Public occurrence listing 
 
 **Response:** `{ "ok": true, "class": { ... } }`
 
-**Errors:** `400` — `no_updates`, same field keys as create; `404` — `class_not_found`
+**Errors:** `400` — `no_updates`, same field keys as create, including `invalid_description`; `404` — `class_not_found`
+
+Send `"description": null` to clear the description. `duration_minutes` remains the default duration.
 
 #### `DELETE /api/admin/scheduling-v2/classes/:classId`
 
-Hard-deletes the catalog row. There are no booking FKs in this slice. Prefer `"is_active": false` to hide a class without deleting it.
+Hard-deletes the catalog row. Bookings hang off `sessions`, not `classes`; deleting a class sets `sessions.class_id` to null and leaves bookings in place. Prefer `"is_active": false` to hide a class without deleting it.
 
 **Response:** `{ "ok": true, "class": { ... } }` (deleted row)
 
 **Errors:** `400` — `invalid_class_id`; `404` — `class_not_found`
+
+#### `GET /api/admin/scheduling-v2/session-content`
+
+List session content. Staff see every visibility, including `members`.
+
+**Query:** `visibility` (`staff` | `members` | `public`), `session_id` (uuid), `limit` (default 50, max 200, clamped), `offset` (default 0)
+
+Rows are ordered by `created_at`, then `id`.
+
+**Response:** `{ "ok": true, "limit", "offset", "rowCount", "rows": [ { "id", "session_id", "notes", "video_url", "visibility", "created_at", "updated_at" } ] }`
+
+**Errors:** `400` — `invalid_pagination`, `invalid_visibility`, `invalid_session_id`
+
+#### `GET /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+**Response:** `{ "ok": true, "content": { "id", "session_id", "notes", "video_url", "visibility", "created_at", "updated_at" } }`
+
+**Errors:** `400` — `invalid_session_id`; `404` — `session_not_found`, `content_not_found`
+
+#### `POST /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Creates the one content row for a session. `visibility` defaults to `staff`. `notes` and `video_url` are optional; blank strings are stored as null. `notes` is trimmed and limited to 8000 characters. `video_url` must be an absolute `https` URL (max 2048 characters, no userinfo). A leading `HTTPS://` is stored as `https://`.
+
+```json
+{
+  "notes": "Bring a towel",
+  "video_url": "https://videos.example.com/class-1",
+  "visibility": "staff"
+}
+```
+
+**Response:** `{ "ok": true, "content": { ... } }`
+
+**Errors:** `400` — `invalid_session_id`, `invalid_notes`, `invalid_video_url`, `invalid_visibility`; `404` — `session_not_found`; `409` — `already_exists`
+
+#### `PATCH /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Partial update. Send `null` to clear `notes` or `video_url`. `visibility` accepts `staff`, `members`, or `public` (case-insensitive).
+
+**Response:** `{ "ok": true, "content": { ... } }`
+
+**Errors:** `400` — `no_updates`, `invalid_notes`, `invalid_video_url`, `invalid_visibility`; `404` — `session_not_found`, `content_not_found`
+
+#### `DELETE /api/admin/scheduling-v2/sessions/:sessionId/content`
+
+Hard-deletes the content row. The session remains.
+
+**Response:** `{ "ok": true, "content": { ... } }` (deleted row)
+
+**Errors:** `400` — `invalid_session_id`; `404` — `session_not_found`, `content_not_found`
+
+`members` is stored and visible on these staff routes. No member API serves it until lane A4.
+
+Booking RPCs (`book_session`, `cancel_booking`, `check_in_booking`, `mark_booking_no_show`) are `service_role` execute-only. They lock the session row. Credits and charges are **not** written; statuses are the later hook.
+
+#### `GET /api/admin/scheduling-v2/sessions/:sessionId/bookings`
+
+Roster for one session. Requires a `sessions` row. Rows are ordered booked, waitlisted, attended, no_show, cancelled, late_cancelled, then `created_at`, then `id`. Participant objects are `id`, `full_name`, `email`, `is_placeholder` only (no address, phone, or date of birth). Placeholders may book and check in before signing a waiver; `book_session` / `check_in_booking` do not inspect waiver rows.
+
+**Query:** `limit` (default 50, max 200, clamped), `offset` (default 0)
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "session_id": "uuid",
+  "capacity": 16,
+  "occupied_count": 12,
+  "booked_count": 10,
+  "waitlist_count": 3,
+  "limit": 50,
+  "offset": 0,
+  "rowCount": 13,
+  "rows": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "participant_id": "uuid",
+      "status": "booked",
+      "created_at": "2026-05-01T12:00:00.000Z",
+      "updated_at": "2026-05-01T12:00:00.000Z",
+      "cancelled_at": null,
+      "checked_in_at": null,
+      "no_show_at": null,
+      "promoted_at": null,
+      "created_by": "staff:uuid",
+      "cancelled_by": null,
+      "checked_in_by": null,
+      "no_show_by": null,
+      "participant": { "id": "uuid", "full_name": "Pat One", "email": "pat@example.com", "is_placeholder": false }
+    }
+  ]
+}
+```
+
+`capacity` is `sessions.capacity` or, if that is null, `classes.capacity` (or `null` when neither is set). `occupied_count` is `booked` + `attended` + `no_show`. `booked_count` is status `booked` only.
+
+**Errors:** `400` — `invalid_session_id`, `invalid_pagination`; `404` — `session_not_found`
+
+#### `POST /api/admin/scheduling-v2/sessions/:sessionId/bookings`
+
+Create a booking for a participant. Full sessions waitlist in FIFO order (HTTP 200, `status: "waitlisted"`). Duplicate active bookings return `already_booked`. Cancelled sessions return `booking_closed`. No credit is held.
+
+**Body:** `{ "participant_id": "uuid" }`
+
+**Response:** `{ "ok": true, "booking": { ... } }` (same booking fields as the roster row, without `participant`)
+
+**Errors:** `400` — `invalid_session_id`, `invalid_participant_id`, `capacity_not_configured`; `404` — `session_not_found`, `participant_not_found`; `409` — `already_booked`, `booking_closed`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/cancel`
+
+Cancel a booked or waitlisted row via `cancel_booking`. More than 3 elapsed hours before `starts_at` → `cancelled`. At or inside 3 hours (including exactly 3h) → `late_cancelled`. Both free the spot. A booked cancel auto-promotes the oldest waitlisted row. A waitlist cancel does not. Repeat cancel is a no-op (`200` with the existing row, `promoted: null`). Attended and no-show rows return `not_booked`.
+
+**Response:** `{ "ok": true, "booking": { ... }, "promoted": { ... } | null }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/check-in`
+
+Marks a booked row `attended`. Repeat check-in is a no-op. Waitlisted, cancelled, and no-show rows return `not_booked`. No credit is consumed in this slice.
+
+**Response:** `{ "ok": true, "booking": { ... } }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`
+
+#### `POST /api/admin/scheduling-v2/bookings/:bookingId/no-show`
+
+Marks a booked row `no_show` at or after `starts_at`. Does not promote the waitlist. Repeat no-show is a no-op. Before start → `booking_closed`.
+
+**Response:** `{ "ok": true, "booking": { ... } }`
+
+**Errors:** `400` — `invalid_booking_id`; `404` — `booking_not_found`; `409` — `not_booked`, `booking_closed`
 
 #### `GET /api/calendar/occurrences` (public)
 
@@ -996,7 +1294,19 @@ Per-IP rate limit (default **60 / 15 minutes**, env `CALENDAR_OCCURRENCES_RATE_L
 `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS`). Over-limit requests return
 `429 { "ok": false, "error": "rate_limited" }`.
 
-Optional `Authorization: Bearer …` is accepted and ignored in this slice.
+Optional `Authorization: Bearer …` is accepted and ignored. It does not reveal `members` or `staff` session content.
+
+When exactly one non-cancelled `sessions` row shares an occurrence's `starts_at` and its `session_label` equals the class `name`, and that session's `session_content.visibility` is `public`, the occurrence includes:
+
+```json
+"content": {
+  "notes": "Bring a towel",
+  "video_url": "https://videos.example.com/class-1",
+  "visibility": "public"
+}
+```
+
+Otherwise the occurrence has no `content` key. `staff` and `members` rows are not selected. A non-https `video_url` is not copied onto the public object. Two sessions matching the same occurrence omit `content`.
 
 **Response:**
 
@@ -1023,7 +1333,43 @@ Optional `Authorization: Bearer …` is accepted and ignored in this slice.
 }
 ```
 
-There is no booking field and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
+There is no booking field, no roster, and no reserved seat count. `starts_at` / `ends_at` are UTC instants.
+
+**Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
+
+#### `GET /api/calendar/classes` (public)
+
+Read-only list of **active** classes. No admin key. Inactive classes are omitted. There is no `include_inactive` switch on this route.
+
+Optional `Authorization: Bearer …` is accepted and ignored.
+
+The class object matches the admin class: `id`, `name`, `description`, `instructor`, `day_of_week`, `recurrence`, `start_time`, `duration_minutes` (default duration), `capacity`, `is_active`, `created_at`, `updated_at`. Rows are ordered by `day_of_week`, `start_time`, then `name`.
+
+Per-IP rate limit uses the same default (**60 / 15 minutes**) and the same env knobs as occurrences (`CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` / `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS`). The counters are separate, so reading occurrences does not consume the class-list budget. Over-limit requests return `429 { "ok": false, "error": "rate_limited" }`.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "classes": [
+    {
+      "id": "uuid",
+      "name": "Class 1",
+      "description": "Bring a towel",
+      "instructor": "Alex Rivera",
+      "day_of_week": 1,
+      "recurrence": "weekly",
+      "start_time": "19:00:00",
+      "duration_minutes": 90,
+      "capacity": 16,
+      "is_active": true,
+      "created_at": "2026-11-01T00:00:00.000Z",
+      "updated_at": "2026-11-01T00:00:00.000Z"
+    }
+  ]
+}
+```
 
 **Errors:** `500` — `supabase_not_configured` / `server_error`; `429` — `rate_limited`
 
@@ -1048,6 +1394,68 @@ Posts a **daily summary** to Discord: new **`marketing_leads`** in the last 24 h
 **Auth:** `x-admin-key` (shared owner key or an `owner` staff key) **or** `x-cron-secret` (when `CRON_SECRET` is configured on the API).
 
 **Response:** `{ "ok": true, "posted": true, "summary": { "date", "reminderTotal", "overdueCount", "dueSoonCount", "marketingLeads24h" } }`
+
+---
+
+### `POST /api/admin/participants/placeholders`
+
+Create a name-only placeholder participant, bind an account, and optionally enroll in a plan **without** an initial charge. Calls RPC `create_placeholder_participant` (migration `20261124120000`, in-repo until applied). The RPC is one transaction: participant + account + `account_members` + optional `create_subscription(..., create_initial_charge := false)`. Failure rolls back every row.
+
+**Auth:** `requireAdmin`. Mutations: **owner** and **front_desk**. **finance** is `403 forbidden`.
+
+Email and phone may be omitted. Stored canonical name is `participants.full_name` (`first_name` + space + `last_name`), matching waiver submit. Unknown date of birth: send `dob_is_placeholder: true` and `dob_placeholder_reason`. Omitted `date_of_birth` then stores the documented stand-in **`1900-01-01`**. Using `1900-01-01` without the flag is `400 dob_is_placeholder_required`.
+
+**Duplicate names:** `409 duplicate_name` when an unmerged participant already has the same `full_name` (case-insensitive). Response includes `existing_participant_id` when the RPC detail is present. There is no force-create flag; enroll the existing person instead.
+
+**Body (JSON):**
+
+```json
+{
+  "first_name": "Casey",
+  "last_name": "Placeholder",
+  "email": "optional@example.invalid",
+  "phone": "optional",
+  "date_of_birth": "YYYY-MM-DD optional when dob_is_placeholder is true",
+  "dob_is_placeholder": true,
+  "dob_placeholder_reason": "DOB unknown at desk",
+  "placeholder_reason": "name only; no waiver yet",
+  "account_id": "uuid optional existing account",
+  "account_name": "optional new account primary_contact_name",
+  "plan_id": "uuid optional",
+  "start_date": "YYYY-MM-DD optional; requires plan_id"
+}
+```
+
+Send `account_id` **or** `account_name`, not both (`400 account_id_xor_account_name`). If neither is sent, a new active account is created named after the person.
+
+**Response `201`:**
+
+```json
+{
+  "ok": true,
+  "participant": {
+    "id": "uuid",
+    "first_name": "Casey",
+    "last_name": "Placeholder",
+    "is_placeholder": true,
+    "placeholder_reason": "name only; no waiver yet",
+    "dob_is_placeholder": true
+  },
+  "account_id": "uuid",
+  "subscription": {
+    "id": "uuid",
+    "plan_id": "uuid",
+    "status": "active",
+    "start_date": "2026-11-01"
+  }
+}
+```
+
+`subscription` is `null` when `plan_id` is omitted.
+
+**Errors:** `400` — `invalid_first_name`, `invalid_last_name`, `placeholder_reason_required`, `date_of_birth_required`, `invalid_date_of_birth`, `dob_is_placeholder_required`, `dob_placeholder_reason_required`, `invalid_dob_is_placeholder`, `invalid_email`, `invalid_phone`, `invalid_account_id`, `invalid_account_name`, `account_id_xor_account_name`, `invalid_plan_id`, `plan_id_required`, `invalid_start_date`; `404` `account_not_found`; `409` `duplicate_name`, `overlapping_active_subscription`; `401` `unauthorized`; `403` `forbidden`; `500` `supabase_not_configured` / `internal_error`.
+
+Placeholders **can** book and check in on scheduling-v2 before a new waiver is signed.
 
 ---
 

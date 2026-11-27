@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "repository": "palthol/TU-api",
-  "updated": "2026-10-24",
+  "updated": "2026-11-13",
   "base_branch": "develop",
   "production_write_default": false,
   "task_dir": "work-queue/tasks",
@@ -185,6 +185,28 @@
       "depends_on": ["API-AUTO-003"],
       "production_writes": false,
       "brief": "work-queue/tasks/API-OPS-002.md"
+    },
+    {
+      "id": "API-OPS-003",
+      "lane": "deployment",
+      "status": "done",
+      "depends_on": ["API-AUTO-003"],
+      "production_writes": false,
+      "brief": "work-queue/tasks/API-OPS-003.md",
+      "allowed_paths": [
+        "services/api/scripts/",
+        "services/api/src/lib/subscriptionCurrent.js",
+        "services/api/src/services/billing/",
+        "services/api/src/routes/admin/billing.js",
+        "services/api/src/routes/admin/billing-plans.js",
+        "services/api/package.json",
+        "package.json",
+        "docs/subscription-backfill.md",
+        "docs/README.md",
+        "docs/use-guide.md",
+        "docs/admin-api.md",
+        "docs/current-state.md"
+      ]
     },
     {
       "id": "API-SCHED-A0",

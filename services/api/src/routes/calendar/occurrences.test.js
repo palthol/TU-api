@@ -5,7 +5,7 @@ import { createCalendarRouter } from './index.js';
 
 const CLASS_ID = 'aaaaaaaa-1111-4111-8111-111111111111';
 
-function createClassesFixture(rows) {
+function createClassesFixture(rows, { content = [], calls } = {}) {
   return {
     from(table) {
       const state = { filters: [] };
@@ -15,19 +15,20 @@ function createClassesFixture(rows) {
         },
         eq(col, val) {
           state.filters.push({ col, val });
+          calls?.push({ table, col, val });
           return api;
         },
         order() {
           return api;
         },
         then(resolve, reject) {
-          if (table !== 'classes') {
+          if (table !== 'classes' && table !== 'session_content') {
             return Promise.resolve({ data: null, error: { message: `unknown_table:${table}` } }).then(
               resolve,
               reject,
             );
           }
-          let data = [...rows];
+          let data = table === 'classes' ? [...rows] : content.map((row) => ({ ...row }));
           for (const f of state.filters) {
             data = data.filter((row) => row[f.col] === f.val);
           }
@@ -92,7 +93,62 @@ describe('GET /api/calendar/occurrences', () => {
       capacity: 12,
     });
     expect(res.body.occurrences.every((row) => row.name !== 'Hidden')).toBe(true);
+    expect(res.body.occurrences.every((row) => !Object.hasOwn(row, 'content'))).toBe(true);
     expect(res.body).not.toHaveProperty('bookings');
+  });
+
+  it('attaches only visibility=public session content and ignores Bearer auth', async () => {
+    const calls = [];
+    const supabase = createClassesFixture([mondayClass], {
+      calls,
+      content: [
+        {
+          notes: 'PUBLIC-NOTE',
+          video_url: 'https://videos.example.com/class-1',
+          visibility: 'public',
+          sessions: {
+            starts_at: '2026-11-10T00:00:00+00:00',
+            session_label: 'Class 1',
+            cancelled_at: null,
+          },
+        },
+        {
+          notes: 'MEMBERS-ONLY-NOTE',
+          video_url: 'https://videos.example.com/members',
+          visibility: 'members',
+          sessions: {
+            starts_at: '2026-11-10T00:00:00.000Z',
+            session_label: 'Class 1',
+            cancelled_at: null,
+          },
+        },
+        {
+          notes: 'STAFF-ONLY-NOTE',
+          video_url: 'http://videos.example.com/staff',
+          visibility: 'staff',
+          sessions: {
+            starts_at: '2026-11-10T00:00:00.000Z',
+            session_label: 'Class 1',
+            cancelled_at: null,
+          },
+        },
+      ],
+    });
+    const res = await request(createApp(supabase, { rateLimit: false }))
+      .get('/api/calendar/occurrences')
+      .set('authorization', 'Bearer member-token');
+    expect(res.status).toBe(200);
+    expect(calls).toContainEqual({ table: 'session_content', col: 'visibility', val: 'public' });
+    expect(res.body.occurrences[0].content).toEqual({
+      notes: 'PUBLIC-NOTE',
+      video_url: 'https://videos.example.com/class-1',
+      visibility: 'public',
+    });
+    expect(res.body.occurrences[1]).not.toHaveProperty('content');
+    const body = JSON.stringify(res.body);
+    expect(body).not.toContain('MEMBERS-ONLY-NOTE');
+    expect(body).not.toContain('STAFF-ONLY-NOTE');
+    expect(body).not.toContain('http://videos.example.com/staff');
   });
 
   it('does not require a Bearer token and still accepts the optional header', async () => {

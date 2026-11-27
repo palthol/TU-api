@@ -75,8 +75,8 @@ Names must match `services/api/.env.example`. Commit **names only**.
 | `WAIVER_SUBMIT_RATE_LIMIT_WINDOW_MS` | Waiver submit rate-limit window (default `900000` = 15 minutes) |
 | `LEAD_JSON_LIMIT` | JSON body limit for `POST /api/lead` (default `16kb`) |
 | `WAIVER_SUBMIT_JSON_LIMIT` | JSON body limit for `POST /api/waivers/submit` (default `512kb`) |
-| `CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` | Max `GET /api/calendar/occurrences` requests per IP per window (default `60`) |
-| `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS` | Calendar occurrence rate-limit window (default `900000` = 15 minutes) |
+| `CALENDAR_OCCURRENCES_RATE_LIMIT_MAX` | Max requests per IP per window for `GET /api/calendar/occurrences` and, separately, `GET /api/calendar/classes` (default `60` each) |
+| `CALENDAR_OCCURRENCES_RATE_LIMIT_WINDOW_MS` | Shared window for those two public calendar reads (default `900000` = 15 minutes) |
 | `TURNSTILE_SECRET_KEY` | Optional Turnstile secret. When set, public POSTs siteverify a token before side effects. When unset, those routes warn and allow the request. |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SECRET_KEY` | Server-only Supabase secret. Prefer the `sb_secret_` key. A legacy service_role JWT is also accepted here. |

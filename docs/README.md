@@ -20,6 +20,7 @@ Read in this order for day-to-day work:
 | [api-schema-audit.md](./api-schema-audit.md) | Live DB vs code |
 | [api-capability-audit.md](./api-capability-audit.md) | Domain capability matrix |
 | [use-guide.md](./use-guide.md) | Operator setup and day-to-day |
+| [subscription-backfill.md](./subscription-backfill.md) | Dry-run roster export and enrollment-only backfill CLI |
 | [deployment.md](./deployment.md) | API host, platform, health, CORS, env names |
 | [validation-environment.md](./validation-environment.md) | Local/non-prod validation: who may write, seed, cleanup |
 | [database-overview.md](./database-overview.md) | Schema map |
@@ -43,6 +44,7 @@ These stay in the live tree because they explain behavior that `admin-api.md` do
 | [discord-waiver-notifications.md](./discord-waiver-notifications.md) | Operator Discord summary, vCards, privacy and delivery limits |
 | [waiver-pdf-generation.md](./waiver-pdf-generation.md) | On-demand PDF renderer |
 | [waiver-entrypoint-automation-checklist.md](./waiver-entrypoint-automation-checklist.md) | Submit → account tether (implemented; leftover monitoring checks) |
+| [scheduling/README.md](./scheduling/README.md) | Scheduling v2 lanes, class catalog, session content, staff booking |
 
 ## Archived
 

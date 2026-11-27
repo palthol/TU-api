@@ -2,6 +2,8 @@ import express from 'express';
 import { registerAdminSchedulingV2ClassRoutes } from './classes.js';
 import { registerAdminSchedulingV2ClassTypeRoutes } from './classTypes.js';
 import { registerAdminSchedulingV2InstructorRoutes } from './instructors.js';
+import { registerAdminSchedulingV2BookingRoutes } from './bookings.js';
+import { registerAdminSchedulingV2SessionContentRoutes } from './sessionContent.js';
 import { registerAdminSchedulingV2SessionRoutes } from './sessions.js';
 
 /**
@@ -15,6 +17,8 @@ export function createAdminSchedulingV2Router({ supabase } = {}) {
   registerAdminSchedulingV2InstructorRoutes(router);
   registerAdminSchedulingV2ClassRoutes(router, { supabase });
   registerAdminSchedulingV2SessionRoutes(router);
+  registerAdminSchedulingV2SessionContentRoutes(router, { supabase });
+  registerAdminSchedulingV2BookingRoutes(router, { supabase });
   return router;
 }
 

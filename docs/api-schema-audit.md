@@ -13,7 +13,7 @@ columns, check constraints) cross-checked against every route in
 > This is the authoritative API repo. The `admin/` repo's `services/api` scaffold was
 > retired in favor of this service — do not re-introduce a second backend.
 >
-> **Status note (2026-09-24):** migration-state statements below are historical evidence from the audit date. Production now has all repository migrations through `20260921221500` applied. Use `current-state.md` for current operational status. In-repo scheduling v2 `classes` (`20261101100000`) is **not** production-applied.
+> **Status note (2026-09-24):** migration-state statements below are historical evidence from the audit date. Production now has all repository migrations through `20260921221500` applied. Use `current-state.md` for current operational status. In-repo scheduling v2 `classes` (`20261101100000`), Eastern cancel (`20261101100500`), `session_content` (`20261101101000`), the class description / `sessions.class_id` link (`20261113175150`), staff bookings (`20261113190000`), and placeholder participants (`20261124120000`) are **not** production-applied. Production `jhxzecxkccqlgyazhsnb` is paused and must not be unpaused or written.
 
 ---
 
@@ -53,6 +53,7 @@ pending SQL was not pushed.
 | `0019_charge_discounts.sql` | table `charge_discounts`, trigger `charge_discounts_set_applied_amount()`, discount-aware rewrite of `view_charge_net`, total-guard triggers, `charges.amount_cents` lock trigger | `billing.js`: `GET/POST /billing/charge-discounts` (and the discount line in the receipts "Formal billing" tab) |
 | `0020_tier1_subscription_and_session_cancel.sql` | `sessions.cancelled_at`, RPC `create_subscription(...)`, updated `view_ops_today_sessions` | `billing.js`: `POST /billing/subscriptions`; `scheduling.js`: session list/get/create/patch + attendance upsert |
 | `20260608191715_marketing_leads_first_last_name.sql` | `marketing_leads.first_name` / `last_name`; drops `name` | `POST /api/lead` |
+| `20261124120000_placeholder_participants.sql` | `participants.is_placeholder`, `placeholder_reason`, `dob_is_placeholder`, `dob_placeholder_reason`; nullable `email`; RPC `create_placeholder_participant` | `POST /participants/placeholders`; `GET /billing/enrollment-board`; roster `is_placeholder` |
 
 **Verification (2026-09-03):**
 
@@ -86,7 +87,8 @@ Legend: **OK** = exists & matches.
 | `POST /billing/charge-discounts` | `charge_discounts` (+ `view_charge_net`) | OK — see §3 note on `applied_amount_cents` |
 | `POST /billing/charge-adjustments` | `charge_adjustments` | OK — `adjustment_type='write_off'`, `amount_cents>0` match checks |
 | `POST /billing/payment-refunds` | RPC `record_payment_refund(p_payment_id,p_amount_cents,p_reason,p_created_by,p_idempotency_key)` | OK — signature matches exactly |
-| `POST /billing/subscriptions` | RPC `create_subscription(...)` | OK — signature matches exactly (0020) |
+| `POST /billing/subscriptions` | RPC `create_subscription(...)` | OK — signature matches exactly (0020); `plan_id`/`start_date` aliases; `409 overlapping_active_subscription` |
+| `GET /billing/enrollment-board` | `participants`, `account_members`, `subscriptions`, `waivers` | OK in-repo after `20261124120000` |
 | `POST /billing/subscription-upgrade` | RPC `upgrade_subscription_prorated(...)` | OK |
 | `POST /billing/per-class/charge-from-attendance` | RPC `create_pay_per_class_charge(p_attendance_id,p_due_at,p_notes,p_created_by)` | OK |
 | `POST /billing/per-class/upgrade-to-monthly` | RPC `upgrade_per_class_to_monthly(...)` | OK |
@@ -104,6 +106,7 @@ Legend: **OK** = exists & matches.
 | Endpoint | DB objects | Status |
 | --- | --- | --- |
 | `GET /participants/search` | `participants`, `account_members`, `accounts` | OK — preferred-account logic uses roles `payer`/`guardian` which match `check_account_member_role` |
+| `POST /participants/placeholders` | RPC `create_placeholder_participant(...)` (`20261124120000`, in-repo) | OK in-repo — not production-applied |
 | `POST /participants/merge` | RPC `merge_participants(p_canonical_participant_id,p_duplicate_participant_id)` | OK |
 
 ### Reporting (`routes/admin/reporting.js`, `lib/reportingViewQuery.js`)

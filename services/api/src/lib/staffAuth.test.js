@@ -37,6 +37,10 @@ describe('staffAuth helpers', () => {
     expect(roleAllowsRequest('finance', 'POST', '/scheduling/sessions')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/staff')).toBe(false);
     expect(roleAllowsRequest('finance', 'GET', '/auth/me')).toBe(true);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/plans')).toBe(true);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/subscriptions/current')).toBe(true);
+    expect(roleAllowsRequest('finance', 'POST', '/participants/placeholders')).toBe(false);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/enrollment-board')).toBe(true);
   });
 
   it('allows front_desk desk writes and record-payment, not refunds', () => {
@@ -45,7 +49,22 @@ describe('staffAuth helpers', () => {
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/payment-refunds')).toBe(false);
     expect(roleAllowsRequest('front_desk', 'POST', '/billing/generate-monthly-charges')).toBe(false);
     expect(roleAllowsRequest('front_desk', 'POST', '/participants/merge')).toBe(false);
+    expect(roleAllowsRequest('front_desk', 'POST', '/participants/placeholders')).toBe(true);
+    expect(roleAllowsRequest('finance', 'POST', '/participants/placeholders')).toBe(false);
+    expect(roleAllowsRequest('front_desk', 'POST', '/billing/subscriptions')).toBe(true);
+    expect(roleAllowsRequest('finance', 'POST', '/billing/subscriptions')).toBe(true);
+    expect(roleAllowsRequest('front_desk', 'GET', '/billing/plans')).toBe(true);
+    expect(roleAllowsRequest('front_desk', 'GET', '/billing/subscriptions/current')).toBe(true);
+    expect(roleAllowsRequest('front_desk', 'GET', '/billing/enrollment-board')).toBe(true);
+    expect(roleAllowsRequest('finance', 'GET', '/billing/enrollment-board')).toBe(true);
+    expect(rolesAllowedForRequest('GET', '/billing/plans')).toEqual(['owner', 'front_desk', 'finance']);
     expect(rolesAllowedForRequest('POST', '/billing/charge-adjustments')).toEqual(['owner', 'finance']);
+    expect(rolesAllowedForRequest('POST', '/participants/placeholders')).toEqual(['owner', 'front_desk']);
+    expect(rolesAllowedForRequest('POST', '/billing/subscriptions')).toEqual([
+      'owner',
+      'finance',
+      'front_desk',
+    ]);
   });
 
   it('treats owner as allowed for every route', () => {

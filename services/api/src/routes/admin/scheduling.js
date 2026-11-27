@@ -16,6 +16,9 @@ import { sendDatabaseError } from '../../lib/exposeSupabaseError.js';
 
 const TEMPLATE_COLUMNS =
   'id, name, day_of_week, start_time, duration_minutes, is_active, notes, created_at, updated_at';
+const SESSION_COLUMNS =
+  'id, starts_at, ends_at, session_label, schedule_template_id, class_id, capacity, notes, cancelled_at, created_at, updated_at';
+const MAX_SESSION_CAPACITY = 500;
 const MAX_GENERATE_SPAN_DAYS = 366;
 const START_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
@@ -62,6 +65,48 @@ function parseOptionalNotes(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+/**
+ * Optional class link. Empty string clears. Omitted leaves the caller to default null.
+ * @param {unknown} value
+ * @returns {{ ok: true, omitted: true } | { ok: true, omitted: false, value: string | null } | { ok: false }}
+ */
+/**
+ * Optional per-session seat cap. Empty string / null clears. Omitted leaves the caller to default null.
+ * @param {unknown} value
+ * @returns {{ ok: true, omitted: true } | { ok: true, omitted: false, value: number | null } | { ok: false }}
+ */
+function parseOptionalCapacity(value) {
+  if (value === undefined) return { ok: true, omitted: true };
+  if (value === null || value === '') return { ok: true, omitted: false, value: null };
+  let n = null;
+  if (typeof value === 'number' && Number.isInteger(value)) n = value;
+  else if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    n = Number.parseInt(value.trim(), 10);
+  }
+  if (n == null || n < 1 || n > MAX_SESSION_CAPACITY) return { ok: false };
+  return { ok: true, omitted: false, value: n };
+}
+
+function parseOptionalClassId(value) {
+  if (value === undefined) return { ok: true, omitted: true };
+  if (value === null || value === '') return { ok: true, omitted: false, value: null };
+  if (typeof value !== 'string') return { ok: false };
+  const id = parseUuid(value);
+  if (!id) return { ok: false };
+  return { ok: true, omitted: false, value: id };
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} classId
+ */
+async function findClassId(supabase, classId) {
+  const { data, error } = await supabase.from('classes').select('id').eq('id', classId).maybeSingle();
+  if (error) return { error };
+  if (!data) return { missing: true };
+  return { id: data.id };
 }
 
 /** Inclusive YYYY-MM-DD span in whole UTC days. */
@@ -326,9 +371,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       let q = supabase
         .from('sessions')
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .order('starts_at', { ascending: true })
         .range(offset, offset + limit - 1);
 
@@ -369,9 +412,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const { data: session, error: sessionErr } = await supabase
         .from('sessions')
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .eq('id', sessionId)
         .maybeSingle();
       if (sessionErr) return sendDatabaseError(res, sessionErr, { context: 'scheduling.sessions.get' });
@@ -425,6 +466,16 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'invalid_notes' });
       }
 
+      const classId = parseOptionalClassId((req.body || {}).class_id);
+      if (!classId.ok) return res.status(400).json({ ok: false, error: 'invalid_class_id' });
+      if (!classId.omitted && classId.value) {
+        const found = await findClassId(supabase, classId.value);
+        if (found.error) return sendDatabaseError(res, found.error, { context: 'sessions.class_lookup' });
+        if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
+      }
+      const capacity = parseOptionalCapacity((req.body || {}).capacity);
+      if (!capacity.ok) return res.status(400).json({ ok: false, error: 'invalid_capacity' });
+
       const { data, error } = await supabase
         .from('sessions')
         .insert({
@@ -432,11 +483,11 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
           ends_at: endsAt,
           session_label: label.omitted ? null : label.value,
           schedule_template_id: templateId,
+          class_id: classId.omitted ? null : classId.value,
+          capacity: capacity.omitted ? null : capacity.value,
           notes: sessionNotes.omitted ? null : sessionNotes.value,
         })
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
+        .select(SESSION_COLUMNS)
         .single();
 
       if (error) {
@@ -458,7 +509,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const { data: existing, error: findErr } = await supabase
         .from('sessions')
-        .select('id, starts_at, ends_at, cancelled_at')
+        .select(SESSION_COLUMNS)
         .eq('id', sessionId)
         .maybeSingle();
       if (findErr) return sendDatabaseError(res, findErr, { context: 'sessions.lookup' });
@@ -466,6 +517,7 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
 
       const body = req.body || {};
       const patch = {};
+      let cancelRequested = false;
 
       if (body.starts_at !== undefined) {
         const startsAt = parseIsoDateTime(body.starts_at);
@@ -496,11 +548,31 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         if (!sessionNotes.ok) return res.status(400).json({ ok: false, error: 'invalid_notes' });
         patch.notes = sessionNotes.value;
       }
+      if (body.class_id !== undefined) {
+        const classId = parseOptionalClassId(body.class_id);
+        if (!classId.ok) return res.status(400).json({ ok: false, error: 'invalid_class_id' });
+        if (classId.value) {
+          const found = await findClassId(supabase, classId.value);
+          if (found.error) return sendDatabaseError(res, found.error, { context: 'sessions.class_lookup' });
+          if (found.missing) return res.status(404).json({ ok: false, error: 'class_not_found' });
+        }
+        patch.class_id = classId.value;
+      }
+      if (body.capacity !== undefined) {
+        const capacity = parseOptionalCapacity(body.capacity);
+        if (!capacity.ok) return res.status(400).json({ ok: false, error: 'invalid_capacity' });
+        patch.capacity = capacity.value;
+      }
       if (body.cancel !== undefined) {
         if (typeof body.cancel !== 'boolean') {
           return res.status(400).json({ ok: false, error: 'invalid_cancel' });
         }
-        patch.cancelled_at = body.cancel ? new Date().toISOString() : null;
+        if (body.cancel) {
+          // cancel_session owns the timestamp. A second cancel must not patch it.
+          cancelRequested = true;
+        } else {
+          patch.cancelled_at = null;
+        }
       }
 
       const nextStarts = patch.starts_at ?? existing.starts_at;
@@ -509,24 +581,42 @@ export function registerAdminSchedulingRoutes(router, { supabase }) {
         return res.status(400).json({ ok: false, error: 'ends_at_must_be_after_starts_at' });
       }
 
-      if (Object.keys(patch).length === 0) {
+      if (!cancelRequested && Object.keys(patch).length === 0) {
         return res.status(400).json({ ok: false, error: 'no_updates' });
       }
 
-      const { data, error } = await supabase
-        .from('sessions')
-        .update(patch)
-        .eq('id', sessionId)
-        .select(
-          'id, starts_at, ends_at, session_label, schedule_template_id, notes, cancelled_at, created_at, updated_at',
-        )
-        .single();
+      let session = existing;
 
-      if (error) {
-        return sendDatabaseError(res, error, { context: 'sessions.update' });
+      if (cancelRequested && !existing.cancelled_at) {
+        const { error: cancelErr } = await supabase.rpc('cancel_session', {
+          p_session_id: sessionId,
+        });
+        if (cancelErr) return sendDatabaseError(res, cancelErr, { context: 'cancel_session' });
+
+        const { data: refreshed, error: readErr } = await supabase
+          .from('sessions')
+          .select(SESSION_COLUMNS)
+          .eq('id', sessionId)
+          .single();
+        if (readErr) return sendDatabaseError(res, readErr, { context: 'sessions.after_cancel' });
+        session = refreshed;
       }
 
-      return res.json({ ok: true, session: data });
+      if (Object.keys(patch).length > 0) {
+        const { data, error } = await supabase
+          .from('sessions')
+          .update(patch)
+          .eq('id', sessionId)
+          .select(SESSION_COLUMNS)
+          .single();
+
+        if (error) {
+          return sendDatabaseError(res, error, { context: 'sessions.update' });
+        }
+        session = data;
+      }
+
+      return res.json({ ok: true, session });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ ok: false, error: 'server_error' });
